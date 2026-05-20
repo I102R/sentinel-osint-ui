@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SENTINEL // OSINT Agent</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --bg:#060a0f;--panel:#0b1118;--border:#1a2a3a;
+  --accent:#00e5ff;--accent2:#ff6b35;--accent3:#39ff14;
+  --text:#c8d8e8;--dim:#4a6070;--danger:#ff3b3b;--warn:#ffb300;
+}
+body{background:var(--bg);color:var(--text);font-family:'Rajdhani',sans-serif;font-size:15px;min-height:100vh;}
+body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,229,255,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,255,0.025) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
+.app{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+
+/* Header */
+header{border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:14px;background:rgba(6,10,15,0.98);flex-shrink:0;}
+.logo{font-family:'Share Tech Mono',monospace;font-size:16px;color:var(--accent);letter-spacing:2px;display:flex;align-items:center;gap:9px;}
+.logo-ring{width:26px;height:26px;border:2px solid var(--accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;animation:glow 3s ease-in-out infinite;}
+@keyframes glow{0%,100%{box-shadow:0 0 4px var(--accent)}50%{box-shadow:0 0 18px var(--accent),0 0 36px rgba(0,229,255,0.15)}}
+.hdr-right{margin-left:auto;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);display:flex;gap:20px;align-items:center;}
+.dot-live{width:6px;height:6px;border-radius:50%;background:var(--accent3);display:inline-block;margin-right:5px;animation:blink 1.5s infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.2}}
+#backendStatus{font-size:9px;}
+
+/* Layout */
+.body{display:flex;flex:1;overflow:hidden;}
+
+/* Sidebar */
+aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display:flex;flex-direction:column;gap:16px;overflow-y:auto;flex-shrink:0;}
+.slabel{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--accent);letter-spacing:3px;text-transform:uppercase;margin-bottom:9px;display:flex;align-items:center;gap:8px;}
+.slabel::after{content:'';flex:1;height:1px;background:var(--border);}
+
+/* Target type btns */
+.type-wrap{display:flex;flex-wrap:wrap;gap:5px;}
+.tbtn{padding:4px 9px;border:1px solid var(--border);border-radius:2px;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;cursor:pointer;background:var(--panel);color:var(--dim);transition:all .15s;}
+.tbtn.active,.tbtn:hover{border-color:var(--accent2);color:var(--accent2);background:rgba(255,107,53,0.08);}
+
+/* Module list */
+.mod-item{display:flex;align-items:center;gap:8px;padding:7px 8px;border:1px solid var(--border);border-radius:3px;cursor:pointer;margin-bottom:5px;transition:all .15s;background:var(--panel);}
+.mod-item.active{border-color:rgba(0,229,255,0.3);background:rgba(0,229,255,0.04);}
+.mod-dot{width:7px;height:7px;border-radius:50%;background:var(--dim);flex-shrink:0;transition:background .15s;}
+.mod-item.active .mod-dot{background:var(--accent3);}
+.mod-name{flex:1;font-size:12px;font-weight:600;color:var(--text);}
+.mod-tag{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);}
+
+/* Stats */
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.stat-box{padding:10px 8px;border:1px solid var(--border);border-radius:3px;background:var(--panel);text-align:center;}
+.stat-num{font-family:'Share Tech Mono',monospace;font-size:20px;color:var(--accent);line-height:1;}
+.stat-lbl{font-size:9px;color:var(--dim);letter-spacing:1px;margin-top:3px;text-transform:uppercase;}
+
+/* Center */
+.center{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+
+/* Search */
+.search-area{padding:14px 18px;border-bottom:1px solid var(--border);flex-shrink:0;}
+.search-row{display:flex;gap:8px;}
+.input-wrap{flex:1;position:relative;}
+.input-wrap::before{content:'›';position:absolute;left:12px;top:50%;transform:translateY(-50%);font-family:'Share Tech Mono',monospace;color:var(--accent);font-size:18px;pointer-events:none;}
+#searchInput{width:100%;background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:11px 14px 11px 30px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:13px;outline:none;transition:border-color .2s;}
+#searchInput:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(0,229,255,0.08);}
+#searchInput::placeholder{color:#2a3a4a;}
+.run-btn{padding:11px 22px;background:var(--accent);color:var(--bg);border:none;border-radius:4px;font-family:'Share Tech Mono',monospace;font-size:12px;font-weight:bold;letter-spacing:2px;cursor:pointer;transition:all .2s;white-space:nowrap;}
+.run-btn:hover{background:#33eeff;box-shadow:0 0 20px rgba(0,229,255,0.35);}
+.run-btn:disabled{background:#0d1720;color:#2a3a4a;cursor:not-allowed;}
+.clr-btn{padding:11px 12px;background:transparent;border:1px solid var(--border);color:var(--dim);font-family:'Share Tech Mono',monospace;font-size:10px;cursor:pointer;border-radius:4px;transition:all .2s;}
+.clr-btn:hover{border-color:var(--danger);color:var(--danger);}
+
+/* Progress */
+.prog-area{padding:8px 18px 0;display:none;}
+.prog-area.show{display:block;}
+.prog-track{height:2px;background:var(--border);border-radius:2px;overflow:hidden;}
+.prog-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent3));border-radius:2px;transition:width .35s ease;width:0%;}
+.prog-lbl{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--dim);margin-top:4px;letter-spacing:1px;}
+
+/* Results */
+.results{flex:1;overflow-y:auto;padding:16px 18px;}
+.results::-webkit-scrollbar{width:4px;}
+.results::-webkit-scrollbar-track{background:var(--bg);}
+.results::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+
+/* Empty state */
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:14px;color:var(--dim);text-align:center;padding:40px 20px;}
+.empty-icon{font-size:48px;opacity:.2;}
+.empty-title{font-family:'Share Tech Mono',monospace;font-size:13px;letter-spacing:3px;}
+.empty-sub{font-size:13px;max-width:420px;line-height:1.65;opacity:.65;}
+.backend-cfg{margin-top:20px;padding:14px 18px;border:1px solid var(--border);border-radius:4px;background:var(--panel);max-width:440px;width:100%;text-align:left;}
+.cfg-label{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--accent);letter-spacing:2px;margin-bottom:8px;}
+.cfg-row{display:flex;gap:8px;}
+#backendUrl{flex:1;background:#060a0f;border:1px solid var(--border);border-radius:3px;padding:8px 10px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:11px;outline:none;}
+#backendUrl:focus{border-color:var(--accent);}
+.cfg-btn{padding:8px 14px;background:transparent;border:1px solid var(--accent);color:var(--accent);font-family:'Share Tech Mono',monospace;font-size:10px;cursor:pointer;border-radius:3px;letter-spacing:1px;}
+.cfg-btn:hover{background:rgba(0,229,255,0.08);}
+
+/* Cards */
+.card{border:1px solid var(--border);border-left:3px solid var(--border);border-radius:4px;background:var(--panel);margin-bottom:10px;overflow:hidden;animation:fadeUp .3s ease;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.card.running{border-left-color:var(--warn);}
+.card.done{border-left-color:var(--accent3);}
+.card.error{border-left-color:var(--danger);}
+.card-hdr{padding:9px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;background:rgba(0,0,0,0.2);user-select:none;}
+.card-hdr:hover{background:rgba(0,229,255,0.03);}
+.card-badge{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:2px;padding:2px 8px;border-radius:2px;background:rgba(0,229,255,0.1);color:var(--accent);border:1px solid rgba(0,229,255,0.2);}
+.card-title{flex:1;font-size:13px;font-weight:600;color:var(--text);}
+.card-status{font-family:'Share Tech Mono',monospace;font-size:10px;display:flex;align-items:center;gap:6px;}
+.card-status.running{color:var(--warn);}
+.card-status.done{color:var(--accent3);}
+.card-status.error{color:var(--danger);}
+.card-toggle{color:var(--dim);font-size:11px;transition:transform .2s;}
+.card-toggle.open{transform:rotate(180deg);}
+.card-body{padding:14px;border-top:1px solid var(--border);display:none;}
+.card-body.open{display:block;}
+.card-content{font-family:'Share Tech Mono',monospace;font-size:11px;color:#8ab0c8;line-height:1.75;white-space:pre-wrap;word-break:break-word;}
+
+/* Spinner */
+.spinner{display:inline-block;width:10px;height:10px;border:2px solid var(--border);border-top-color:var(--warn);border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Right panel */
+.right{width:185px;border-left:1px solid var(--border);padding:14px 12px;display:flex;flex-direction:column;gap:14px;flex-shrink:0;}
+.history-item{padding:6px 8px;border:1px solid var(--border);border-radius:3px;margin-bottom:4px;font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--dim);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:all .15s;}
+.history-item:hover{border-color:var(--accent);color:var(--accent);}
+.exp-btn{width:100%;padding:9px;background:transparent;border:1px solid var(--accent2);color:var(--accent2);font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:2px;cursor:pointer;border-radius:3px;transition:all .2s;}
+.exp-btn:hover{background:rgba(255,107,53,0.1);}
+.exp-btn:disabled{border-color:var(--border);color:var(--dim);cursor:not-allowed;}
+
+/* Scanline */
+.scanline{position:fixed;left:0;right:0;height:2px;background:linear-gradient(transparent,rgba(0,229,255,0.05),transparent);pointer-events:none;animation:scan 8s linear infinite;z-index:999;}
+@keyframes scan{0%{top:-2px}100%{top:100vh}}
+</style>
+</head>
+<body>
+<div class="scanline"></div>
+<div class="app">
+
+  <!-- Header -->
+  <header>
+    <div class="logo">
+      <div class="logo-ring">◎</div>
+      SENTINEL // OSINT AGENT
+    </div>
+    <div class="hdr-right">
+      <span><span class="dot-live"></span>LIVE</span>
+      <span id="backendStatus" style="color:var(--warn)">⬤ BACKEND: NOT CONNECTED</span>
+      <span id="clock"></span>
+    </div>
+  </header>
+
+  <div class="body">
+
+    <!-- Sidebar -->
+    <aside>
+      <div>
+        <div class="slabel">Target Type</div>
+        <div class="type-wrap" id="typeWrap"></div>
+      </div>
+      <div>
+        <div class="slabel">Modules</div>
+        <div id="modList"></div>
+      </div>
+      <div style="margin-top:auto;">
+        <div class="slabel">Stats</div>
+        <div class="stat-grid">
+          <div class="stat-box"><div class="stat-num" id="sQueries">0</div><div class="stat-lbl">Queries</div></div>
+          <div class="stat-box"><div class="stat-num" id="sMods">0</div><div class="stat-lbl">Modules</div></div>
+          <div class="stat-box"><div class="stat-num" id="sFindings">0</div><div class="stat-lbl">Findings</div></div>
+          <div class="stat-box"><div class="stat-num" id="sTime">—</div><div class="stat-lbl">Last Run</div></div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Center -->
+    <div class="center">
+      <div class="search-area">
+        <div class="search-row">
+          <div class="input-wrap">
+            <input id="searchInput" type="text" placeholder="Target: name, domain, IP, email, username, phone…"/>
+          </div>
+          <button class="run-btn" id="runBtn" onclick="runInvestigation()">▶ INVESTIGATE</button>
+          <button class="clr-btn" onclick="clearAll()">CLR</button>
+        </div>
+      </div>
+      <div class="prog-area" id="progArea">
+        <div class="prog-track"><div class="prog-fill" id="progFill"></div></div>
+        <div class="prog-lbl" id="progLbl">INITIALIZING…</div>
+      </div>
+      <div class="results" id="results">
+        <div class="empty" id="emptyState">
+          <div class="empty-icon">◎</div>
+          <div class="empty-title">AWAITING TARGET</div>
+          <div class="empty-sub">All modules run in parallel — WHOIS, DNS, Nmap, theHarvester, Sherlock, Shodan, Subdomains, GeoIP, VirusTotal, EmailRep, HIBP, Metadata & Google Dorks.</div>
+          <div class="backend-cfg">
+            <div class="cfg-label">BACKEND URL (your Replit URL)</div>
+            <div class="cfg-row">
+              <input id="backendUrl" type="text" placeholder="https://YOUR-REPLIT-URL.replit.app"/>
+              <button class="cfg-btn" onclick="testBackend()">TEST</button>
+            </div>
+            <div id="cfgMsg" style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);margin-top:8px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right panel -->
+    <div class="right">
+      <div>
+        <div class="slabel">History</div>
+        <div id="historyList"><div style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);">No searches yet</div></div>
+      </div>
+      <div style="margin-top:auto;display:flex;flex-direction:column;gap:8px;">
+        <button class="exp-btn" id="expBtn" onclick="exportReport()" disabled>⬇ EXPORT</button>
+        <div style="font-family:Share Tech Mono,monospace;font-size:9px;color:var(--dim);text-align:center;line-height:1.7;margin-top:4px;">
+          Parallel execution<br>
+          13 OSINT modules<br>
+          Real tool output<br>
+          Export to .txt
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────────────
+let BACKEND = localStorage.getItem('sentinel_backend') || '';
+let targetType = 'DOMAIN';
+let activeModIds = new Set();
+let running = false;
+let allResults = {};
+let history = JSON.parse(localStorage.getItem('sentinel_history') || '[]');
+let stats = JSON.parse(localStorage.getItem('sentinel_stats') || '{"queries":0,"findings":0}');
+
+const TARGET_TYPES = ['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','LOCATION'];
+
+const ALL_MODULES = [
+  { id:'whois',        name:'WHOIS Lookup',       tag:'WHOIS', types:['DOMAIN','IP'] },
+  { id:'dns',          name:'DNS Records',         tag:'DNS',   types:['DOMAIN'] },
+  { id:'subdomains',   name:'Subdomain Enum',      tag:'SUBS',  types:['DOMAIN'] },
+  { id:'nmap',         name:'Port Scan (Nmap)',    tag:'NMAP',  types:['DOMAIN','IP'] },
+  { id:'geoip',        name:'GeoIP Location',      tag:'GEO',   types:['IP','DOMAIN'] },
+  { id:'theharvester', name:'theHarvester',        tag:'HARV',  types:['DOMAIN','EMAIL','COMPANY'] },
+  { id:'sherlock',     name:'Sherlock (usernames)',tag:'SHRL',  types:['USERNAME','PERSON'] },
+  { id:'shodan',       name:'Shodan',              tag:'SHDN',  types:['IP','DOMAIN'] },
+  { id:'virustotal',   name:'VirusTotal',          tag:'VT',    types:['DOMAIN','IP','EMAIL'] },
+  { id:'emailrep',     name:'EmailRep',            tag:'EREP',  types:['EMAIL'] },
+  { id:'hibp',         name:'HaveIBeenPwned',      tag:'HIBP',  types:['EMAIL'] },
+  { id:'metadata',     name:'Public Metadata',     tag:'META',  always:true },
+  { id:'dorks',        name:'Google Dorks',        tag:'DORK',  always:true },
+];
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+function init() {
+  if (BACKEND) document.getElementById('backendUrl').value = BACKEND;
+  renderTypes();
+  renderModules();
+  renderHistory();
+  updateStats();
+  setInterval(() => {
+    document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+  }, 1000);
+  if (BACKEND) testBackend(true);
+}
+
+function renderTypes() {
+  const wrap = document.getElementById('typeWrap');
+  wrap.innerHTML = TARGET_TYPES.map(t =>
+    `<button class="tbtn${t===targetType?' active':''}" onclick="setType('${t}',this)">${t}</button>`
+  ).join('');
+}
+
+function setType(t, btn) {
+  targetType = t;
+  document.querySelectorAll('.tbtn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderModules();
+}
+
+function renderModules() {
+  const list = document.getElementById('modList');
+  list.innerHTML = '';
+  ALL_MODULES.forEach(mod => {
+    const relevant = mod.always || (mod.types && mod.types.includes(targetType));
+    if (relevant && !activeModIds.has(mod.id)) activeModIds.add(mod.id);
+    const active = activeModIds.has(mod.id);
+    const el = document.createElement('div');
+    el.className = `mod-item${active?' active':''}`;
+    el.dataset.id = mod.id;
+    el.innerHTML = `<div class="mod-dot"></div><div class="mod-name">${mod.name}</div><div class="mod-tag">${mod.tag}</div>`;
+    el.onclick = () => {
+      if (activeModIds.has(mod.id)) activeModIds.delete(mod.id);
+      else activeModIds.add(mod.id);
+      el.classList.toggle('active');
+      document.getElementById('sMods').textContent = activeModIds.size;
+    };
+    list.appendChild(el);
+  });
+  document.getElementById('sMods').textContent = activeModIds.size;
+}
+
+// ── Backend test ──────────────────────────────────────────────────────────────
+async function testBackend(silent) {
+  const url = document.getElementById('backendUrl').value.trim().replace(/\/$/, '');
+  if (!url) { if (!silent) showCfgMsg('Enter your Replit URL first.', 'warn'); return; }
+  BACKEND = url;
+  localStorage.setItem('sentinel_backend', url);
+  const statusEl = document.getElementById('backendStatus');
+  try {
+    statusEl.style.color = 'var(--warn)';
+    statusEl.textContent = '⬤ BACKEND: TESTING…';
+    const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(8000) });
+    const data = await res.json();
+    statusEl.style.color = 'var(--accent3)';
+    statusEl.textContent = '⬤ BACKEND: CONNECTED';
+    const tools = Object.entries(data.tools || {}).map(([k,v]) => `${k}:${v?'✓':'✗'}`).join(' ');
+    if (!silent) showCfgMsg(`Connected! Tools: ${tools}`, 'ok');
+  } catch(e) {
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = '⬤ BACKEND: OFFLINE';
+    if (!silent) showCfgMsg(`Cannot reach backend: ${e.message}`, 'err');
+  }
+}
+
+function showCfgMsg(msg, type) {
+  const el = document.getElementById('cfgMsg');
+  el.textContent = msg;
+  el.style.color = type==='ok' ? 'var(--accent3)' : type==='err' ? 'var(--danger)' : 'var(--warn)';
+}
+
+// ── Run investigation ─────────────────────────────────────────────────────────
+async function runInvestigation() {
+  const query = document.getElementById('searchInput').value.trim();
+  if (!query || running) return;
+  if (!BACKEND) { showCfgMsg('Set your backend URL first!', 'err'); scrollToEmpty(); return; }
+
+  running = true;
+  allResults = {};
+  document.getElementById('runBtn').disabled = true;
+  document.getElementById('runBtn').textContent = '⏳ RUNNING';
+  document.getElementById('expBtn').disabled = true;
+
+  addHistory(query);
+  stats.queries++;
+  updateStats();
+
+  // Clear results
+  const resultsEl = document.getElementById('results');
+  resultsEl.innerHTML = '';
+  const mods = [...activeModIds];
+  const modCards = {};
+
+  // Show progress
+  setProgress(true, 0, 'LAUNCHING MODULES…');
+
+  // Create all cards upfront
+  mods.forEach(id => {
+    const mod = ALL_MODULES.find(m => m.id === id);
+    if (!mod) return;
+    const card = createCard(id, mod.name, mod.tag);
+    resultsEl.appendChild(card);
+    modCards[id] = card;
+  });
+
+  const t0 = Date.now();
+
+  try {
+    // POST to backend
+    const res = await fetch(`${BACKEND}/api/investigate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target: query, type: targetType, modules: mods }),
+    });
+    const { job_id } = await res.json();
+
+    // Stream results via SSE
+    let done = 0;
+    await new Promise((resolve, reject) => {
+      const es = new EventSource(`${BACKEND}/api/stream/${job_id}`);
+      es.onmessage = (e) => {
+        const event = JSON.parse(e.data);
+        if (event.type === 'module_start') {
+          updateCard(modCards[event.data.module], 'running');
+        } else if (event.type === 'module_done') {
+          updateCard(modCards[event.data.module], 'done', event.data.result);
+          allResults[event.data.module] = event.data.result;
+          stats.findings++;
+          updateStats();
+          done++;
+          setProgress(true, Math.round(done / mods.length * 100), `${done}/${mods.length} MODULES COMPLETE`);
+        } else if (event.type === 'done') {
+          es.close(); resolve();
+        } else if (event.type === 'error') {
+          es.close(); reject(new Error(event.data.message));
+        }
+      };
+      es.onerror = () => { es.close(); resolve(); };
+      setTimeout(() => { es.close(); resolve(); }, 150000);
+    });
+  } catch (e) {
+    const errCard = document.createElement('div');
+    errCard.style.cssText = 'padding:14px;border:1px solid var(--danger);border-radius:4px;font-family:Share Tech Mono,monospace;font-size:11px;color:var(--danger);';
+    errCard.textContent = `Error: ${e.message}`;
+    resultsEl.insertBefore(errCard, resultsEl.firstChild);
+  }
+
+  const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+  stats.lastTime = elapsed + 's';
+  document.getElementById('sTime').textContent = elapsed + 's';
+  localStorage.setItem('sentinel_stats', JSON.stringify(stats));
+
+  setProgress(true, 100, `✓ COMPLETE — ${mods.length} modules in ${elapsed}s`);
+  setTimeout(() => setProgress(false), 3500);
+
+  document.getElementById('runBtn').disabled = false;
+  document.getElementById('runBtn').textContent = '▶ INVESTIGATE';
+  document.getElementById('expBtn').disabled = false;
+  running = false;
+}
+
+// ── Card helpers ──────────────────────────────────────────────────────────────
+function createCard(id, name, tag) {
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.id = `card-${id}`;
+  el.innerHTML = `
+    <div class="card-hdr" onclick="toggleCard('${id}')">
+      <span class="card-badge">${tag}</span>
+      <span class="card-title">${name}</span>
+      <span class="card-status running" id="cs-${id}"><span class="spinner"></span> PENDING</span>
+      <span class="card-toggle open" id="ct-${id}">▼</span>
+    </div>
+    <div class="card-body open" id="cb-${id}">
+      <div class="card-content" id="cc-${id}">Waiting to start…</div>
+    </div>`;
+  return el;
+}
+
+function updateCard(cardEl, state, content) {
+  if (!cardEl) return;
+  const id = cardEl.id.replace('card-', '');
+  cardEl.className = `card ${state}`;
+  const statusEl = document.getElementById(`cs-${id}`);
+  statusEl.className = `card-status ${state}`;
+  if (state === 'running') {
+    statusEl.innerHTML = '<span class="spinner"></span> SCANNING';
+    document.getElementById(`cc-${id}`).textContent = 'Running…';
+  } else if (state === 'done') {
+    statusEl.innerHTML = '✓ DONE';
+    document.getElementById(`cc-${id}`).textContent = content || 'No results.';
+  } else if (state === 'error') {
+    statusEl.innerHTML = '✗ ERROR';
+    document.getElementById(`cc-${id}`).textContent = content || 'Module failed.';
+  }
+}
+
+function toggleCard(id) {
+  const body = document.getElementById(`cb-${id}`);
+  const tog = document.getElementById(`ct-${id}`);
+  body.classList.toggle('open');
+  tog.classList.toggle('open');
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function setProgress(show, pct, label) {
+  const area = document.getElementById('progArea');
+  if (show) { area.classList.add('show'); }
+  else { area.classList.remove('show'); }
+  document.getElementById('progFill').style.width = pct + '%';
+  document.getElementById('progLbl').textContent = label || '';
+}
+
+function clearAll() {
+  allResults = {};
+  document.getElementById('results').innerHTML = `
+    <div class="empty" id="emptyState">
+      <div class="empty-icon">◎</div>
+      <div class="empty-title">AWAITING TARGET</div>
+      <div class="empty-sub">All modules run in parallel — WHOIS, DNS, Nmap, theHarvester, Sherlock, Shodan, Subdomains, GeoIP, VirusTotal, EmailRep, HIBP, Metadata & Google Dorks.</div>
+      <div class="backend-cfg">
+        <div class="cfg-label">BACKEND URL (your Replit URL)</div>
+        <div class="cfg-row">
+          <input id="backendUrl" type="text" value="${BACKEND}" placeholder="https://YOUR-REPLIT-URL.replit.app"/>
+          <button class="cfg-btn" onclick="testBackend()">TEST</button>
+        </div>
+        <div id="cfgMsg" style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);margin-top:8px;"></div>
+      </div>
+    </div>`;
+  setProgress(false);
+  document.getElementById('expBtn').disabled = true;
+}
+
+function scrollToEmpty() {
+  document.getElementById('results').scrollTop = 0;
+}
+
+function addHistory(q) {
+  history = [q, ...history.filter(x => x !== q)].slice(0, 10);
+  localStorage.setItem('sentinel_history', JSON.stringify(history));
+  renderHistory();
+}
+
+function renderHistory() {
+  const el = document.getElementById('historyList');
+  if (!history.length) {
+    el.innerHTML = '<div style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);">No searches yet</div>';
+    return;
+  }
+  el.innerHTML = history.map(h =>
+    `<div class="history-item" onclick="document.getElementById('searchInput').value='${h.replace(/'/g,"\\'")}';">${h}</div>`
+  ).join('');
+}
+
+function updateStats() {
+  document.getElementById('sQueries').textContent = stats.queries;
+  document.getElementById('sFindings').textContent = stats.findings;
+  if (stats.lastTime) document.getElementById('sTime').textContent = stats.lastTime;
+}
+
+function exportReport() {
+  const target = document.getElementById('searchInput').value.trim();
+  if (!Object.keys(allResults).length) return;
+  let r = `SENTINEL OSINT REPORT\n${'='.repeat(50)}\nTarget: ${target}\nType: ${targetType}\nDate: ${new Date().toUTCString()}\n${'='.repeat(50)}\n`;
+  Object.entries(allResults).forEach(([mod, content]) => {
+    r += `\n\n${mod.toUpperCase()}\n${'-'.repeat(30)}\n${content}\n`;
+  });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([r], { type: 'text/plain' }));
+  a.download = `sentinel_${target.replace(/\s+/g,'_')}.txt`;
+  a.click();
+}
+
+document.getElementById('searchInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') runInvestigation();
+});
+
+init();
+</script>
+</body>
+</html>
