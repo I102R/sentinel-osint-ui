@@ -40,14 +40,151 @@ def tool_available(name):
 
 # ── Modules ───────────────────────────────────────────────────────────────────
 
+def module_people_search(target, job_id):
+    emit(job_id, "module_start", {"module": "people"})
+
+    if "," in target:
+        name_part = target.split(",")[0].strip()
+        location_part = target.split(",")[1].strip()
+    else:
+        parts = target.split()
+        name_part = " ".join(parts[:2]) if len(parts) >= 2 else target
+        location_part = " ".join(parts[2:]) if len(parts) > 2 else ""
+
+    wp_first = name_part.split()[0] if name_part else ""
+    wp_last = name_part.split()[-1] if len(name_part.split()) > 1 else ""
+    wp_city = location_part.split()[0] if location_part else ""
+    wp_state = location_part.split()[-1] if location_part else ""
+    name_plus = name_part.replace(" ", "+")
+    loc_plus = location_part.replace(" ", "+")
+    name_url = name_part.replace(" ", "-").lower()
+
+    lines = []
+    lines.append(f"TARGET:   {name_part}")
+    if location_part:
+        lines.append(f"LOCATION: {location_part}")
+    lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("PEOPLE FINDER SITES")
+    lines.append("=" * 50)
+    lines.append("")
+
+    sites = [
+        ("TRUEPEOPLESEARCH", f"https://www.truepeoplesearch.com/results?name={name_plus}&citystatezip={loc_plus}"),
+        ("FASTPEOPLESEARCH", f"https://www.fastpeoplesearch.com/name/{name_url}"),
+        ("WHITEPAGES",       f"https://www.whitepages.com/name/{wp_first}-{wp_last}/{wp_city}-{wp_state}"),
+        ("SPOKEO",           f"https://www.spokeo.com/{name_part.replace(' ','-')}"),
+        ("BEENVERIFIED",     f"https://www.beenverified.com/people/{name_url}/"),
+        ("INTELIUS",         f"https://intelius.com/people-search/results/?firstName={wp_first}&lastName={wp_last}&city={wp_city}&state={wp_state}"),
+        ("PEOPLEFINDERS",    f"https://www.peoplefinders.com/people/{name_url}"),
+        ("USPHONEBOOK",      f"https://www.usphonebook.com/{name_part.replace(' ','-')}"),
+        ("411.COM",          f"https://www.411.com/name/{wp_first}-{wp_last}/{wp_city}-{wp_state}"),
+        ("PEOPLELOOKER",     f"https://www.peoplelooker.com/results/people?firstName={wp_first}&lastName={wp_last}&city={wp_city}&state={wp_state}"),
+        ("RADARIS",          f"https://radaris.com/p/{wp_first}-{wp_last}/"),
+        ("MYLIFE",           f"https://www.mylife.com/people-search/searchPeople.pubview?firstName={wp_first}&lastName={wp_last}&city={wp_city}&state={wp_state}"),
+        ("VOTERRECORDS",     f"https://voterrecords.com/voters/{name_url}/1"),
+        ("CHECKPEOPLE",      f"https://checkpeople.com/search?firstName={wp_first}&lastName={wp_last}&state={wp_state}"),
+        ("CLUBSET",          f"https://www.clubset.com/profile/name/{wp_first}+{wp_last}"),
+    ]
+
+    for name, url in sites:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("SOCIAL MEDIA")
+    lines.append("=" * 50)
+    lines.append("")
+
+    social = [
+        ("LinkedIn",  f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
+        ("Facebook",  f"https://www.facebook.com/search/people/?q={name_plus}"),
+        ("Twitter/X", f"https://twitter.com/search?q=%22{name_plus}%22&f=user"),
+        ("Instagram", f"https://www.instagram.com/explore/search/keyword/?q={name_plus}"),
+        ("TikTok",    f"https://www.tiktok.com/search?q={name_plus}"),
+        ("YouTube",   f"https://www.youtube.com/results?search_query={name_plus}"),
+        ("Reddit",    f"https://www.reddit.com/search/?q=%22{name_part}%22&type=user"),
+    ]
+    for platform, url in social:
+        lines.append(f"[{platform}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("COURT & PUBLIC RECORDS")
+    lines.append("=" * 50)
+    lines.append("")
+
+    courts = [
+        ("PACER Federal Courts",    "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
+        ("OpenSanctions Watchlist", f"https://www.opensanctions.org/search/?q={name_plus}"),
+        ("NM Courts (CourtLook)",   f"https://caselookup.nmcourts.gov/caselookup/app"),
+        ("VINE Offender Search",    f"https://vinelink.vineapps.com/search/NM/Person"),
+    ]
+    for name, url in courts:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("GOOGLE DORKS")
+    lines.append("=" * 50)
+    lines.append("")
+
+    dorks = [
+        f'"{name_part}" "{location_part}"',
+        f'"{name_part}" address phone',
+        f'"{name_part}" site:whitepages.com',
+        f'"{name_part}" site:spokeo.com',
+        f'"{name_part}" site:linkedin.com',
+        f'"{name_part}" arrest OR mugshot',
+        f'"{name_part}" court OR lawsuit OR case',
+        f'"{name_part}" resume OR CV',
+        f'"{name_part}" obituary',
+        f'"{name_part}" email OR contact',
+    ]
+    for dork in dorks:
+        encoded = dork.replace(" ", "+").replace('"', '%22')
+        lines.append(f"  {dork}")
+        lines.append(f"  https://www.google.com/search?q={encoded}")
+        lines.append("")
+
+    # Live sanctions check
+    try:
+        san_out, _, _ = run_cmd(
+            f"curl -s 'https://api.opensanctions.org/search/default?q={name_plus}&schema=Person' 2>/dev/null",
+            timeout=10
+        )
+        san_data = json.loads(san_out)
+        results = san_data.get("results", [])
+        lines.append("=" * 50)
+        lines.append("LIVE SANCTIONS / WATCHLIST CHECK")
+        lines.append("=" * 50)
+        lines.append("")
+        if results:
+            lines.append(f"⚠ WARNING: {len(results)} MATCH(ES) FOUND ON WATCHLISTS")
+            for r in results[:5]:
+                lines.append(f"  • {r.get('caption','?')} — {r.get('schema','?')} — Score: {r.get('score','?')}")
+        else:
+            lines.append("✓ No matches found on sanctions/watchlists")
+        lines.append("")
+    except:
+        pass
+
+    result = "\n".join(lines)
+    emit(job_id, "module_done", {"module": "people", "result": result})
+    return result
+
 def module_whois(target, job_id):
     emit(job_id, "module_start", {"module": "whois"})
+    api_key = os.environ.get("WHOIS_API_KEY", "at_free")
     try:
-        import urllib.request
-        api_key = os.environ.get("WHOIS_API_KEY", "")
-        url = f"https://www.whoisxmlapi.com/whoisserver/WhoisService?apiKey={api_key}&domainName={target}&outputFormat=JSON"
-        with urllib.request.urlopen(url, timeout=10) as r:
-            data = json.loads(r.read().decode())
+        out, _, _ = run_cmd(
+            f"curl -s 'https://www.whoisxmlapi.com/whoisserver/WhoisService?apiKey={api_key}&domainName={target}&outputFormat=JSON' 2>/dev/null"
+        )
+        data = json.loads(out)
         record = data.get("WhoisRecord", {})
         registrant = record.get("registrant", {})
         lines = [
@@ -60,9 +197,13 @@ def module_whois(target, job_id):
             f"Registrant:  {registrant.get('organization', registrant.get('name', 'N/A'))}",
             f"Country:     {registrant.get('country', 'N/A')}",
         ]
+        nameservers = record.get("nameServers", {}).get("hostNames", [])
+        if nameservers:
+            lines.append(f"Nameservers: {', '.join(nameservers[:4])}")
         result = "\n".join(lines)
-    except Exception as e:
-        result = f"WHOIS lookup failed: {str(e)}"
+    except:
+        out, err, _ = run_cmd(f"whois {target} 2>/dev/null | head -40")
+        result = out if out else f"WHOIS lookup failed for {target}"
     emit(job_id, "module_done", {"module": "whois", "result": result})
     return result
 
@@ -190,7 +331,7 @@ def module_virustotal(target, job_id):
     emit(job_id, "module_start", {"module": "virustotal"})
     api_key = os.environ.get("VT_API_KEY", "")
     if not api_key:
-        result = "Add VT_API_KEY to Render Environment Variables.\nFree key at https://virustotal.com"
+        result = "Add VT_API_KEY to Render Environment Variables."
     else:
         out, _, _ = run_cmd(
             f"curl -s --request GET "
@@ -309,6 +450,7 @@ def module_google_dorks(target, job_id):
 
 # ── Module registry ───────────────────────────────────────────────────────────
 MODULE_MAP = {
+    "people":       module_people_search,
     "whois":        module_whois,
     "dns":          module_dns,
     "subdomains":   module_subdomains,
