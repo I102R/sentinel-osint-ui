@@ -132,37 +132,30 @@ def module_shodan(target, job_id):
     emit(job_id, "module_start", {"module": "shodan"})
     api_key = os.environ.get("SHODAN_API_KEY", "")
     if not api_key:
-        result = "Add SHODAN_API_KEY to Render Environment Variables.\nFree key at https://shodan.io"
+        result = "Add SHODAN_API_KEY to Render Environment Variables."
     else:
         try:
+            import urllib.request
             ip = socket.gethostbyname(target)
-            out, _, _ = run_cmd(
-                f"curl -s 'https://api.shodan.io/shodan/host/{ip}?key={api_key}' 2>/dev/null"
-            )
-            data = json.loads(out)
+            url = f"https://api.shodan.io/shodan/host/{ip}?key={api_key}"
+            with urllib.request.urlopen(url, timeout=10) as r:
+                data = json.loads(r.read().decode())
             if "error" in data:
                 result = f"Shodan: {data['error']}"
             else:
                 ports = data.get("ports", [])
-                org = data.get("org", "N/A")
-                country = data.get("country_name", "N/A")
-                city = data.get("city", "N/A")
-                isp = data.get("isp", "N/A")
-                hostnames = ", ".join(data.get("hostnames", [])) or "None"
-                vulns = list(data.get("vulns", {}).keys())
                 lines = [
-                    f"IP:        {ip}",
-                    f"Org:       {org}",
-                    f"ISP:       {isp}",
-                    f"Country:   {country}",
-                    f"City:      {city}",
-                    f"Hostnames: {hostnames}",
-                    f"Ports:     {', '.join(map(str, ports)) or 'None found'}",
-                    f"Vulns:     {', '.join(vulns) if vulns else 'None detected'}",
+                    f"IP:      {ip}",
+                    f"Org:     {data.get('org', 'N/A')}",
+                    f"ISP:     {data.get('isp', 'N/A')}",
+                    f"Country: {data.get('country_name', 'N/A')}",
+                    f"City:    {data.get('city', 'N/A')}",
+                    f"Ports:   {', '.join(map(str, ports)) or 'None'}",
+                    f"Vulns:   {', '.join(data.get('vulns', {}).keys()) or 'None'}",
                 ]
                 result = "\n".join(lines)
         except Exception as e:
-            result = f"Shodan lookup failed: {str(e)}"
+            result = f"Shodan: {str(e)}"
     emit(job_id, "module_done", {"module": "shodan", "result": result})
     return result
 
