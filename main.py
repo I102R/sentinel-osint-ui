@@ -42,10 +42,20 @@ def tool_available(name):
 
 def module_whois(target, job_id):
     emit(job_id, "module_start", {"module": "whois"})
-    out, err, rc = run_cmd(f"whois {target} 2>/dev/null | head -60")
-    result = out if out else f"No WHOIS data found. {err}"
-    emit(job_id, "module_done", {"module": "whois", "result": result})
-    return result
+    try:
+        out, _, _ = run_cmd(
+            f"curl -s 'https://www.whoisxmlapi.com/whoisserver/WhoisService?apiKey=at_free&domainName={target}&outputFormat=JSON' 2>/dev/null"
+        )
+        data = json.loads(out)
+        record = data.get("WhoisRecord", {})
+        registrant = record.get("registrant", {})
+        lines = [
+            f"Domain:      {record.get('domainName', target)}",
+            f"Registrar:   {record.get('registrarName', 'N/A')}",
+            f"Created:     {record.get('createdDate', 'N/A')}",
+            f"Expires:     {record.get('expiresDate', 'N/A')}",
+            f"Updated:     {record.get('updatedDate', 'N/A')}",
+            f"Registrant:  {registrant.get('organization', registr
 
 def module_dns(target, job_id):
     emit(job_id, "module_start", {"module": "dns"})
