@@ -238,19 +238,20 @@ let stats = JSON.parse(localStorage.getItem('sentinel_stats') || '{"queries":0,"
 const TARGET_TYPES = ['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','LOCATION'];
 
 const ALL_MODULES = [
-  { id:'whois',        name:'WHOIS Lookup',       tag:'WHOIS', types:['DOMAIN','IP'] },
-  { id:'dns',          name:'DNS Records',         tag:'DNS',   types:['DOMAIN'] },
-  { id:'subdomains',   name:'Subdomain Enum',      tag:'SUBS',  types:['DOMAIN'] },
-  { id:'nmap',         name:'Port Scan (Nmap)',    tag:'NMAP',  types:['DOMAIN','IP'] },
-  { id:'geoip',        name:'GeoIP Location',      tag:'GEO',   types:['IP','DOMAIN'] },
-  { id:'theharvester', name:'theHarvester',        tag:'HARV',  types:['DOMAIN','EMAIL','COMPANY'] },
-  { id:'sherlock',     name:'Sherlock (usernames)',tag:'SHRL',  types:['USERNAME','PERSON'] },
-  { id:'shodan',       name:'Shodan',              tag:'SHDN',  types:['IP','DOMAIN'] },
-  { id:'virustotal',   name:'VirusTotal',          tag:'VT',    types:['DOMAIN','IP','EMAIL'] },
-  { id:'emailrep',     name:'EmailRep',            tag:'EREP',  types:['EMAIL'] },
-  { id:'hibp',         name:'HaveIBeenPwned',      tag:'HIBP',  types:['EMAIL'] },
-  { id:'metadata',     name:'Public Metadata',     tag:'META',  always:true },
-  { id:'dorks',        name:'Google Dorks',        tag:'DORK',  always:true },
+  { id:'people',       name:'People Search',       tag:'PEOP',  types:['PERSON'] },
+  { id:'whois',        name:'WHOIS Lookup',        tag:'WHOIS', types:['DOMAIN','IP'] },
+  { id:'dns',          name:'DNS Records',          tag:'DNS',   types:['DOMAIN'] },
+  { id:'subdomains',   name:'Subdomain Enum',       tag:'SUBS',  types:['DOMAIN'] },
+  { id:'nmap',         name:'Port Scan',            tag:'NMAP',  types:['DOMAIN','IP'] },
+  { id:'geoip',        name:'GeoIP Location',       tag:'GEO',   types:['IP','DOMAIN'] },
+  { id:'theharvester', name:'theHarvester',         tag:'HARV',  types:['DOMAIN','EMAIL','COMPANY'] },
+  { id:'sherlock',     name:'Sherlock (usernames)', tag:'SHRL',  types:['USERNAME','PERSON'] },
+  { id:'shodan',       name:'Shodan',               tag:'SHDN',  types:['IP','DOMAIN'] },
+  { id:'virustotal',   name:'VirusTotal',           tag:'VT',    types:['DOMAIN','IP','EMAIL'] },
+  { id:'emailrep',     name:'EmailRep',             tag:'EREP',  types:['EMAIL'] },
+  { id:'hibp',         name:'HaveIBeenPwned',       tag:'HIBP',  types:['EMAIL'] },
+  { id:'metadata',     name:'Public Metadata',      tag:'META',  always:true },
+  { id:'dorks',        name:'Google Dorks',         tag:'DORK',  always:true },
 ];
 
 // ── Init ──────────────────────────────────────────────────────────────────────
