@@ -134,6 +134,18 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
 </style>
 </head>
 <body>
+<div id="lockscreen" style="position:fixed;inset:0;background:#060a0f;z-index:9999;display:flex;align-items:center;justify-content:center;background-image:linear-gradient(rgba(0,229,255,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,255,0.025) 1px,transparent 1px);background-size:40px 40px;">
+<div style="border:1px solid #1a2a3a;border-radius:6px;padding:36px 40px;background:#0b1118;display:flex;flex-direction:column;align-items:center;gap:18px;min-width:320px;max-width:360px;">
+  <div style="width:48px;height:48px;border:2px solid #00e5ff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;animation:glow 3s infinite;">&#9678;</div>
+  <div style="font-family:Share Tech Mono,monospace;font-size:16px;color:#00e5ff;letter-spacing:3px;text-align:center;">SENTINEL // OSINT</div>
+  <div style="font-family:Share Tech Mono,monospace;font-size:10px;color:#4a6070;letter-spacing:2px;text-align:center;">AUTHORIZED ACCESS ONLY</div>
+  <input id="pwInput" type="password" placeholder="ENTER ACCESS CODE"
+    style="width:100%;background:#060a0f;border:1px solid #1a2a3a;border-radius:4px;padding:12px 14px;color:#c8d8e8;font-family:Share Tech Mono,monospace;font-size:14px;outline:none;text-align:center;letter-spacing:4px;"
+    onkeydown="if(event.key==='Enter')checkPw()"/>
+  <button onclick="checkPw()" style="width:100%;padding:12px;background:#00e5ff;color:#060a0f;border:none;border-radius:4px;font-family:Share Tech Mono,monospace;font-size:13px;font-weight:bold;letter-spacing:2px;cursor:pointer;">AUTHENTICATE</button>
+  <div id="pwErr" style="font-family:Share Tech Mono,monospace;font-size:11px;color:#ff3b3b;letter-spacing:1px;display:none;">&#9888; ACCESS DENIED — INVALID CODE</div>
+</div>
+</div>
 <div class="scanline"></div>
 <div class="app">
 
@@ -539,7 +551,31 @@ document.getElementById('searchInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') runInvestigation();
 });
 
-init();
+// init() called after password check
+</script>
+<script>
+// ── Password Protection ───────────────────────────────────────────────────────
+const ACCESS_CODE = 'sentinel2026'; // CHANGE THIS TO YOUR PASSWORD
+function checkPw() {
+  const val = document.getElementById('pwInput').value;
+  if (val === ACCESS_CODE) {
+    document.getElementById('lockscreen').style.display = 'none';
+    sessionStorage.setItem('sentinel_auth', '1');
+    init();
+  } else {
+    const err = document.getElementById('pwErr');
+    err.style.display = 'block';
+    document.getElementById('pwInput').value = '';
+    setTimeout(() => err.style.display = 'none', 3000);
+  }
+}
+// Check if already authenticated this session
+if (sessionStorage.getItem('sentinel_auth') === '1') {
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('lockscreen').style.display = 'none';
+    init();
+  });
+}
 </script>
 </body>
 </html>
