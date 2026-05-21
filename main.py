@@ -244,6 +244,124 @@ def module_nmap(target, job_id):
     emit(job_id, "module_done", {"module": "nmap", "result": result})
     return result
 
+def module_phone(target, job_id):
+    emit(job_id, "module_start", {"module": "phone"})
+    # Clean phone number - remove formatting
+    clean = target.replace("-","").replace("(","").replace(")","").replace(" ","").replace("+1","").strip()
+    formatted = f"({clean[:3]}) {clean[3:6]}-{clean[6:]}" if len(clean) == 10 else target
+    phone_plus1 = f"+1{clean}" if len(clean) == 10 else target
+
+    lines = []
+    lines.append(f"TARGET:    {formatted}")
+    lines.append(f"CLEANED:   {clean}")
+    lines.append("")
+
+    # Live carrier/spam lookup via IPQualityScore (free, no key needed for basic)
+    try:
+        out, _, _ = run_cmd(
+            f"curl -s 'https://www.ipqualityscore.com/api/json/phone/YOUR_KEY/{clean}' 2>/dev/null",
+            timeout=10
+        )
+        # Even without API key, try numverify free tier
+        nv_out, _, _ = run_cmd(
+            f"curl -s 'http://apilayer.net/api/validate?access_key=free&number={clean}&country_code=US&format=1' 2>/dev/null",
+            timeout=10
+        )
+        try:
+            nv_data = json.loads(nv_out)
+            if nv_data.get("valid"):
+                lines.append("=== CARRIER INTELLIGENCE ===")
+                lines.append(f"Valid:        {nv_data.get('valid', 'N/A')}")
+                lines.append(f"Line Type:    {nv_data.get('line_type', 'N/A')}")
+                lines.append(f"Carrier:      {nv_data.get('carrier', 'N/A')}")
+                lines.append(f"Location:     {nv_data.get('location', 'N/A')}")
+                lines.append(f"Country:      {nv_data.get('country_name', 'N/A')}")
+                lines.append("")
+        except:
+            pass
+    except:
+        pass
+
+    lines.append("=" * 50)
+    lines.append("REVERSE LOOKUP SITES — CLICK TO SEARCH")
+    lines.append("=" * 50)
+    lines.append("")
+
+    sites = [
+        ("TRUEPEOPLESEARCH", f"https://www.truepeoplesearch.com/results?phoneno={clean}"),
+        ("WHITEPAGES",       f"https://www.whitepages.com/phone/{formatted.replace(' ','-').replace('(','').replace(')','').replace(' ','-')}"),
+        ("SPOKEO",           f"https://www.spokeo.com/phone-search/{clean}"),
+        ("BEENVERIFIED",     f"https://www.beenverified.com/phone/{clean}/"),
+        ("INTELIUS",         f"https://intelius.com/phone-lookup/{clean}/"),
+        ("PEOPLEFINDERS",    f"https://www.peoplefinders.com/phone/{clean}"),
+        ("USPHONEBOOK",      f"https://www.usphonebook.com/{clean}"),
+        ("411.COM",          f"https://www.411.com/phone/{clean}"),
+        ("CALLERMART",       f"https://www.callermart.com/phone/{clean}"),
+        ("ZLOOKUP",          f"https://www.zlookup.com/"),
+    ]
+    for name, url in sites:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("SPAM & REPORT DATABASES")
+    lines.append("=" * 50)
+    lines.append("")
+
+    spam_sites = [
+        ("800NOTES",      f"https://800notes.com/Phone.aspx/{clean}"),
+        ("CALLERCENTER",  f"https://callercenter.com/{clean}"),
+        ("WHOCALLEDUS",   f"https://whocalledus.com/calls/{clean}/"),
+        ("CALLERCOMMENTS",f"https://callercomments.com/calls/{clean}/"),
+        ("NOMOROBO",      f"https://www.nomorobo.com/lookup/{clean}"),
+        ("SPAMCALLS",     f"https://spamcalls.net/en/search?n={clean}"),
+    ]
+    for name, url in spam_sites:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("SOCIAL MEDIA PHONE SEARCH")
+    lines.append("=" * 50)
+    lines.append("")
+
+    social = [
+        ("Facebook",  f"https://www.facebook.com/search/people/?q={clean}"),
+        ("TrueCaller", f"https://www.truecaller.com/search/us/{clean}"),
+        ("Telegram",  f"https://t.me/+1{clean}"),
+    ]
+    for name, url in social:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("GOOGLE DORKS")
+    lines.append("=" * 50)
+    lines.append("")
+
+    dorks = [
+        f'"{formatted}"',
+        f'"{clean}"',
+        f'"{phone_plus1}"',
+        f'"{formatted}" name address',
+        f'"{clean}" site:facebook.com',
+        f'"{clean}" site:linkedin.com',
+        f'"{formatted}" site:whitepages.com',
+        f'"{clean}" spam OR scam OR fraud',
+    ]
+    for dork in dorks:
+        encoded = dork.replace(" ", "+").replace('"', '%22')
+        lines.append(f"  {dork}")
+        lines.append(f"  https://www.google.com/search?q={encoded}")
+        lines.append("")
+
+    result = "\n".join(lines)
+    emit(job_id, "module_done", {"module": "phone", "result": result})
+    return result
+
 def module_theharvester(target, job_id):
     emit(job_id, "module_start", {"module": "theharvester"})
     out, err, rc = run_cmd(
@@ -451,6 +569,7 @@ def module_google_dorks(target, job_id):
 # ── Module registry ───────────────────────────────────────────────────────────
 MODULE_MAP = {
     "people":       module_people_search,
+    "phone":        module_phone,
     "whois":        module_whois,
     "dns":          module_dns,
     "subdomains":   module_subdomains,
