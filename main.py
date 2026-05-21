@@ -55,7 +55,21 @@ def module_whois(target, job_id):
             f"Created:     {record.get('createdDate', 'N/A')}",
             f"Expires:     {record.get('expiresDate', 'N/A')}",
             f"Updated:     {record.get('updatedDate', 'N/A')}",
-            f"Registrant:  {registrant.get('organization', registr
+            f"Status:      {record.get('status', 'N/A')}",
+            f"Registrant:  {registrant.get('organization', registrant.get('name', 'N/A'))}",
+            f"Country:     {registrant.get('country', 'N/A')}",
+        ]
+        nameservers = record.get("nameServers", {}).get("hostNames", [])
+        if nameservers:
+            lines.append(f"Nameservers: {', '.join(nameservers[:4])}")
+        result = "\n".join(lines)
+        if "N/A" in result and len(result) < 100:
+            raise Exception("Insufficient data")
+    except:
+        out, err, _ = run_cmd(f"whois {target} 2>/dev/null | head -40")
+        result = out if out else f"WHOIS lookup failed for {target}"
+    emit(job_id, "module_done", {"module": "whois", "result": result})
+    return result
 
 def module_dns(target, job_id):
     emit(job_id, "module_start", {"module": "dns"})
@@ -120,8 +134,35 @@ def module_shodan(target, job_id):
     if not api_key:
         result = "Add SHODAN_API_KEY to Render Environment Variables.\nFree key at https://shodan.io"
     else:
-        out, err, _ = run_cmd(f"shodan host {target} 2>/dev/null")
-        result = out if out else f"Shodan: {err}"
+        try:
+            ip = socket.gethostbyname(target)
+            out, _, _ = run_cmd(
+                f"curl -s 'https://api.shodan.io/shodan/host/{ip}?key={api_key}' 2>/dev/null"
+            )
+            data = json.loads(out)
+            if "error" in data:
+                result = f"Shodan: {data['error']}"
+            else:
+                ports = data.get("ports", [])
+                org = data.get("org", "N/A")
+                country = data.get("country_name", "N/A")
+                city = data.get("city", "N/A")
+                isp = data.get("isp", "N/A")
+                hostnames = ", ".join(data.get("hostnames", [])) or "None"
+                vulns = list(data.get("vulns", {}).keys())
+                lines = [
+                    f"IP:        {ip}",
+                    f"Org:       {org}",
+                    f"ISP:       {isp}",
+                    f"Country:   {country}",
+                    f"City:      {city}",
+                    f"Hostnames: {hostnames}",
+                    f"Ports:     {', '.join(map(str, ports)) or 'None found'}",
+                    f"Vulns:     {', '.join(vulns) if vulns else 'None detected'}",
+                ]
+                result = "\n".join(lines)
+        except Exception as e:
+            result = f"Shodan lookup failed: {str(e)}"
     emit(job_id, "module_done", {"module": "shodan", "result": result})
     return result
 
@@ -138,11 +179,12 @@ def module_subdomains(target, job_id):
 
 def module_geoip(target, job_id):
     emit(job_id, "module_start", {"module": "geoip"})
-    out, _, _ = run_cmd(f"curl -s 'https://ipapi.co/{target}/json/' 2>/dev/null")
     try:
+        ip = socket.gethostbyname(target)
+        out, _, _ = run_cmd(f"curl -s 'https://ipapi.co/{ip}/json/' 2>/dev/null")
         data = json.loads(out)
         lines = [
-            f"IP:       {data.get('ip', target)}",
+            f"IP:       {data.get('ip', ip)}",
             f"City:     {data.get('city', 'N/A')}",
             f"Region:   {data.get('region', 'N/A')}",
             f"Country:  {data.get('country_name', 'N/A')}",
@@ -151,8 +193,8 @@ def module_geoip(target, job_id):
             f"Lat/Lon:  {data.get('latitude', 'N/A')}, {data.get('longitude', 'N/A')}",
         ]
         result = "\n".join(lines)
-    except:
-        result = out if out else "GeoIP lookup failed."
+    except Exception as e:
+        result = f"GeoIP lookup failed: {str(e)}"
     emit(job_id, "module_done", {"module": "geoip", "result": result})
     return result
 
@@ -171,11 +213,14 @@ def module_virustotal(target, job_id):
             data = json.loads(out)
             attrs = data.get("data", {}).get("attributes", {})
             stats = attrs.get("last_analysis_stats", {})
+            cats = attrs.get("categories", {})
             result = (
-                f"Malicious:  {stats.get('malicious', 0)}\n"
-                f"Suspicious: {stats.get('suspicious', 0)}\n"
-                f"Harmless:   {stats.get('harmless', 0)}\n"
-                f"Reputation: {attrs.get('reputation', 'N/A')}"
+                f"Malicious:   {stats.get('malicious', 0)}\n"
+                f"Suspicious:  {stats.get('suspicious', 0)}\n"
+                f"Harmless:    {stats.get('harmless', 0)}\n"
+                f"Undetected:  {stats.get('undetected', 0)}\n"
+                f"Reputation:  {attrs.get('reputation', 'N/A')}\n"
+                f"Categories:  {', '.join(set(cats.values())) if cats else 'N/A'}"
             )
         except:
             result = out[:500] if out else "VirusTotal lookup failed."
@@ -191,15 +236,15 @@ def module_emailrep(target, job_id):
         data = json.loads(out)
         details = data.get("details", {})
         lines = [
-            f"Email:       {data.get('email', target)}",
-            f"Reputation:  {data.get('reputation', 'N/A')}",
-            f"Suspicious:  {data.get('suspicious', 'N/A')}",
-            f"References:  {data.get('references', 'N/A')}",
-            f"Blacklisted: {details.get('blacklisted', False)}",
-            f"Data breach: {details.get('data_breach', False)}",
-            f"Disposable:  {details.get('disposable', False)}",
+            f"Email:         {data.get('email', target)}",
+            f"Reputation:    {data.get('reputation', 'N/A')}",
+            f"Suspicious:    {data.get('suspicious', 'N/A')}",
+            f"References:    {data.get('references', 'N/A')}",
+            f"Blacklisted:   {details.get('blacklisted', False)}",
+            f"Data breach:   {details.get('data_breach', False)}",
+            f"Disposable:    {details.get('disposable', False)}",
             f"Free provider: {details.get('free_provider', False)}",
-            f"Profiles:    {', '.join(details.get('profiles', [])) or 'None found'}",
+            f"Profiles:      {', '.join(details.get('profiles', [])) or 'None found'}",
         ]
         result = "\n".join(lines)
     except:
