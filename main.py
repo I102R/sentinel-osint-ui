@@ -43,10 +43,11 @@ def tool_available(name):
 def module_whois(target, job_id):
     emit(job_id, "module_start", {"module": "whois"})
     try:
-        out, _, _ = run_cmd(
-            f"curl -s 'https://www.whoisxmlapi.com/whoisserver/WhoisService?apiKey=at_free&domainName={target}&outputFormat=JSON' 2>/dev/null"
-        )
-        data = json.loads(out)
+        import urllib.request
+        api_key = os.environ.get("WHOIS_API_KEY", "")
+        url = f"https://www.whoisxmlapi.com/whoisserver/WhoisService?apiKey={api_key}&domainName={target}&outputFormat=JSON"
+        with urllib.request.urlopen(url, timeout=10) as r:
+            data = json.loads(r.read().decode())
         record = data.get("WhoisRecord", {})
         registrant = record.get("registrant", {})
         lines = [
@@ -59,15 +60,9 @@ def module_whois(target, job_id):
             f"Registrant:  {registrant.get('organization', registrant.get('name', 'N/A'))}",
             f"Country:     {registrant.get('country', 'N/A')}",
         ]
-        nameservers = record.get("nameServers", {}).get("hostNames", [])
-        if nameservers:
-            lines.append(f"Nameservers: {', '.join(nameservers[:4])}")
         result = "\n".join(lines)
-        if "N/A" in result and len(result) < 100:
-            raise Exception("Insufficient data")
-    except:
-        out, err, _ = run_cmd(f"whois {target} 2>/dev/null | head -40")
-        result = out if out else f"WHOIS lookup failed for {target}"
+    except Exception as e:
+        result = f"WHOIS lookup failed: {str(e)}"
     emit(job_id, "module_done", {"module": "whois", "result": result})
     return result
 
