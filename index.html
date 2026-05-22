@@ -247,7 +247,7 @@ let allResults = {};
 let history = JSON.parse(localStorage.getItem('sentinel_history') || '[]');
 let stats = JSON.parse(localStorage.getItem('sentinel_stats') || '{"queries":0,"findings":0}');
 
-const TARGET_TYPES = ['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','LOCATION'];
+const TARGET_TYPES = ['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','PLATE','LOCATION'];
 
 const ALL_MODULES = [
   { id:'people',       name:'People Search',       tag:'PEOP',  types:['PERSON'] },
