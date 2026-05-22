@@ -363,6 +363,187 @@ def module_phone(target, job_id):
     return result
 
 
+
+def module_social_media(target, job_id):
+    emit(job_id, "module_start", {"module": "social_media"})
+    
+    name_plus = target.replace(" ", "+").replace(",", "")
+    name_quoted = target.replace(",", "").strip()
+    parts = name_quoted.split()
+    first = parts[0] if parts else target
+    last = parts[-1] if len(parts) > 1 else ""
+    
+    lines = []
+    lines.append(f"TARGET: {name_quoted}")
+    lines.append("")
+
+    # ── Facebook ─────────────────────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("FACEBOOK INTELLIGENCE")
+    lines.append("=" * 50)
+    lines.append("")
+    fb_searches = [
+        ("People Search",      f"https://www.facebook.com/search/people/?q={name_plus}"),
+        ("Posts mentioning",   f"https://www.facebook.com/search/posts/?q={name_plus}"),
+        ("Photos tagged",      f"https://www.facebook.com/search/photos/?q={name_plus}"),
+        ("Check-ins",          f"https://www.facebook.com/search/places/?q={name_plus}"),
+        ("Groups",             f"https://www.facebook.com/search/groups/?q={name_plus}"),
+        ("Events",             f"https://www.facebook.com/search/events/?q={name_plus}"),
+        ("Marketplace",        f"https://www.facebook.com/marketplace/search/?query={name_plus}"),
+    ]
+    for label, url in fb_searches:
+        lines.append(f"[{label}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Instagram ─────────────────────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("INSTAGRAM INTELLIGENCE")
+    lines.append("=" * 50)
+    lines.append("")
+    ig_searches = [
+        ("Profile Search",     f"https://www.instagram.com/explore/search/keyword/?q={name_plus}"),
+        ("Hashtag Search",     f"https://www.instagram.com/explore/tags/{name_plus.replace('+','')}/"),
+        ("Google IG Search",   f"https://www.google.com/search?q=site:instagram.com+%22{name_plus}%22"),
+    ]
+    for label, url in ig_searches:
+        lines.append(f"[{label}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Twitter/X ─────────────────────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("TWITTER/X INTELLIGENCE")
+    lines.append("=" * 50)
+    lines.append("")
+    tw_searches = [
+        ("People Search",      f"https://twitter.com/search?q=%22{name_plus}%22&f=user"),
+        ("Recent Posts",       f"https://twitter.com/search?q=%22{name_plus}%22&f=live"),
+        ("Top Posts",          f"https://twitter.com/search?q=%22{name_plus}%22&f=top"),
+        ("With Location",      f"https://twitter.com/search?q=%22{name_plus}%22+near%3A%22Albuquerque%22"),
+    ]
+    for label, url in tw_searches:
+        lines.append(f"[{label}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── LinkedIn ──────────────────────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("LINKEDIN INTELLIGENCE")
+    lines.append("=" * 50)
+    lines.append("")
+    li_searches = [
+        ("People Search",      f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
+        ("Posts Search",       f"https://www.linkedin.com/search/results/content/?keywords={name_plus}"),
+        ("Google LI Search",   f"https://www.google.com/search?q=site:linkedin.com/in+%22{name_plus}%22"),
+    ]
+    for label, url in li_searches:
+        lines.append(f"[{label}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── TikTok ────────────────────────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("TIKTOK INTELLIGENCE")
+    lines.append("=" * 50)
+    lines.append("")
+    tt_searches = [
+        ("User Search",        f"https://www.tiktok.com/search/user?q={name_plus}"),
+        ("Video Search",       f"https://www.tiktok.com/search?q={name_plus}"),
+        ("Google TT Search",   f"https://www.google.com/search?q=site:tiktok.com+%22{name_plus}%22"),
+    ]
+    for label, url in tt_searches:
+        lines.append(f"[{label}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── YouTube ───────────────────────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("YOUTUBE INTELLIGENCE")
+    lines.append("=" * 50)
+    lines.append("")
+    yt_searches = [
+        ("Channel Search",     f"https://www.youtube.com/results?search_query={name_plus}&sp=EgIQAg%253D%253D"),
+        ("Video Search",       f"https://www.youtube.com/results?search_query={name_plus}"),
+    ]
+    for label, url in yt_searches:
+        lines.append(f"[{label}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Reddit ────────────────────────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("REDDIT INTELLIGENCE")
+    lines.append("=" * 50)
+    lines.append("")
+    rd_searches = [
+        ("User Search",        f"https://www.reddit.com/search/?q=%22{name_quoted}%22&type=user"),
+        ("Posts Search",       f"https://www.reddit.com/search/?q=%22{name_quoted}%22"),
+    ]
+    for label, url in rd_searches:
+        lines.append(f"[{label}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Snapchat ──────────────────────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("SNAPCHAT / OTHER PLATFORMS")
+    lines.append("=" * 50)
+    lines.append("")
+    other_searches = [
+        ("Snapchat",           f"https://www.snapchat.com/add/{first.lower()}{last.lower()}"),
+        ("Pinterest",          f"https://www.pinterest.com/search/people/?q={name_plus}"),
+        ("Tumblr",             f"https://www.tumblr.com/search/{name_plus}"),
+        ("Nextdoor",           f"https://nextdoor.com/find-neighbors/"),
+        ("Meetup",             f"https://www.meetup.com/find/?keywords={name_plus}"),
+        ("Venmo",              f"https://venmo.com/{first.lower()}{last.lower()}"),
+        ("Cash App",           f"https://cash.app/${first.lower()}{last.lower()}"),
+    ]
+    for label, url in other_searches:
+        lines.append(f"[{label}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Location-Specific Social Searches ────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("LOCATION INDICATOR SEARCHES")
+    lines.append("=" * 50)
+    lines.append("")
+    location_searches = [
+        ("FB Check-ins NM",    f"https://www.facebook.com/search/places/?q={name_plus}+new+mexico"),
+        ("Twitter Near ABQ",   f"https://twitter.com/search?q=%22{name_plus}%22+near%3AAlbuquerque&f=live"),
+        ("Google Maps",        f"https://www.google.com/maps/search/{name_plus}"),
+        ("Nextdoor NM",        f"https://nextdoor.com/find-neighbors/"),
+        ("Yelp Reviews",       f"https://www.yelp.com/search?find_desc={name_plus}"),
+    ]
+    for label, url in location_searches:
+        lines.append(f"[{label}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Live DuckDuckGo check ─────────────────────────────────────────────────
+    try:
+        ddg_out, _, _ = run_cmd(
+            f"curl -s 'https://api.duckduckgo.com/?q={name_plus}+social+media&format=json&no_html=1' 2>/dev/null",
+            timeout=10
+        )
+        ddg_data = json.loads(ddg_out)
+        if ddg_data.get("Abstract"):
+            lines.append("=" * 50)
+            lines.append("PUBLIC PROFILE SUMMARY")
+            lines.append("=" * 50)
+            lines.append("")
+            lines.append(ddg_data["Abstract"])
+            if ddg_data.get("AbstractURL"):
+                lines.append(f"Source: {ddg_data['AbstractURL']}")
+            lines.append("")
+    except:
+        pass
+
+    result = "\n".join(lines)
+    emit(job_id, "module_done", {"module": "social_media", "result": result})
+    return result
+
 def module_email_investigate(target, job_id):
     emit(job_id, "module_start", {"module": "email_investigate"})
     lines = []
@@ -692,6 +873,7 @@ def module_google_dorks(target, job_id):
 # ── Module registry ───────────────────────────────────────────────────────────
 MODULE_MAP = {
     "people":       module_people_search,
+    "social_media":  module_social_media,
     "email_investigate": module_email_investigate,
     "phone":        module_phone,
     "whois":        module_whois,
