@@ -205,7 +205,7 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
           <div class="empty-icon">◎</div>
           <div class="empty-title">AWAITING TARGET</div>
           <div class="empty-sub">All modules run in parallel — WHOIS, DNS, Nmap, theHarvester, Sherlock, Shodan, Subdomains, GeoIP, VirusTotal, EmailRep, HIBP, Metadata & Google Dorks.</div>
-          <div class="backend-cfg">
+          <div class="backend-cfg" id="backendCfg">
             <div class="cfg-label">BACKEND URL (your Replit URL)</div>
             <div class="cfg-row">
               <input id="backendUrl" type="text" placeholder="https://YOUR-REPLIT-URL.replit.app"/>
@@ -239,7 +239,7 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
 
 <script>
 // ── Config ────────────────────────────────────────────────────────────────────
-let BACKEND = localStorage.getItem('sentinel_backend') || '';
+let BACKEND = 'https://sentinel-osint-ui.onrender.com'; // HARDCODED - admin only
 let targetType = 'DOMAIN';
 let activeModIds = new Set();
 let running = false;
@@ -252,6 +252,7 @@ const TARGET_TYPES = ['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE
 const ALL_MODULES = [
   { id:'people',       name:'People Search',       tag:'PEOP',  types:['PERSON'] },
   { id:'phone',        name:'Phone Lookup',         tag:'PHONE', types:['PHONE'] },
+  { id:'email_investigate', name:'Email Investigation', tag:'EMAIL', types:['EMAIL'] },
   { id:'whois',        name:'WHOIS Lookup',        tag:'WHOIS', types:['DOMAIN','IP'] },
   { id:'dns',          name:'DNS Records',          tag:'DNS',   types:['DOMAIN'] },
   { id:'subdomains',   name:'Subdomain Enum',       tag:'SUBS',  types:['DOMAIN'] },
@@ -278,6 +279,9 @@ function init() {
     document.getElementById('clock').textContent = new Date().toLocaleTimeString();
   }, 1000);
   if (BACKEND) testBackend(true);
+  // Hide admin-only elements for regular users
+  const cfg = document.getElementById('backendCfg');
+  if (cfg) cfg.style.display = isAdmin ? 'block' : 'none';
 }
 
 function renderTypes() {
@@ -306,6 +310,7 @@ function renderModules() {
     el.dataset.id = mod.id;
     el.innerHTML = `<div class="mod-dot"></div><div class="mod-name">${mod.name}</div><div class="mod-tag">${mod.tag}</div>`;
     el.onclick = () => {
+      if (!isAdmin) return; // only admin can toggle modules
       if (activeModIds.has(mod.id)) activeModIds.delete(mod.id);
       else activeModIds.add(mod.id);
       el.classList.toggle('active');
@@ -494,7 +499,7 @@ function clearAll() {
       <div class="empty-icon">◎</div>
       <div class="empty-title">AWAITING TARGET</div>
       <div class="empty-sub">All modules run in parallel — WHOIS, DNS, Nmap, theHarvester, Sherlock, Shodan, Subdomains, GeoIP, VirusTotal, EmailRep, HIBP, Metadata & Google Dorks.</div>
-      <div class="backend-cfg">
+      <div class="backend-cfg" id="backendCfg">
         <div class="cfg-label">BACKEND URL (your Replit URL)</div>
         <div class="cfg-row">
           <input id="backendUrl" type="text" value="${BACKEND}" placeholder="https://YOUR-REPLIT-URL.replit.app"/>
@@ -555,12 +560,21 @@ document.getElementById('searchInput').addEventListener('keydown', e => {
 </script>
 <script>
 // ── Password Protection ───────────────────────────────────────────────────────
-const ACCESS_CODE = 'sentinel2026'; // CHANGE THIS TO YOUR PASSWORD
+const ACCESS_CODE = 'sentinel2026';   // INVESTIGATOR password
+const ADMIN_CODE  = 'adminsentinel26'; // ADMIN password - change this!
+let isAdmin = false;
+
 function checkPw() {
   const val = document.getElementById('pwInput').value;
-  if (val === ACCESS_CODE) {
+  if (val === ADMIN_CODE) {
+    isAdmin = true;
     document.getElementById('lockscreen').style.display = 'none';
-    sessionStorage.setItem('sentinel_auth', '1');
+    sessionStorage.setItem('sentinel_auth', 'admin');
+    init();
+  } else if (val === ACCESS_CODE) {
+    isAdmin = false;
+    document.getElementById('lockscreen').style.display = 'none';
+    sessionStorage.setItem('sentinel_auth', 'user');
     init();
   } else {
     const err = document.getElementById('pwErr');
@@ -570,12 +584,11 @@ function checkPw() {
   }
 }
 // Check if already authenticated this session
-if (sessionStorage.getItem('sentinel_auth') === '1') {
-  document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('lockscreen').style.display = 'none';
-    init();
-  });
-}
+window.addEventListener('load', () => {
+  const auth = sessionStorage.getItem('sentinel_auth');
+  if (auth === 'admin') { isAdmin = true; document.getElementById('lockscreen').style.display = 'none'; init(); }
+  else if (auth === 'user') { isAdmin = false; document.getElementById('lockscreen').style.display = 'none'; init(); }
+});
 </script>
 </body>
 </html>
