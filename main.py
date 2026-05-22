@@ -365,6 +365,126 @@ def module_phone(target, job_id):
 
 
 
+
+def module_plate_lookup(target, job_id):
+    emit(job_id, "module_start", {"module": "plate_lookup"})
+    
+    # Clean and parse plate
+    plate = target.upper().strip().replace(" ", "").replace("-", "")
+    
+    lines = []
+    lines.append(f"TARGET PLATE: {plate}")
+    lines.append(f"NOTE: Vehicle record access requires permissible purpose under DPPA.")
+    lines.append(f"Law firms qualify for litigation, process serving, and investigations.")
+    lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("COMMERCIAL DATABASE LOOKUPS")
+    lines.append("=" * 50)
+    lines.append("")
+    
+    commercial = [
+        ("CLEAR (Thomson Reuters)", "https://clear.thomsonreuters.com/"),
+        ("TLO (TransUnion)",        "https://www.tlo.com/"),
+        ("IRB Search",              "https://www.irbsearch.com/"),
+        ("Tracers",                 "https://www.tracers.com/"),
+        ("NMVTIS (vehiclehistory)", "https://www.vehiclehistory.gov/"),
+        ("AutoCheck",               f"https://www.autocheck.com/vehiclehistory/search/go?stype=plate&plate={plate}&state=NM"),
+        ("VehicleHistory.com",      f"https://www.vehiclehistory.com/license-plate-search?plate={plate}&state=NM"),
+    ]
+    for name, url in commercial:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("NEW MEXICO SPECIFIC RESOURCES")
+    lines.append("=" * 50)
+    lines.append("")
+    
+    nm_resources = [
+        ("NM MVD Records Request",     "https://www.mvd.newmexico.gov/"),
+        ("NM Courts - Vehicle Cases",  "https://caselookup.nmcourts.gov/caselookup/app"),
+        ("NM Public Records Request",  "https://www.nmag.gov/public-records-requests.aspx"),
+        ("NM Taxation & Revenue MVD",  "https://www.mvd.newmexico.gov/"),
+    ]
+    for name, url in nm_resources:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("FREE PUBLIC VEHICLE RESOURCES")
+    lines.append("=" * 50)
+    lines.append("")
+
+    free_resources = [
+        ("VINCheck (NICB stolen)",     f"https://www.nicb.org/vincheck"),
+        ("NHTSA VIN Decoder",          f"https://vpic.nhtsa.dot.gov/decoder/"),
+        ("NMVTIS Vehicle History",     f"https://www.vehiclehistory.gov/"),
+        ("RecallsByVIN",               f"https://www.nhtsa.gov/recalls"),
+        ("Plate Search (freecarvin)",  f"https://www.freecarvin.com/"),
+        ("VehicleHistory",             f"https://www.vehiclehistory.com/license-plate-search?plate={plate}&state=NM"),
+    ]
+    for name, url in free_resources:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("GOOGLE DORKS FOR PLATE")
+    lines.append("=" * 50)
+    lines.append("")
+
+    dorks = [
+        f'"{plate}" New Mexico vehicle',
+        f'"{plate}" NM license plate',
+        f'"{plate}" site:facebook.com',
+        f'"{plate}" site:instagram.com',
+        f'"{plate}" accident OR crash OR incident',
+        f'"{plate}" arrest OR citation OR ticket',
+    ]
+    for dork in dorks:
+        encoded = dork.replace(" ", "+").replace('"', '%22')
+        lines.append(f"  {dork}")
+        lines.append(f"  https://www.google.com/search?q={encoded}")
+        lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("SOCIAL MEDIA PLATE SEARCH")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("People sometimes post photos showing their plates on social media.")
+    lines.append("")
+    
+    social = [
+        ("Facebook",   f"https://www.facebook.com/search/posts/?q={plate}"),
+        ("Instagram",  f"https://www.instagram.com/explore/search/keyword/?q={plate}"),
+        ("Twitter/X",  f"https://twitter.com/search?q=%22{plate}%22&f=live"),
+        ("Reddit",     f"https://www.reddit.com/search/?q=%22{plate}%22"),
+    ]
+    for name, url in social:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("DPPA PERMISSIBLE PURPOSES (Law Firm)")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("Your firm qualifies under DPPA for:")
+    lines.append("  • Use in litigation or investigation in anticipation of litigation")
+    lines.append("  • Service of process")
+    lines.append("  • Research by licensed private investigators")
+    lines.append("  • Insurance claims investigation")
+    lines.append("  • Locating missing persons or witnesses")
+    lines.append("")
+    lines.append("When requesting records, cite: 18 U.S.C. § 2721(b)")
+
+    result = "\n".join(lines)
+    emit(job_id, "module_done", {"module": "plate_lookup", "result": result})
+    return result
+
 def module_image_metadata(target, job_id):
     """
     Image metadata extraction - target should be a URL to an image
@@ -1027,6 +1147,7 @@ def module_google_dorks(target, job_id):
 MODULE_MAP = {
     "people":       module_people_search,
     "social_media":  module_social_media,
+    "plate_lookup":   module_plate_lookup,
     "image_metadata": module_image_metadata,
     "email_investigate": module_email_investigate,
     "phone":        module_phone,
