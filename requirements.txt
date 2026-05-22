@@ -3,4 +3,4 @@ flask-cors==4.0.1
 requests==2.32.3
 gunicorn==21.2.0
 sherlock-project==0.15.0
-holehe==1.4.4
+holehe==1.61
