@@ -1,1113 +1,596 @@
-"""
-SENTINEL OSINT Agent - Backend Server
-Runs on Render.com (Python 3.10+)
-"""
-
-from flask import Flask, request, jsonify, Response
-from flask_cors import CORS
-import subprocess, threading, json, os, time, queue, socket
-from datetime import datetime
-
-app = Flask(__name__)
-CORS(app)
-
-jobs = {}
-
-def new_job(job_id):
-    jobs[job_id] = {
-        "status": "running",
-        "started": datetime.utcnow().isoformat(),
-        "results": {},
-        "events": queue.Queue(),
-    }
-
-def emit(job_id, event_type, data):
-    if job_id in jobs:
-        jobs[job_id]["events"].put({"type": event_type, "data": data})
-
-def run_cmd(cmd, timeout=60):
-    try:
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-        return r.stdout.strip(), r.stderr.strip(), r.returncode
-    except subprocess.TimeoutExpired:
-        return "", "Timed out", 1
-    except Exception as e:
-        return "", str(e), 1
-
-def tool_available(name):
-    out, _, rc = run_cmd(f"which {name}")
-    return rc == 0
-
-# ── Modules ───────────────────────────────────────────────────────────────────
-
-def module_people_search(target, job_id):
-    emit(job_id, "module_start", {"module": "people"})
-
-    if "," in target:
-        name_part = target.split(",")[0].strip()
-        location_part = target.split(",")[1].strip()
-    else:
-        parts = target.split()
-        name_part = " ".join(parts[:2]) if len(parts) >= 2 else target
-        location_part = " ".join(parts[2:]) if len(parts) > 2 else ""
-
-    wp_first = name_part.split()[0] if name_part else ""
-    wp_last = name_part.split()[-1] if len(name_part.split()) > 1 else ""
-    wp_city = location_part.split()[0] if location_part else ""
-    wp_state = location_part.split()[-1] if location_part else ""
-    name_plus = name_part.replace(" ", "+")
-    loc_plus = location_part.replace(" ", "+")
-    name_url = name_part.replace(" ", "-").lower()
-
-    lines = []
-    lines.append(f"TARGET:   {name_part}")
-    if location_part:
-        lines.append(f"LOCATION: {location_part}")
-    lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("PEOPLE FINDER SITES")
-    lines.append("=" * 50)
-    lines.append("")
-
-    sites = [
-        ("TRUEPEOPLESEARCH", f"https://www.truepeoplesearch.com/results?name={name_plus}&citystatezip={loc_plus}"),
-        ("FASTPEOPLESEARCH", f"https://www.fastpeoplesearch.com/name/{name_url}"),
-        ("WHITEPAGES",       f"https://www.whitepages.com/name/{wp_first}-{wp_last}/{wp_city}-{wp_state}"),
-        ("SPOKEO",           f"https://www.spokeo.com/{name_part.replace(' ','-')}"),
-        ("BEENVERIFIED",     f"https://www.beenverified.com/people/{name_url}/"),
-        ("INTELIUS",         f"https://intelius.com/people-search/results/?firstName={wp_first}&lastName={wp_last}&city={wp_city}&state={wp_state}"),
-        ("PEOPLEFINDERS",    f"https://www.peoplefinders.com/people/{name_url}"),
-        ("USPHONEBOOK",      f"https://www.usphonebook.com/{name_part.replace(' ','-')}"),
-        ("411.COM",          f"https://www.411.com/name/{wp_first}-{wp_last}/{wp_city}-{wp_state}"),
-        ("PEOPLELOOKER",     f"https://www.peoplelooker.com/results/people?firstName={wp_first}&lastName={wp_last}&city={wp_city}&state={wp_state}"),
-        ("RADARIS",          f"https://radaris.com/p/{wp_first}-{wp_last}/"),
-        ("MYLIFE",           f"https://www.mylife.com/people-search/searchPeople.pubview?firstName={wp_first}&lastName={wp_last}&city={wp_city}&state={wp_state}"),
-        ("VOTERRECORDS",     f"https://voterrecords.com/voters/{name_url}/1"),
-        ("CHECKPEOPLE",      f"https://checkpeople.com/search?firstName={wp_first}&lastName={wp_last}&state={wp_state}"),
-        ("CLUBSET",          f"https://www.clubset.com/profile/name/{wp_first}+{wp_last}"),
-    ]
-
-    for name, url in sites:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("SOCIAL MEDIA")
-    lines.append("=" * 50)
-    lines.append("")
-
-    social = [
-        ("LinkedIn",  f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
-        ("Facebook",  f"https://www.facebook.com/search/people/?q={name_plus}"),
-        ("Twitter/X", f"https://twitter.com/search?q=%22{name_plus}%22&f=user"),
-        ("Instagram", f"https://www.instagram.com/explore/search/keyword/?q={name_plus}"),
-        ("TikTok",    f"https://www.tiktok.com/search?q={name_plus}"),
-        ("YouTube",   f"https://www.youtube.com/results?search_query={name_plus}"),
-        ("Reddit",    f"https://www.reddit.com/search/?q=%22{name_part}%22&type=user"),
-    ]
-    for platform, url in social:
-        lines.append(f"[{platform}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("COURT & PUBLIC RECORDS")
-    lines.append("=" * 50)
-    lines.append("")
-
-    courts = [
-        ("PACER Federal Courts",    "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
-        ("OpenSanctions Watchlist", f"https://www.opensanctions.org/search/?q={name_plus}"),
-        ("NM Courts (CourtLook)",   f"https://caselookup.nmcourts.gov/caselookup/app"),
-        ("VINE Offender Search",    f"https://vinelink.vineapps.com/search/NM/Person"),
-    ]
-    for name, url in courts:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("GOOGLE DORKS")
-    lines.append("=" * 50)
-    lines.append("")
-
-    dorks = [
-        f'"{name_part}" "{location_part}"',
-        f'"{name_part}" address phone',
-        f'"{name_part}" site:whitepages.com',
-        f'"{name_part}" site:spokeo.com',
-        f'"{name_part}" site:linkedin.com',
-        f'"{name_part}" arrest OR mugshot',
-        f'"{name_part}" court OR lawsuit OR case',
-        f'"{name_part}" resume OR CV',
-        f'"{name_part}" obituary',
-        f'"{name_part}" email OR contact',
-    ]
-    for dork in dorks:
-        encoded = dork.replace(" ", "+").replace('"', '%22')
-        lines.append(f"  {dork}")
-        lines.append(f"  https://www.google.com/search?q={encoded}")
-        lines.append("")
-
-    # Live sanctions check
-    try:
-        san_out, _, _ = run_cmd(
-            f"curl -s 'https://api.opensanctions.org/search/default?q={name_plus}&schema=Person' 2>/dev/null",
-            timeout=10
-        )
-        san_data = json.loads(san_out)
-        results = san_data.get("results", [])
-        lines.append("=" * 50)
-        lines.append("LIVE SANCTIONS / WATCHLIST CHECK")
-        lines.append("=" * 50)
-        lines.append("")
-        if results:
-            lines.append(f"⚠ WARNING: {len(results)} MATCH(ES) FOUND ON WATCHLISTS")
-            for r in results[:5]:
-                lines.append(f"  • {r.get('caption','?')} — {r.get('schema','?')} — Score: {r.get('score','?')}")
-        else:
-            lines.append("✓ No matches found on sanctions/watchlists")
-        lines.append("")
-    except:
-        pass
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "people", "result": result})
-    return result
-
-def module_whois(target, job_id):
-    emit(job_id, "module_start", {"module": "whois"})
-    api_key = os.environ.get("WHOIS_API_KEY", "at_free")
-    try:
-        out, _, _ = run_cmd(
-            f"curl -s 'https://www.whoisxmlapi.com/whoisserver/WhoisService?apiKey={api_key}&domainName={target}&outputFormat=JSON' 2>/dev/null"
-        )
-        data = json.loads(out)
-        record = data.get("WhoisRecord", {})
-        registrant = record.get("registrant", {})
-        lines = [
-            f"Domain:      {record.get('domainName', target)}",
-            f"Registrar:   {record.get('registrarName', 'N/A')}",
-            f"Created:     {record.get('createdDate', 'N/A')}",
-            f"Expires:     {record.get('expiresDate', 'N/A')}",
-            f"Updated:     {record.get('updatedDate', 'N/A')}",
-            f"Status:      {record.get('status', 'N/A')}",
-            f"Registrant:  {registrant.get('organization', registrant.get('name', 'N/A'))}",
-            f"Country:     {registrant.get('country', 'N/A')}",
-        ]
-        nameservers = record.get("nameServers", {}).get("hostNames", [])
-        if nameservers:
-            lines.append(f"Nameservers: {', '.join(nameservers[:4])}")
-        result = "\n".join(lines)
-    except:
-        out, err, _ = run_cmd(f"whois {target} 2>/dev/null | head -40")
-        result = out if out else f"WHOIS lookup failed for {target}"
-    emit(job_id, "module_done", {"module": "whois", "result": result})
-    return result
-
-def module_dns(target, job_id):
-    emit(job_id, "module_start", {"module": "dns"})
-    lines = []
-    for rtype in ["A", "AAAA", "MX", "NS", "TXT", "CNAME"]:
-        out, _, _ = run_cmd(f"dig +short {rtype} {target} 2>/dev/null")
-        if out:
-            lines.append(f"[{rtype}] {out}")
-    result = "\n".join(lines) if lines else "No DNS records found."
-    emit(job_id, "module_done", {"module": "dns", "result": result})
-    return result
-
-def module_nmap(target, job_id):
-    emit(job_id, "module_start", {"module": "nmap"})
-    common_ports = {
-        21: "FTP", 22: "SSH", 23: "Telnet", 25: "SMTP", 53: "DNS",
-        80: "HTTP", 110: "POP3", 143: "IMAP", 443: "HTTPS", 445: "SMB",
-        3306: "MySQL", 3389: "RDP", 5432: "PostgreSQL", 6379: "Redis",
-        8080: "HTTP-Alt", 8443: "HTTPS-Alt", 27017: "MongoDB"
-    }
-    try:
-        ip = socket.gethostbyname(target)
-        open_ports = []
-        for port, service in common_ports.items():
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(1)
-                if sock.connect_ex((ip, port)) == 0:
-                    open_ports.append(f"  {port}/tcp  OPEN  {service}")
-                sock.close()
-            except:
-                pass
-        result = f"Host: {target} ({ip})\n\n" + ("\n".join(open_ports) if open_ports else "No common ports open.")
-    except Exception as e:
-        result = f"Port scan failed: {str(e)}"
-    emit(job_id, "module_done", {"module": "nmap", "result": result})
-    return result
-
-def module_phone(target, job_id):
-    emit(job_id, "module_start", {"module": "phone"})
-    # Clean phone number - remove formatting
-    clean = target.replace("-","").replace("(","").replace(")","").replace(" ","").replace("+1","").strip()
-    formatted = f"({clean[:3]}) {clean[3:6]}-{clean[6:]}" if len(clean) == 10 else target
-    phone_plus1 = f"+1{clean}" if len(clean) == 10 else target
-
-    lines = []
-    lines.append(f"TARGET:    {formatted}")
-    lines.append(f"CLEANED:   {clean}")
-    lines.append("")
-
-    # Live carrier/spam lookup via IPQualityScore (free, no key needed for basic)
-    try:
-        out, _, _ = run_cmd(
-            f"curl -s 'https://www.ipqualityscore.com/api/json/phone/YOUR_KEY/{clean}' 2>/dev/null",
-            timeout=10
-        )
-        # Even without API key, try numverify free tier
-        nv_out, _, _ = run_cmd(
-            f"curl -s 'http://apilayer.net/api/validate?access_key=free&number={clean}&country_code=US&format=1' 2>/dev/null",
-            timeout=10
-        )
-        try:
-            nv_data = json.loads(nv_out)
-            if nv_data.get("valid"):
-                lines.append("=== CARRIER INTELLIGENCE ===")
-                lines.append(f"Valid:        {nv_data.get('valid', 'N/A')}")
-                lines.append(f"Line Type:    {nv_data.get('line_type', 'N/A')}")
-                lines.append(f"Carrier:      {nv_data.get('carrier', 'N/A')}")
-                lines.append(f"Location:     {nv_data.get('location', 'N/A')}")
-                lines.append(f"Country:      {nv_data.get('country_name', 'N/A')}")
-                lines.append("")
-        except:
-            pass
-    except:
-        pass
-
-    lines.append("=" * 50)
-    lines.append("REVERSE LOOKUP SITES — CLICK TO SEARCH")
-    lines.append("=" * 50)
-    lines.append("")
-
-    sites = [
-        ("TRUEPEOPLESEARCH", f"https://www.truepeoplesearch.com/results?phoneno={clean}"),
-        ("WHITEPAGES",       f"https://www.whitepages.com/phone/{formatted.replace(' ','-').replace('(','').replace(')','').replace(' ','-')}"),
-        ("SPOKEO",           f"https://www.spokeo.com/phone-search/{clean}"),
-        ("BEENVERIFIED",     f"https://www.beenverified.com/phone/{clean}/"),
-        ("INTELIUS",         f"https://intelius.com/phone-lookup/{clean}/"),
-        ("PEOPLEFINDERS",    f"https://www.peoplefinders.com/phone/{clean}"),
-        ("USPHONEBOOK",      f"https://www.usphonebook.com/{clean}"),
-        ("411.COM",          f"https://www.411.com/phone/{clean}"),
-        ("CALLERMART",       f"https://www.callermart.com/phone/{clean}"),
-        ("ZLOOKUP",          f"https://www.zlookup.com/"),
-    ]
-    for name, url in sites:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("SPAM & REPORT DATABASES")
-    lines.append("=" * 50)
-    lines.append("")
-
-    spam_sites = [
-        ("800NOTES",      f"https://800notes.com/Phone.aspx/{clean}"),
-        ("CALLERCENTER",  f"https://callercenter.com/{clean}"),
-        ("WHOCALLEDUS",   f"https://whocalledus.com/calls/{clean}/"),
-        ("CALLERCOMMENTS",f"https://callercomments.com/calls/{clean}/"),
-        ("NOMOROBO",      f"https://www.nomorobo.com/lookup/{clean}"),
-        ("SPAMCALLS",     f"https://spamcalls.net/en/search?n={clean}"),
-    ]
-    for name, url in spam_sites:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("SOCIAL MEDIA PHONE SEARCH")
-    lines.append("=" * 50)
-    lines.append("")
-
-    social = [
-        ("Facebook",  f"https://www.facebook.com/search/people/?q={clean}"),
-        ("TrueCaller", f"https://www.truecaller.com/search/us/{clean}"),
-        ("Telegram",  f"https://t.me/+1{clean}"),
-    ]
-    for name, url in social:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("GOOGLE DORKS")
-    lines.append("=" * 50)
-    lines.append("")
-
-    dorks = [
-        f'"{formatted}"',
-        f'"{clean}"',
-        f'"{phone_plus1}"',
-        f'"{formatted}" name address',
-        f'"{clean}" site:facebook.com',
-        f'"{clean}" site:linkedin.com',
-        f'"{formatted}" site:whitepages.com',
-        f'"{clean}" spam OR scam OR fraud',
-    ]
-    for dork in dorks:
-        encoded = dork.replace(" ", "+").replace('"', '%22')
-        lines.append(f"  {dork}")
-        lines.append(f"  https://www.google.com/search?q={encoded}")
-        lines.append("")
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "phone", "result": result})
-    return result
-
-
-
-
-def module_image_metadata(target, job_id):
-    """
-    Image metadata extraction - target should be a URL to an image
-    or the module is triggered with image data from frontend
-    """
-    emit(job_id, "module_start", {"module": "image_metadata"})
-    lines = []
-    lines.append(f"TARGET: {target}")
-    lines.append("")
-
-    # Try to fetch and analyze image from URL
-    if target.startswith("http"):
-        try:
-            # Download image to temp file
-            out, err, rc = run_cmd(
-                f"curl -s -L -o /tmp/sentinel_img.jpg '{target}' 2>/dev/null",
-                timeout=15
-            )
-            
-            # Extract EXIF with exiftool if available
-            exif_out, _, rc = run_cmd("exiftool /tmp/sentinel_img.jpg 2>/dev/null", timeout=10)
-            
-            if exif_out and rc == 0:
-                lines.append("=" * 50)
-                lines.append("EXIF METADATA EXTRACTED")
-                lines.append("=" * 50)
-                lines.append("")
-                
-                # Parse key fields
-                important_fields = [
-                    "GPS Latitude", "GPS Longitude", "GPS Position",
-                    "GPS Altitude", "GPS Date/Time",
-                    "Create Date", "Date/Time Original", "Modify Date",
-                    "Make", "Camera Model Name", "Software",
-                    "Image Width", "Image Height",
-                    "File Name", "File Size", "File Type",
-                    "Author", "Copyright", "Artist",
-                    "City", "State", "Country", "Location",
-                    "Subject", "Description", "Comment",
-                    "Serial Number", "Lens ID",
-                ]
-                
-                found_gps = False
-                gps_lat = ""
-                gps_lon = ""
-                
-                for line in exif_out.split("\n"):
-                    for field in important_fields:
-                        if field.lower() in line.lower():
-                            lines.append(f"  {line.strip()}")
-                            if "GPS Latitude" in line and "Ref" not in line:
-                                gps_lat = line.split(":")[-1].strip()
-                                found_gps = True
-                            if "GPS Longitude" in line and "Ref" not in line:
-                                gps_lon = line.split(":")[-1].strip()
-                
-                lines.append("")
-                
-                if found_gps and gps_lat and gps_lon:
-                    lines.append("=" * 50)
-                    lines.append("⚠ GPS COORDINATES FOUND!")
-                    lines.append("=" * 50)
-                    lines.append("")
-                    lines.append(f"Latitude:  {gps_lat}")
-                    lines.append(f"Longitude: {gps_lon}")
-                    lines.append("")
-                    lines.append("View on maps:")
-                    lines.append(f"  Google Maps: https://www.google.com/maps?q={gps_lat},{gps_lon}")
-                    lines.append(f"  Google Street View: https://www.google.com/maps?q=&layer=c&cbll={gps_lat},{gps_lon}")
-                    lines.append("")
-            else:
-                # Try strings command to extract any text metadata
-                str_out, _, _ = run_cmd("strings /tmp/sentinel_img.jpg | grep -i 'gps\|location\|date\|camera\|make\|model' 2>/dev/null | head -20")
-                if str_out:
-                    lines.append("=" * 50)
-                    lines.append("TEXT STRINGS FOUND IN IMAGE")
-                    lines.append("=" * 50)
-                    lines.append(str_out)
-                    lines.append("")
-                else:
-                    lines.append("No metadata found in image.")
-                    lines.append("The image may have had metadata stripped.")
-                    lines.append("")
-                    
-        except Exception as e:
-            lines.append(f"Image fetch failed: {str(e)}")
-            lines.append("")
-    
-    # Always provide manual analysis tools
-    lines.append("=" * 50)
-    lines.append("MANUAL IMAGE ANALYSIS TOOLS")
-    lines.append("=" * 50)
-    lines.append("")
-    
-    manual_tools = [
-        ("Jeffrey EXIF Viewer",     "http://exif.regex.info/exif.cgi"),
-        ("ExifTool Online",         "https://exiftool.org/"),
-        ("Metadata2Go",             "https://www.metadata2go.com/"),
-        ("Google Reverse Image",    f"https://images.google.com/searchbyimage?image_url={target}" if target.startswith("http") else "https://images.google.com/"),
-        ("TinEye Reverse Image",    f"https://tineye.com/search?url={target}" if target.startswith("http") else "https://tineye.com/"),
-        ("Yandex Reverse Image",    f"https://yandex.com/images/search?url={target}&rpt=imageview" if target.startswith("http") else "https://yandex.com/images/"),
-        ("Bing Visual Search",      "https://www.bing.com/images/search?view=detailv2&iss=sbi"),
-        ("FotoForensics",           f"https://fotoforensics.com/analysis.php?id=" ),
-        ("InVID/WeVerify",          "https://www.invid-project.eu/tools-and-services/invid-verification-plugin/"),
-    ]
-    for name, url in manual_tools:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("REVERSE IMAGE SEARCH LINKS")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("To find where else this image appears online:")
-    lines.append("")
-    
-    if target.startswith("http"):
-        rev_searches = [
-            ("Google Images",   f"https://images.google.com/searchbyimage?image_url={target}"),
-            ("TinEye",          f"https://tineye.com/search?url={target}"),
-            ("Yandex",          f"https://yandex.com/images/search?url={target}&rpt=imageview"),
-        ]
-        for name, url in rev_searches:
-            lines.append(f"[{name}]")
-            lines.append(f"  {url}")
-            lines.append("")
-    else:
-        lines.append("Paste an image URL in the search box to enable reverse image search links.")
-        lines.append("")
-        lines.append("Or drag and drop an image at:")
-        lines.append("  https://images.google.com/")
-        lines.append("  https://tineye.com/")
-        lines.append("  https://yandex.com/images/")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("HOW TO USE FOR FACEBOOK PHOTOS")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("1. Right-click any Facebook photo")
-    lines.append("2. Select 'Copy image address'")
-    lines.append("3. Paste the URL as your target and re-investigate")
-    lines.append("4. OR download the photo and upload to Jeffrey EXIF Viewer")
-    lines.append("")
-    lines.append("Note: Facebook strips GPS from uploaded photos")
-    lines.append("but timestamps and device info often remain.")
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "image_metadata", "result": result})
-    return result
-
-def module_social_media(target, job_id):
-    emit(job_id, "module_start", {"module": "social_media"})
-    
-    name_plus = target.replace(" ", "+").replace(",", "")
-    name_quoted = target.replace(",", "").strip()
-    parts = name_quoted.split()
-    first = parts[0] if parts else target
-    last = parts[-1] if len(parts) > 1 else ""
-    
-    lines = []
-    lines.append(f"TARGET: {name_quoted}")
-    lines.append("")
-
-    # ── Facebook ─────────────────────────────────────────────────────────────
-    lines.append("=" * 50)
-    lines.append("FACEBOOK INTELLIGENCE")
-    lines.append("=" * 50)
-    lines.append("")
-    fb_searches = [
-        ("People Search",      f"https://www.facebook.com/search/people/?q={name_plus}"),
-        ("Posts mentioning",   f"https://www.facebook.com/search/posts/?q={name_plus}"),
-        ("Photos tagged",      f"https://www.facebook.com/search/photos/?q={name_plus}"),
-        ("Check-ins",          f"https://www.facebook.com/search/places/?q={name_plus}"),
-        ("Groups",             f"https://www.facebook.com/search/groups/?q={name_plus}"),
-        ("Events",             f"https://www.facebook.com/search/events/?q={name_plus}"),
-        ("Marketplace",        f"https://www.facebook.com/marketplace/search/?query={name_plus}"),
-    ]
-    for label, url in fb_searches:
-        lines.append(f"[{label}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    # ── Instagram ─────────────────────────────────────────────────────────────
-    lines.append("=" * 50)
-    lines.append("INSTAGRAM INTELLIGENCE")
-    lines.append("=" * 50)
-    lines.append("")
-    ig_searches = [
-        ("Profile Search",     f"https://www.instagram.com/explore/search/keyword/?q={name_plus}"),
-        ("Hashtag Search",     f"https://www.instagram.com/explore/tags/{name_plus.replace('+','')}/"),
-        ("Google IG Search",   f"https://www.google.com/search?q=site:instagram.com+%22{name_plus}%22"),
-    ]
-    for label, url in ig_searches:
-        lines.append(f"[{label}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    # ── Twitter/X ─────────────────────────────────────────────────────────────
-    lines.append("=" * 50)
-    lines.append("TWITTER/X INTELLIGENCE")
-    lines.append("=" * 50)
-    lines.append("")
-    tw_searches = [
-        ("People Search",      f"https://twitter.com/search?q=%22{name_plus}%22&f=user"),
-        ("Recent Posts",       f"https://twitter.com/search?q=%22{name_plus}%22&f=live"),
-        ("Top Posts",          f"https://twitter.com/search?q=%22{name_plus}%22&f=top"),
-        ("With Location",      f"https://twitter.com/search?q=%22{name_plus}%22+near%3A%22Albuquerque%22"),
-    ]
-    for label, url in tw_searches:
-        lines.append(f"[{label}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    # ── LinkedIn ──────────────────────────────────────────────────────────────
-    lines.append("=" * 50)
-    lines.append("LINKEDIN INTELLIGENCE")
-    lines.append("=" * 50)
-    lines.append("")
-    li_searches = [
-        ("People Search",      f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
-        ("Posts Search",       f"https://www.linkedin.com/search/results/content/?keywords={name_plus}"),
-        ("Google LI Search",   f"https://www.google.com/search?q=site:linkedin.com/in+%22{name_plus}%22"),
-    ]
-    for label, url in li_searches:
-        lines.append(f"[{label}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    # ── TikTok ────────────────────────────────────────────────────────────────
-    lines.append("=" * 50)
-    lines.append("TIKTOK INTELLIGENCE")
-    lines.append("=" * 50)
-    lines.append("")
-    tt_searches = [
-        ("User Search",        f"https://www.tiktok.com/search/user?q={name_plus}"),
-        ("Video Search",       f"https://www.tiktok.com/search?q={name_plus}"),
-        ("Google TT Search",   f"https://www.google.com/search?q=site:tiktok.com+%22{name_plus}%22"),
-    ]
-    for label, url in tt_searches:
-        lines.append(f"[{label}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    # ── YouTube ───────────────────────────────────────────────────────────────
-    lines.append("=" * 50)
-    lines.append("YOUTUBE INTELLIGENCE")
-    lines.append("=" * 50)
-    lines.append("")
-    yt_searches = [
-        ("Channel Search",     f"https://www.youtube.com/results?search_query={name_plus}&sp=EgIQAg%253D%253D"),
-        ("Video Search",       f"https://www.youtube.com/results?search_query={name_plus}"),
-    ]
-    for label, url in yt_searches:
-        lines.append(f"[{label}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    # ── Reddit ────────────────────────────────────────────────────────────────
-    lines.append("=" * 50)
-    lines.append("REDDIT INTELLIGENCE")
-    lines.append("=" * 50)
-    lines.append("")
-    rd_searches = [
-        ("User Search",        f"https://www.reddit.com/search/?q=%22{name_quoted}%22&type=user"),
-        ("Posts Search",       f"https://www.reddit.com/search/?q=%22{name_quoted}%22"),
-    ]
-    for label, url in rd_searches:
-        lines.append(f"[{label}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    # ── Snapchat ──────────────────────────────────────────────────────────────
-    lines.append("=" * 50)
-    lines.append("SNAPCHAT / OTHER PLATFORMS")
-    lines.append("=" * 50)
-    lines.append("")
-    other_searches = [
-        ("Snapchat",           f"https://www.snapchat.com/add/{first.lower()}{last.lower()}"),
-        ("Pinterest",          f"https://www.pinterest.com/search/people/?q={name_plus}"),
-        ("Tumblr",             f"https://www.tumblr.com/search/{name_plus}"),
-        ("Nextdoor",           f"https://nextdoor.com/find-neighbors/"),
-        ("Meetup",             f"https://www.meetup.com/find/?keywords={name_plus}"),
-        ("Venmo",              f"https://venmo.com/{first.lower()}{last.lower()}"),
-        ("Cash App",           f"https://cash.app/${first.lower()}{last.lower()}"),
-    ]
-    for label, url in other_searches:
-        lines.append(f"[{label}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    # ── Location-Specific Social Searches ────────────────────────────────────
-    lines.append("=" * 50)
-    lines.append("LOCATION INDICATOR SEARCHES")
-    lines.append("=" * 50)
-    lines.append("")
-    location_searches = [
-        ("FB Check-ins NM",    f"https://www.facebook.com/search/places/?q={name_plus}+new+mexico"),
-        ("Twitter Near ABQ",   f"https://twitter.com/search?q=%22{name_plus}%22+near%3AAlbuquerque&f=live"),
-        ("Google Maps",        f"https://www.google.com/maps/search/{name_plus}"),
-        ("Nextdoor NM",        f"https://nextdoor.com/find-neighbors/"),
-        ("Yelp Reviews",       f"https://www.yelp.com/search?find_desc={name_plus}"),
-    ]
-    for label, url in location_searches:
-        lines.append(f"[{label}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    # ── Live DuckDuckGo check ─────────────────────────────────────────────────
-    try:
-        ddg_out, _, _ = run_cmd(
-            f"curl -s 'https://api.duckduckgo.com/?q={name_plus}+social+media&format=json&no_html=1' 2>/dev/null",
-            timeout=10
-        )
-        ddg_data = json.loads(ddg_out)
-        if ddg_data.get("Abstract"):
-            lines.append("=" * 50)
-            lines.append("PUBLIC PROFILE SUMMARY")
-            lines.append("=" * 50)
-            lines.append("")
-            lines.append(ddg_data["Abstract"])
-            if ddg_data.get("AbstractURL"):
-                lines.append(f"Source: {ddg_data['AbstractURL']}")
-            lines.append("")
-    except:
-        pass
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "social_media", "result": result})
-    return result
-
-def module_email_investigate(target, job_id):
-    emit(job_id, "module_start", {"module": "email_investigate"})
-    lines = []
-    lines.append(f"TARGET EMAIL: {target}")
-    lines.append("")
-
-    # Run Holehe if installed
-    out, err, rc = run_cmd(f"python3 -m holehe {target} --only-used 2>/dev/null", timeout=120)
-    if out and "holehe" not in out.lower() and "error" not in out.lower():
-        lines.append("=" * 50)
-        lines.append("HOLEHE — ACCOUNT DETECTION (120+ SITES)")
-        lines.append("=" * 50)
-        lines.append("")
-        lines.append(out)
-        lines.append("")
-    
-    # EmailRep live check
-    try:
-        rep_out, _, _ = run_cmd(
-            f"curl -s 'https://emailrep.io/{target}' -H 'User-Agent: sentinel-osint' 2>/dev/null",
-            timeout=10
-        )
-        data = json.loads(rep_out)
-        details = data.get("details", {})
-        lines.append("=" * 50)
-        lines.append("EMAIL REPUTATION INTELLIGENCE")
-        lines.append("=" * 50)
-        lines.append("")
-        lines.append(f"Reputation:    {data.get('reputation', 'N/A')}")
-        lines.append(f"Suspicious:    {data.get('suspicious', False)}")
-        lines.append(f"Blacklisted:   {details.get('blacklisted', False)}")
-        lines.append(f"Data Breach:   {details.get('data_breach', False)}")
-        lines.append(f"Malicious:     {details.get('malicious_activity', False)}")
-        lines.append(f"Disposable:    {details.get('disposable', False)}")
-        lines.append(f"Free Provider: {details.get('free_provider', False)}")
-        lines.append(f"Profiles:      {', '.join(details.get('profiles', [])) or 'None detected'}")
-        lines.append(f"References:    {data.get('references', 0)}")
-        lines.append("")
-    except:
-        pass
-
-    # Extract domain from email for WHOIS
-    try:
-        domain = target.split("@")[1]
-        lines.append("=" * 50)
-        lines.append(f"EMAIL DOMAIN INTEL: {domain}")
-        lines.append("=" * 50)
-        lines.append("")
-        
-        # DNS for domain
-        dns_out, _, _ = run_cmd(f"dig +short A {domain} 2>/dev/null")
-        mx_out, _, _ = run_cmd(f"dig +short MX {domain} 2>/dev/null")
-        if dns_out:
-            lines.append(f"Domain IP:   {dns_out.split()[0] if dns_out else 'N/A'}")
-        if mx_out:
-            lines.append(f"Mail Server: {mx_out}")
-        lines.append("")
-    except:
-        pass
-
-    lines.append("=" * 50)
-    lines.append("DIRECT SEARCH LINKS")
-    lines.append("=" * 50)
-    lines.append("")
-
-    sites = [
-        ("TRUEPEOPLESEARCH", f"https://www.truepeoplesearch.com/results?emailaddress={target}"),
-        ("SPOKEO",           f"https://www.spokeo.com/email-search/{target}"),
-        ("BEENVERIFIED",     f"https://www.beenverified.com/email/{target}/"),
-        ("INTELIUS",         f"https://intelius.com/email-lookup/{target}/"),
-        ("EMAILREP",         f"https://emailrep.io/{target}"),
-        ("HUNTER.IO",        f"https://hunter.io/email-verifier/{target}"),
-        ("HAVEIBEENPWNED",   f"https://haveibeenpwned.com/account/{target}"),
-        ("DEHASHED",         f"https://www.dehashed.com/search?query={target}"),
-        ("EPIEOS",           f"https://epieos.com/?q={target}&t=email"),
-        ("GMAIL LOOKUP",     f"https://www.google.com/search?q=%22{target}%22"),
-    ]
-    for name, url in sites:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("SOCIAL MEDIA EMAIL SEARCH")
-    lines.append("=" * 50)
-    lines.append("")
-
-    social = [
-        ("Facebook",   f"https://www.facebook.com/search/people/?q={target}"),
-        ("LinkedIn",   f"https://www.linkedin.com/search/results/people/?keywords={target}"),
-        ("Twitter/X",  f"https://twitter.com/search?q={target}&f=user"),
-        ("Gravatar",   f"https://en.gravatar.com/{target}"),
-    ]
-    for name, url in social:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("GOOGLE DORKS")
-    lines.append("=" * 50)
-    lines.append("")
-
-    dorks = [
-        f'"{target}"',
-        f'"{target}" name address phone',
-        f'"{target}" site:linkedin.com',
-        f'"{target}" site:facebook.com',
-        f'"{target}" resume OR CV',
-        f'"{target}" site:pastebin.com',
-        f'"{target}" leaked OR breach OR hacked',
-    ]
-    for dork in dorks:
-        encoded = dork.replace(" ", "+").replace('"', '%22')
-        lines.append(f"  {dork}")
-        lines.append(f"  https://www.google.com/search?q={encoded}")
-        lines.append("")
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "email_investigate", "result": result})
-    return result
-
-def module_theharvester(target, job_id):
-    emit(job_id, "module_start", {"module": "theharvester"})
-    out, err, rc = run_cmd(
-        f"python3 -m theHarvester -d {target} -b google,bing,duckduckgo -l 50 2>/dev/null",
-        timeout=120
-    )
-    result = out if out else f"theHarvester: {err or 'No results'}"
-    emit(job_id, "module_done", {"module": "theharvester", "result": result})
-    return result
-
-def module_sherlock(target, job_id):
-    emit(job_id, "module_start", {"module": "sherlock"})
-    out, err, rc = run_cmd(
-        f"python3 -m sherlock {target} --timeout 8 2>/dev/null",
-        timeout=120
-    )
-    result = out if out else f"Sherlock: {err or 'No results'}"
-    emit(job_id, "module_done", {"module": "sherlock", "result": result})
-    return result
-
-def module_shodan(target, job_id):
-    emit(job_id, "module_start", {"module": "shodan"})
-    api_key = os.environ.get("SHODAN_API_KEY", "")
-    if not api_key:
-        result = "Add SHODAN_API_KEY to Render Environment Variables."
-    else:
-        try:
-            import urllib.request
-            ip = socket.gethostbyname(target)
-            url = f"https://api.shodan.io/shodan/host/{ip}?key={api_key}"
-            with urllib.request.urlopen(url, timeout=10) as r:
-                data = json.loads(r.read().decode())
-            if "error" in data:
-                result = f"Shodan: {data['error']}"
-            else:
-                ports = data.get("ports", [])
-                lines = [
-                    f"IP:      {ip}",
-                    f"Org:     {data.get('org', 'N/A')}",
-                    f"ISP:     {data.get('isp', 'N/A')}",
-                    f"Country: {data.get('country_name', 'N/A')}",
-                    f"City:    {data.get('city', 'N/A')}",
-                    f"Ports:   {', '.join(map(str, ports)) or 'None'}",
-                    f"Vulns:   {', '.join(data.get('vulns', {}).keys()) or 'None'}",
-                ]
-                result = "\n".join(lines)
-        except Exception as e:
-            result = f"Shodan: {str(e)}"
-    emit(job_id, "module_done", {"module": "shodan", "result": result})
-    return result
-
-def module_subdomains(target, job_id):
-    emit(job_id, "module_start", {"module": "subdomains"})
-    out, _, _ = run_cmd(
-        f"curl -s 'https://crt.sh/?q=%.{target}&output=json' 2>/dev/null | "
-        f"python3 -c \"import sys,json; data=json.load(sys.stdin); "
-        f"[print(e['name_value']) for e in data]\" 2>/dev/null | sort -u | head -40"
-    )
-    result = out if out else "No subdomains found via crt.sh."
-    emit(job_id, "module_done", {"module": "subdomains", "result": result})
-    return result
-
-def module_geoip(target, job_id):
-    emit(job_id, "module_start", {"module": "geoip"})
-    try:
-        ip = socket.gethostbyname(target)
-        out, _, _ = run_cmd(f"curl -s 'https://ipapi.co/{ip}/json/' 2>/dev/null")
-        data = json.loads(out)
-        lines = [
-            f"IP:       {data.get('ip', ip)}",
-            f"City:     {data.get('city', 'N/A')}",
-            f"Region:   {data.get('region', 'N/A')}",
-            f"Country:  {data.get('country_name', 'N/A')}",
-            f"Org/ISP:  {data.get('org', 'N/A')}",
-            f"Timezone: {data.get('timezone', 'N/A')}",
-            f"Lat/Lon:  {data.get('latitude', 'N/A')}, {data.get('longitude', 'N/A')}",
-        ]
-        result = "\n".join(lines)
-    except Exception as e:
-        result = f"GeoIP lookup failed: {str(e)}"
-    emit(job_id, "module_done", {"module": "geoip", "result": result})
-    return result
-
-def module_virustotal(target, job_id):
-    emit(job_id, "module_start", {"module": "virustotal"})
-    api_key = os.environ.get("VT_API_KEY", "")
-    if not api_key:
-        result = "Add VT_API_KEY to Render Environment Variables."
-    else:
-        out, _, _ = run_cmd(
-            f"curl -s --request GET "
-            f"--url 'https://www.virustotal.com/api/v3/domains/{target}' "
-            f"--header 'x-apikey: {api_key}' 2>/dev/null"
-        )
-        try:
-            data = json.loads(out)
-            attrs = data.get("data", {}).get("attributes", {})
-            stats = attrs.get("last_analysis_stats", {})
-            cats = attrs.get("categories", {})
-            result = (
-                f"Malicious:   {stats.get('malicious', 0)}\n"
-                f"Suspicious:  {stats.get('suspicious', 0)}\n"
-                f"Harmless:    {stats.get('harmless', 0)}\n"
-                f"Undetected:  {stats.get('undetected', 0)}\n"
-                f"Reputation:  {attrs.get('reputation', 'N/A')}\n"
-                f"Categories:  {', '.join(set(cats.values())) if cats else 'N/A'}"
-            )
-        except:
-            result = out[:500] if out else "VirusTotal lookup failed."
-    emit(job_id, "module_done", {"module": "virustotal", "result": result})
-    return result
-
-def module_emailrep(target, job_id):
-    emit(job_id, "module_start", {"module": "emailrep"})
-    out, _, _ = run_cmd(
-        f"curl -s 'https://emailrep.io/{target}' -H 'User-Agent: sentinel-osint' 2>/dev/null"
-    )
-    try:
-        data = json.loads(out)
-        details = data.get("details", {})
-        lines = [
-            f"Email:         {data.get('email', target)}",
-            f"Reputation:    {data.get('reputation', 'N/A')}",
-            f"Suspicious:    {data.get('suspicious', 'N/A')}",
-            f"References:    {data.get('references', 'N/A')}",
-            f"Blacklisted:   {details.get('blacklisted', False)}",
-            f"Data breach:   {details.get('data_breach', False)}",
-            f"Disposable:    {details.get('disposable', False)}",
-            f"Free provider: {details.get('free_provider', False)}",
-            f"Profiles:      {', '.join(details.get('profiles', [])) or 'None found'}",
-        ]
-        result = "\n".join(lines)
-    except:
-        result = out[:500] if out else "EmailRep lookup failed."
-    emit(job_id, "module_done", {"module": "emailrep", "result": result})
-    return result
-
-def module_haveibeenpwned(target, job_id):
-    emit(job_id, "module_start", {"module": "hibp"})
-    api_key = os.environ.get("HIBP_API_KEY", "")
-    if not api_key:
-        result = "Add HIBP_API_KEY to Render Environment Variables.\nKey at https://haveibeenpwned.com/API/Key"
-    else:
-        out, _, _ = run_cmd(
-            f"curl -s 'https://haveibeenpwned.com/api/v3/breachedaccount/{target}' "
-            f"-H 'hibp-api-key: {api_key}' -H 'User-Agent: sentinel-osint' 2>/dev/null"
-        )
-        try:
-            data = json.loads(out)
-            if isinstance(data, list):
-                result = f"Found in {len(data)} breach(es):\n"
-                result += "\n".join(f"  - {b.get('Name','?')} ({b.get('BreachDate','?')})" for b in data[:20])
-            else:
-                result = "No breaches found."
-        except:
-            result = "No breaches found or API error."
-    emit(job_id, "module_done", {"module": "hibp", "result": result})
-    return result
-
-def module_metadata(target, job_id):
-    emit(job_id, "module_start", {"module": "metadata"})
-    query = target.replace(" ", "+")
-    out, _, _ = run_cmd(
-        f"curl -s 'https://api.duckduckgo.com/?q={query}&format=json&no_html=1' 2>/dev/null"
-    )
-    try:
-        data = json.loads(out)
-        lines = []
-        if data.get("Abstract"):
-            lines.append(f"Summary: {data['Abstract']}")
-        if data.get("AbstractSource"):
-            lines.append(f"Source: {data['AbstractSource']} — {data.get('AbstractURL','')}")
-        for r in data.get("RelatedTopics", [])[:8]:
-            if isinstance(r, dict) and r.get("Text"):
-                lines.append(f"• {r['Text'][:120]}")
-        result = "\n".join(lines) if lines else "No public metadata found."
-    except:
-        result = "Metadata lookup failed."
-    emit(job_id, "module_done", {"module": "metadata", "result": result})
-    return result
-
-def module_google_dorks(target, job_id):
-    emit(job_id, "module_start", {"module": "dorks"})
-    dorks = [
-        f'site:linkedin.com "{target}"',
-        f'site:twitter.com "{target}"',
-        f'site:facebook.com "{target}"',
-        f'"{target}" filetype:pdf',
-        f'"{target}" inurl:cv OR inurl:resume',
-        f'"{target}" site:pastebin.com',
-        f'"{target}" site:github.com',
-        f'"{target}" site:reddit.com',
-        f'"{target}" site:instagram.com',
-        f'"{target}" site:youtube.com',
-    ]
-    result = "Google Dork Queries (copy into Google):\n\n"
-    result += "\n".join(f"  {d}" for d in dorks)
-    result += "\n\nDirect links:\n"
-    for d in dorks:
-        encoded = d.replace(" ", "+").replace('"', '%22')
-        result += f"  https://www.google.com/search?q={encoded}\n"
-    emit(job_id, "module_done", {"module": "dorks", "result": result})
-    return result
-
-# ── Module registry ───────────────────────────────────────────────────────────
-MODULE_MAP = {
-    "people":       module_people_search,
-    "social_media":  module_social_media,
-    "image_metadata": module_image_metadata,
-    "email_investigate": module_email_investigate,
-    "phone":        module_phone,
-    "whois":        module_whois,
-    "dns":          module_dns,
-    "subdomains":   module_subdomains,
-    "nmap":         module_nmap,
-    "geoip":        module_geoip,
-    "theharvester": module_theharvester,
-    "sherlock":     module_sherlock,
-    "shodan":       module_shodan,
-    "virustotal":   module_virustotal,
-    "emailrep":     module_emailrep,
-    "hibp":         module_haveibeenpwned,
-    "metadata":     module_metadata,
-    "dorks":        module_google_dorks,
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SENTINEL // OSINT Agent</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --bg:#060a0f;--panel:#0b1118;--border:#1a2a3a;
+  --accent:#00e5ff;--accent2:#ff6b35;--accent3:#39ff14;
+  --text:#c8d8e8;--dim:#4a6070;--danger:#ff3b3b;--warn:#ffb300;
+}
+body{background:var(--bg);color:var(--text);font-family:'Rajdhani',sans-serif;font-size:15px;min-height:100vh;}
+body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,229,255,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,255,0.025) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
+.app{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+
+/* Header */
+header{border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:14px;background:rgba(6,10,15,0.98);flex-shrink:0;}
+.logo{font-family:'Share Tech Mono',monospace;font-size:16px;color:var(--accent);letter-spacing:2px;display:flex;align-items:center;gap:9px;}
+.logo-ring{width:26px;height:26px;border:2px solid var(--accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;animation:glow 3s ease-in-out infinite;}
+@keyframes glow{0%,100%{box-shadow:0 0 4px var(--accent)}50%{box-shadow:0 0 18px var(--accent),0 0 36px rgba(0,229,255,0.15)}}
+.hdr-right{margin-left:auto;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);display:flex;gap:20px;align-items:center;}
+.dot-live{width:6px;height:6px;border-radius:50%;background:var(--accent3);display:inline-block;margin-right:5px;animation:blink 1.5s infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.2}}
+#backendStatus{font-size:9px;}
+
+/* Layout */
+.body{display:flex;flex:1;overflow:hidden;}
+
+/* Sidebar */
+aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display:flex;flex-direction:column;gap:16px;overflow-y:auto;flex-shrink:0;}
+.slabel{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--accent);letter-spacing:3px;text-transform:uppercase;margin-bottom:9px;display:flex;align-items:center;gap:8px;}
+.slabel::after{content:'';flex:1;height:1px;background:var(--border);}
+
+/* Target type btns */
+.type-wrap{display:flex;flex-wrap:wrap;gap:5px;}
+.tbtn{padding:4px 9px;border:1px solid var(--border);border-radius:2px;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;cursor:pointer;background:var(--panel);color:var(--dim);transition:all .15s;}
+.tbtn.active,.tbtn:hover{border-color:var(--accent2);color:var(--accent2);background:rgba(255,107,53,0.08);}
+
+/* Module list */
+.mod-item{display:flex;align-items:center;gap:8px;padding:7px 8px;border:1px solid var(--border);border-radius:3px;cursor:pointer;margin-bottom:5px;transition:all .15s;background:var(--panel);}
+.mod-item.active{border-color:rgba(0,229,255,0.3);background:rgba(0,229,255,0.04);}
+.mod-dot{width:7px;height:7px;border-radius:50%;background:var(--dim);flex-shrink:0;transition:background .15s;}
+.mod-item.active .mod-dot{background:var(--accent3);}
+.mod-name{flex:1;font-size:12px;font-weight:600;color:var(--text);}
+.mod-tag{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);}
+
+/* Stats */
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.stat-box{padding:10px 8px;border:1px solid var(--border);border-radius:3px;background:var(--panel);text-align:center;}
+.stat-num{font-family:'Share Tech Mono',monospace;font-size:20px;color:var(--accent);line-height:1;}
+.stat-lbl{font-size:9px;color:var(--dim);letter-spacing:1px;margin-top:3px;text-transform:uppercase;}
+
+/* Center */
+.center{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+
+/* Search */
+.search-area{padding:14px 18px;border-bottom:1px solid var(--border);flex-shrink:0;}
+.search-row{display:flex;gap:8px;}
+.input-wrap{flex:1;position:relative;}
+.input-wrap::before{content:'›';position:absolute;left:12px;top:50%;transform:translateY(-50%);font-family:'Share Tech Mono',monospace;color:var(--accent);font-size:18px;pointer-events:none;}
+#searchInput{width:100%;background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:11px 14px 11px 30px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:13px;outline:none;transition:border-color .2s;}
+#searchInput:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(0,229,255,0.08);}
+#searchInput::placeholder{color:#2a3a4a;}
+.run-btn{padding:11px 22px;background:var(--accent);color:var(--bg);border:none;border-radius:4px;font-family:'Share Tech Mono',monospace;font-size:12px;font-weight:bold;letter-spacing:2px;cursor:pointer;transition:all .2s;white-space:nowrap;}
+.run-btn:hover{background:#33eeff;box-shadow:0 0 20px rgba(0,229,255,0.35);}
+.run-btn:disabled{background:#0d1720;color:#2a3a4a;cursor:not-allowed;}
+.clr-btn{padding:11px 12px;background:transparent;border:1px solid var(--border);color:var(--dim);font-family:'Share Tech Mono',monospace;font-size:10px;cursor:pointer;border-radius:4px;transition:all .2s;}
+.clr-btn:hover{border-color:var(--danger);color:var(--danger);}
+
+/* Progress */
+.prog-area{padding:8px 18px 0;display:none;}
+.prog-area.show{display:block;}
+.prog-track{height:2px;background:var(--border);border-radius:2px;overflow:hidden;}
+.prog-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent3));border-radius:2px;transition:width .35s ease;width:0%;}
+.prog-lbl{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--dim);margin-top:4px;letter-spacing:1px;}
+
+/* Results */
+.results{flex:1;overflow-y:auto;padding:16px 18px;}
+.results::-webkit-scrollbar{width:4px;}
+.results::-webkit-scrollbar-track{background:var(--bg);}
+.results::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+
+/* Empty state */
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:14px;color:var(--dim);text-align:center;padding:40px 20px;}
+.empty-icon{font-size:48px;opacity:.2;}
+.empty-title{font-family:'Share Tech Mono',monospace;font-size:13px;letter-spacing:3px;}
+.empty-sub{font-size:13px;max-width:420px;line-height:1.65;opacity:.65;}
+.backend-cfg{margin-top:20px;padding:14px 18px;border:1px solid var(--border);border-radius:4px;background:var(--panel);max-width:440px;width:100%;text-align:left;}
+.cfg-label{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--accent);letter-spacing:2px;margin-bottom:8px;}
+.cfg-row{display:flex;gap:8px;}
+#backendUrl{flex:1;background:#060a0f;border:1px solid var(--border);border-radius:3px;padding:8px 10px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:11px;outline:none;}
+#backendUrl:focus{border-color:var(--accent);}
+.cfg-btn{padding:8px 14px;background:transparent;border:1px solid var(--accent);color:var(--accent);font-family:'Share Tech Mono',monospace;font-size:10px;cursor:pointer;border-radius:3px;letter-spacing:1px;}
+.cfg-btn:hover{background:rgba(0,229,255,0.08);}
+
+/* Cards */
+.card{border:1px solid var(--border);border-left:3px solid var(--border);border-radius:4px;background:var(--panel);margin-bottom:10px;overflow:hidden;animation:fadeUp .3s ease;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.card.running{border-left-color:var(--warn);}
+.card.done{border-left-color:var(--accent3);}
+.card.error{border-left-color:var(--danger);}
+.card-hdr{padding:9px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;background:rgba(0,0,0,0.2);user-select:none;}
+.card-hdr:hover{background:rgba(0,229,255,0.03);}
+.card-badge{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:2px;padding:2px 8px;border-radius:2px;background:rgba(0,229,255,0.1);color:var(--accent);border:1px solid rgba(0,229,255,0.2);}
+.card-title{flex:1;font-size:13px;font-weight:600;color:var(--text);}
+.card-status{font-family:'Share Tech Mono',monospace;font-size:10px;display:flex;align-items:center;gap:6px;}
+.card-status.running{color:var(--warn);}
+.card-status.done{color:var(--accent3);}
+.card-status.error{color:var(--danger);}
+.card-toggle{color:var(--dim);font-size:11px;transition:transform .2s;}
+.card-toggle.open{transform:rotate(180deg);}
+.card-body{padding:14px;border-top:1px solid var(--border);display:none;}
+.card-body.open{display:block;}
+.card-content{font-family:'Share Tech Mono',monospace;font-size:11px;color:#8ab0c8;line-height:1.75;white-space:pre-wrap;word-break:break-word;}
+
+/* Spinner */
+.spinner{display:inline-block;width:10px;height:10px;border:2px solid var(--border);border-top-color:var(--warn);border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Right panel */
+.right{width:185px;border-left:1px solid var(--border);padding:14px 12px;display:flex;flex-direction:column;gap:14px;flex-shrink:0;}
+.history-item{padding:6px 8px;border:1px solid var(--border);border-radius:3px;margin-bottom:4px;font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--dim);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:all .15s;}
+.history-item:hover{border-color:var(--accent);color:var(--accent);}
+.exp-btn{width:100%;padding:9px;background:transparent;border:1px solid var(--accent2);color:var(--accent2);font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:2px;cursor:pointer;border-radius:3px;transition:all .2s;}
+.exp-btn:hover{background:rgba(255,107,53,0.1);}
+.exp-btn:disabled{border-color:var(--border);color:var(--dim);cursor:not-allowed;}
+
+/* Scanline */
+.scanline{position:fixed;left:0;right:0;height:2px;background:linear-gradient(transparent,rgba(0,229,255,0.05),transparent);pointer-events:none;animation:scan 8s linear infinite;z-index:999;}
+@keyframes scan{0%{top:-2px}100%{top:100vh}}
+</style>
+</head>
+<body>
+<div id="lockscreen" style="position:fixed;inset:0;background:#060a0f;z-index:9999;display:flex;align-items:center;justify-content:center;background-image:linear-gradient(rgba(0,229,255,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,255,0.025) 1px,transparent 1px);background-size:40px 40px;">
+<div style="border:1px solid #1a2a3a;border-radius:6px;padding:36px 40px;background:#0b1118;display:flex;flex-direction:column;align-items:center;gap:18px;min-width:320px;max-width:360px;">
+  <div style="width:48px;height:48px;border:2px solid #00e5ff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;animation:glow 3s infinite;">&#9678;</div>
+  <div style="font-family:Share Tech Mono,monospace;font-size:16px;color:#00e5ff;letter-spacing:3px;text-align:center;">SENTINEL // OSINT</div>
+  <div style="font-family:Share Tech Mono,monospace;font-size:10px;color:#4a6070;letter-spacing:2px;text-align:center;">AUTHORIZED ACCESS ONLY</div>
+  <input id="pwInput" type="password" placeholder="ENTER ACCESS CODE"
+    style="width:100%;background:#060a0f;border:1px solid #1a2a3a;border-radius:4px;padding:12px 14px;color:#c8d8e8;font-family:Share Tech Mono,monospace;font-size:14px;outline:none;text-align:center;letter-spacing:4px;"
+    onkeydown="if(event.key==='Enter')checkPw()"/>
+  <button onclick="checkPw()" style="width:100%;padding:12px;background:#00e5ff;color:#060a0f;border:none;border-radius:4px;font-family:Share Tech Mono,monospace;font-size:13px;font-weight:bold;letter-spacing:2px;cursor:pointer;">AUTHENTICATE</button>
+  <div id="pwErr" style="font-family:Share Tech Mono,monospace;font-size:11px;color:#ff3b3b;letter-spacing:1px;display:none;">&#9888; ACCESS DENIED — INVALID CODE</div>
+</div>
+</div>
+<div class="scanline"></div>
+<div class="app">
+
+  <!-- Header -->
+  <header>
+    <div class="logo">
+      <div class="logo-ring">◎</div>
+      SENTINEL // OSINT AGENT
+    </div>
+    <div class="hdr-right">
+      <span><span class="dot-live"></span>LIVE</span>
+      <span id="backendStatus" style="color:var(--warn)">⬤ BACKEND: NOT CONNECTED</span>
+      <span id="clock"></span>
+    </div>
+  </header>
+
+  <div class="body">
+
+    <!-- Sidebar -->
+    <aside>
+      <div>
+        <div class="slabel">Target Type</div>
+        <div class="type-wrap" id="typeWrap"></div>
+      </div>
+      <div>
+        <div class="slabel">Modules</div>
+        <div id="modList"></div>
+      </div>
+      <div style="margin-top:auto;">
+        <div class="slabel">Stats</div>
+        <div class="stat-grid">
+          <div class="stat-box"><div class="stat-num" id="sQueries">0</div><div class="stat-lbl">Queries</div></div>
+          <div class="stat-box"><div class="stat-num" id="sMods">0</div><div class="stat-lbl">Modules</div></div>
+          <div class="stat-box"><div class="stat-num" id="sFindings">0</div><div class="stat-lbl">Findings</div></div>
+          <div class="stat-box"><div class="stat-num" id="sTime">—</div><div class="stat-lbl">Last Run</div></div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Center -->
+    <div class="center">
+      <div class="search-area">
+        <div class="search-row">
+          <div class="input-wrap">
+            <input id="searchInput" type="text" placeholder="Target: name, domain, IP, email, username, phone…"/>
+          </div>
+          <button class="run-btn" id="runBtn" onclick="runInvestigation()">▶ INVESTIGATE</button>
+          <button class="clr-btn" onclick="clearAll()">CLR</button>
+        </div>
+      </div>
+      <div class="prog-area" id="progArea">
+        <div class="prog-track"><div class="prog-fill" id="progFill"></div></div>
+        <div class="prog-lbl" id="progLbl">INITIALIZING…</div>
+      </div>
+      <div class="results" id="results">
+        <div class="empty" id="emptyState">
+          <div class="empty-icon">◎</div>
+          <div class="empty-title">AWAITING TARGET</div>
+          <div class="empty-sub">All modules run in parallel — WHOIS, DNS, Nmap, theHarvester, Sherlock, Shodan, Subdomains, GeoIP, VirusTotal, EmailRep, HIBP, Metadata & Google Dorks.</div>
+          <div class="backend-cfg" id="backendCfg">
+            <div class="cfg-label">BACKEND URL (your Replit URL)</div>
+            <div class="cfg-row">
+              <input id="backendUrl" type="text" placeholder="https://YOUR-REPLIT-URL.replit.app"/>
+              <button class="cfg-btn" onclick="testBackend()">TEST</button>
+            </div>
+            <div id="cfgMsg" style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);margin-top:8px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right panel -->
+    <div class="right">
+      <div>
+        <div class="slabel">History</div>
+        <div id="historyList"><div style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);">No searches yet</div></div>
+      </div>
+      <div style="margin-top:auto;display:flex;flex-direction:column;gap:8px;">
+        <button class="exp-btn" id="expBtn" onclick="exportReport()" disabled>⬇ EXPORT</button>
+        <div style="font-family:Share Tech Mono,monospace;font-size:9px;color:var(--dim);text-align:center;line-height:1.7;margin-top:4px;">
+          Parallel execution<br>
+          13 OSINT modules<br>
+          Real tool output<br>
+          Export to .txt
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────────────
+let BACKEND = 'https://sentinel-osint-ui.onrender.com'; // HARDCODED - admin only
+let targetType = 'DOMAIN';
+let activeModIds = new Set();
+let running = false;
+let allResults = {};
+let history = JSON.parse(localStorage.getItem('sentinel_history') || '[]');
+let stats = JSON.parse(localStorage.getItem('sentinel_stats') || '{"queries":0,"findings":0}');
+
+const TARGET_TYPES = ['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','LOCATION'];
+
+const ALL_MODULES = [
+  { id:'people',       name:'People Search',       tag:'PEOP',  types:['PERSON'] },
+  { id:'phone',        name:'Phone Lookup',         tag:'PHONE', types:['PHONE'] },
+  { id:'email_investigate', name:'Email Investigation', tag:'EMAIL', types:['EMAIL'] },
+  { id:'social_media',      name:'Social Media Search',  tag:'SOCL',  types:['PERSON','USERNAME'] },
+  { id:'image_metadata',    name:'Image Metadata',        tag:'IMG',   types:['DOMAIN','IP','PERSON','USERNAME'] },
+  { id:'whois',        name:'WHOIS Lookup',        tag:'WHOIS', types:['DOMAIN','IP'] },
+  { id:'dns',          name:'DNS Records',          tag:'DNS',   types:['DOMAIN'] },
+  { id:'subdomains',   name:'Subdomain Enum',       tag:'SUBS',  types:['DOMAIN'] },
+  { id:'nmap',         name:'Port Scan',            tag:'NMAP',  types:['DOMAIN','IP'] },
+  { id:'geoip',        name:'GeoIP Location',       tag:'GEO',   types:['IP','DOMAIN'] },
+  { id:'theharvester', name:'theHarvester',         tag:'HARV',  types:['DOMAIN','EMAIL','COMPANY'] },
+  { id:'sherlock',     name:'Sherlock (usernames)', tag:'SHRL',  types:['USERNAME','PERSON'] },
+  { id:'shodan',       name:'Shodan',               tag:'SHDN',  types:['IP','DOMAIN'] },
+  { id:'virustotal',   name:'VirusTotal',           tag:'VT',    types:['DOMAIN','IP','EMAIL'] },
+  { id:'emailrep',     name:'EmailRep',             tag:'EREP',  types:['EMAIL'] },
+  { id:'hibp',         name:'HaveIBeenPwned',       tag:'HIBP',  types:['EMAIL'] },
+  { id:'metadata',     name:'Public Metadata',      tag:'META',  always:true },
+  { id:'dorks',        name:'Google Dorks',         tag:'DORK',  always:true },
+];
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+function init() {
+  if (BACKEND) document.getElementById('backendUrl').value = BACKEND;
+  renderTypes();
+  renderModules();
+  renderHistory();
+  updateStats();
+  setInterval(() => {
+    document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+  }, 1000);
+  if (BACKEND) testBackend(true);
+  // Hide admin-only elements for regular users
+  const cfg = document.getElementById('backendCfg');
+  if (cfg) cfg.style.display = isAdmin ? 'block' : 'none';
 }
 
-def run_investigation(job_id, target, target_type, selected_modules):
-    try:
-        threads = []
-        for mod_id in selected_modules:
-            fn = MODULE_MAP.get(mod_id)
-            if fn:
-                t = threading.Thread(target=fn, args=(target, job_id), daemon=True)
-                threads.append(t)
-                t.start()
-        for t in threads:
-            t.join(timeout=130)
-        jobs[job_id]["status"] = "complete"
-        emit(job_id, "done", {"message": f"Complete: {target}"})
-    except Exception as e:
-        jobs[job_id]["status"] = "error"
-        emit(job_id, "error", {"message": str(e)})
+function renderTypes() {
+  const wrap = document.getElementById('typeWrap');
+  wrap.innerHTML = TARGET_TYPES.map(t =>
+    `<button class="tbtn${t===targetType?' active':''}" onclick="setType('${t}',this)">${t}</button>`
+  ).join('');
+}
 
-# ── Routes ────────────────────────────────────────────────────────────────────
-@app.route("/api/investigate", methods=["POST"])
-def investigate():
-    data = request.json
-    target = data.get("target", "").strip()
-    target_type = data.get("type", "DOMAIN")
-    selected_modules = data.get("modules", list(MODULE_MAP.keys()))
-    if not target:
-        return jsonify({"error": "No target provided"}), 400
-    job_id = f"job_{int(time.time()*1000)}"
-    new_job(job_id)
-    threading.Thread(
-        target=run_investigation,
-        args=(job_id, target, target_type, selected_modules),
-        daemon=True
-    ).start()
-    return jsonify({"job_id": job_id})
+function setType(t, btn) {
+  targetType = t;
+  document.querySelectorAll('.tbtn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderModules();
+}
 
-@app.route("/api/stream/<job_id>")
-def stream(job_id):
-    def generate():
-        if job_id not in jobs:
-            yield f"data: {json.dumps({'type':'error','data':{'message':'Job not found'}})}\n\n"
-            return
-        while True:
-            try:
-                event = jobs[job_id]["events"].get(timeout=30)
-                yield f"data: {json.dumps(event)}\n\n"
-                if event["type"] in ("done", "error"):
-                    break
-            except queue.Empty:
-                yield f"data: {json.dumps({'type':'ping','data':{}})}\n\n"
-                if jobs[job_id]["status"] in ("complete", "error"):
-                    break
-    return Response(generate(), mimetype="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+function renderModules() {
+  const list = document.getElementById('modList');
+  list.innerHTML = '';
+  ALL_MODULES.forEach(mod => {
+    const relevant = mod.always || (mod.types && mod.types.includes(targetType));
+    if (relevant && !activeModIds.has(mod.id)) activeModIds.add(mod.id);
+    const active = activeModIds.has(mod.id);
+    const el = document.createElement('div');
+    el.className = `mod-item${active?' active':''}`;
+    el.dataset.id = mod.id;
+    el.innerHTML = `<div class="mod-dot"></div><div class="mod-name">${mod.name}</div><div class="mod-tag">${mod.tag}</div>`;
+    el.onclick = () => {
+      if (!isAdmin) return; // only admin can toggle modules
+      if (activeModIds.has(mod.id)) activeModIds.delete(mod.id);
+      else activeModIds.add(mod.id);
+      el.classList.toggle('active');
+      document.getElementById('sMods').textContent = activeModIds.size;
+    };
+    list.appendChild(el);
+  });
+  document.getElementById('sMods').textContent = activeModIds.size;
+}
 
-@app.route("/api/health")
-def health():
-    tools = {t: tool_available(t) for t in ["whois", "dig", "curl"]}
-    return jsonify({"status": "ok", "tools": tools})
+// ── Backend test ──────────────────────────────────────────────────────────────
+async function testBackend(silent) {
+  const url = document.getElementById('backendUrl').value.trim().replace(/\/$/, '');
+  if (!url) { if (!silent) showCfgMsg('Enter your Replit URL first.', 'warn'); return; }
+  BACKEND = url;
+  localStorage.setItem('sentinel_backend', url);
+  const statusEl = document.getElementById('backendStatus');
+  try {
+    statusEl.style.color = 'var(--warn)';
+    statusEl.textContent = '⬤ BACKEND: TESTING…';
+    const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(8000) });
+    const data = await res.json();
+    statusEl.style.color = 'var(--accent3)';
+    statusEl.textContent = '⬤ BACKEND: CONNECTED';
+    const tools = Object.entries(data.tools || {}).map(([k,v]) => `${k}:${v?'✓':'✗'}`).join(' ');
+    if (!silent) showCfgMsg(`Connected! Tools: ${tools}`, 'ok');
+  } catch(e) {
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = '⬤ BACKEND: OFFLINE';
+    if (!silent) showCfgMsg(`Cannot reach backend: ${e.message}`, 'err');
+  }
+}
 
-@app.route("/")
-def index():
-    return "SENTINEL OSINT Backend running. Connect your frontend."
+function showCfgMsg(msg, type) {
+  const el = document.getElementById('cfgMsg');
+  el.textContent = msg;
+  el.style.color = type==='ok' ? 'var(--accent3)' : type==='err' ? 'var(--danger)' : 'var(--warn)';
+}
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port, debug=False)
+// ── Run investigation ─────────────────────────────────────────────────────────
+async function runInvestigation() {
+  const query = document.getElementById('searchInput').value.trim();
+  if (!query || running) return;
+  if (!BACKEND) { showCfgMsg('Set your backend URL first!', 'err'); scrollToEmpty(); return; }
+
+  running = true;
+  allResults = {};
+  document.getElementById('runBtn').disabled = true;
+  document.getElementById('runBtn').textContent = '⏳ RUNNING';
+  document.getElementById('expBtn').disabled = true;
+
+  addHistory(query);
+  stats.queries++;
+  updateStats();
+
+  // Clear results
+  const resultsEl = document.getElementById('results');
+  resultsEl.innerHTML = '';
+  const mods = [...activeModIds];
+  const modCards = {};
+
+  // Show progress
+  setProgress(true, 0, 'LAUNCHING MODULES…');
+
+  // Create all cards upfront
+  mods.forEach(id => {
+    const mod = ALL_MODULES.find(m => m.id === id);
+    if (!mod) return;
+    const card = createCard(id, mod.name, mod.tag);
+    resultsEl.appendChild(card);
+    modCards[id] = card;
+  });
+
+  const t0 = Date.now();
+
+  try {
+    // POST to backend
+    const res = await fetch(`${BACKEND}/api/investigate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target: query, type: targetType, modules: mods }),
+    });
+    const { job_id } = await res.json();
+
+    // Stream results via SSE
+    let done = 0;
+    await new Promise((resolve, reject) => {
+      const es = new EventSource(`${BACKEND}/api/stream/${job_id}`);
+      es.onmessage = (e) => {
+        const event = JSON.parse(e.data);
+        if (event.type === 'module_start') {
+          updateCard(modCards[event.data.module], 'running');
+        } else if (event.type === 'module_done') {
+          updateCard(modCards[event.data.module], 'done', event.data.result);
+          allResults[event.data.module] = event.data.result;
+          stats.findings++;
+          updateStats();
+          done++;
+          setProgress(true, Math.round(done / mods.length * 100), `${done}/${mods.length} MODULES COMPLETE`);
+        } else if (event.type === 'done') {
+          es.close(); resolve();
+        } else if (event.type === 'error') {
+          es.close(); reject(new Error(event.data.message));
+        }
+      };
+      es.onerror = () => { es.close(); resolve(); };
+      setTimeout(() => { es.close(); resolve(); }, 150000);
+    });
+  } catch (e) {
+    const errCard = document.createElement('div');
+    errCard.style.cssText = 'padding:14px;border:1px solid var(--danger);border-radius:4px;font-family:Share Tech Mono,monospace;font-size:11px;color:var(--danger);';
+    errCard.textContent = `Error: ${e.message}`;
+    resultsEl.insertBefore(errCard, resultsEl.firstChild);
+  }
+
+  const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+  stats.lastTime = elapsed + 's';
+  document.getElementById('sTime').textContent = elapsed + 's';
+  localStorage.setItem('sentinel_stats', JSON.stringify(stats));
+
+  setProgress(true, 100, `✓ COMPLETE — ${mods.length} modules in ${elapsed}s`);
+  setTimeout(() => setProgress(false), 3500);
+
+  document.getElementById('runBtn').disabled = false;
+  document.getElementById('runBtn').textContent = '▶ INVESTIGATE';
+  document.getElementById('expBtn').disabled = false;
+  running = false;
+}
+
+// ── Card helpers ──────────────────────────────────────────────────────────────
+function createCard(id, name, tag) {
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.id = `card-${id}`;
+  el.innerHTML = `
+    <div class="card-hdr" onclick="toggleCard('${id}')">
+      <span class="card-badge">${tag}</span>
+      <span class="card-title">${name}</span>
+      <span class="card-status running" id="cs-${id}"><span class="spinner"></span> PENDING</span>
+      <span class="card-toggle open" id="ct-${id}">▼</span>
+    </div>
+    <div class="card-body open" id="cb-${id}">
+      <div class="card-content" id="cc-${id}">Waiting to start…</div>
+    </div>`;
+  return el;
+}
+
+function updateCard(cardEl, state, content) {
+  if (!cardEl) return;
+  const id = cardEl.id.replace('card-', '');
+  cardEl.className = `card ${state}`;
+  const statusEl = document.getElementById(`cs-${id}`);
+  statusEl.className = `card-status ${state}`;
+  if (state === 'running') {
+    statusEl.innerHTML = '<span class="spinner"></span> SCANNING';
+    document.getElementById(`cc-${id}`).textContent = 'Running…';
+  } else if (state === 'done') {
+    statusEl.innerHTML = '✓ DONE';
+    document.getElementById(`cc-${id}`).textContent = content || 'No results.';
+  } else if (state === 'error') {
+    statusEl.innerHTML = '✗ ERROR';
+    document.getElementById(`cc-${id}`).textContent = content || 'Module failed.';
+  }
+}
+
+function toggleCard(id) {
+  const body = document.getElementById(`cb-${id}`);
+  const tog = document.getElementById(`ct-${id}`);
+  body.classList.toggle('open');
+  tog.classList.toggle('open');
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function setProgress(show, pct, label) {
+  const area = document.getElementById('progArea');
+  if (show) { area.classList.add('show'); }
+  else { area.classList.remove('show'); }
+  document.getElementById('progFill').style.width = pct + '%';
+  document.getElementById('progLbl').textContent = label || '';
+}
+
+function clearAll() {
+  allResults = {};
+  document.getElementById('results').innerHTML = `
+    <div class="empty" id="emptyState">
+      <div class="empty-icon">◎</div>
+      <div class="empty-title">AWAITING TARGET</div>
+      <div class="empty-sub">All modules run in parallel — WHOIS, DNS, Nmap, theHarvester, Sherlock, Shodan, Subdomains, GeoIP, VirusTotal, EmailRep, HIBP, Metadata & Google Dorks.</div>
+      <div class="backend-cfg" id="backendCfg">
+        <div class="cfg-label">BACKEND URL (your Replit URL)</div>
+        <div class="cfg-row">
+          <input id="backendUrl" type="text" value="${BACKEND}" placeholder="https://YOUR-REPLIT-URL.replit.app"/>
+          <button class="cfg-btn" onclick="testBackend()">TEST</button>
+        </div>
+        <div id="cfgMsg" style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);margin-top:8px;"></div>
+      </div>
+    </div>`;
+  setProgress(false);
+  document.getElementById('expBtn').disabled = true;
+}
+
+function scrollToEmpty() {
+  document.getElementById('results').scrollTop = 0;
+}
+
+function addHistory(q) {
+  history = [q, ...history.filter(x => x !== q)].slice(0, 10);
+  localStorage.setItem('sentinel_history', JSON.stringify(history));
+  renderHistory();
+}
+
+function renderHistory() {
+  const el = document.getElementById('historyList');
+  if (!history.length) {
+    el.innerHTML = '<div style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);">No searches yet</div>';
+    return;
+  }
+  el.innerHTML = history.map(h =>
+    `<div class="history-item" onclick="document.getElementById('searchInput').value='${h.replace(/'/g,"\\'")}';">${h}</div>`
+  ).join('');
+}
+
+function updateStats() {
+  document.getElementById('sQueries').textContent = stats.queries;
+  document.getElementById('sFindings').textContent = stats.findings;
+  if (stats.lastTime) document.getElementById('sTime').textContent = stats.lastTime;
+}
+
+function exportReport() {
+  const target = document.getElementById('searchInput').value.trim();
+  if (!Object.keys(allResults).length) return;
+  let r = `SENTINEL OSINT REPORT\n${'='.repeat(50)}\nTarget: ${target}\nType: ${targetType}\nDate: ${new Date().toUTCString()}\n${'='.repeat(50)}\n`;
+  Object.entries(allResults).forEach(([mod, content]) => {
+    r += `\n\n${mod.toUpperCase()}\n${'-'.repeat(30)}\n${content}\n`;
+  });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([r], { type: 'text/plain' }));
+  a.download = `sentinel_${target.replace(/\s+/g,'_')}.txt`;
+  a.click();
+}
+
+document.getElementById('searchInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') runInvestigation();
+});
+
+// init() called after password check
+</script>
+<script>
+// ── Password Protection ───────────────────────────────────────────────────────
+const ACCESS_CODE = 'sentinel2026';   // INVESTIGATOR password
+const ADMIN_CODE  = 'adminsentinel26'; // ADMIN password - change this!
+let isAdmin = false;
+
+function checkPw() {
+  const val = document.getElementById('pwInput').value;
+  if (val === ADMIN_CODE) {
+    isAdmin = true;
+    document.getElementById('lockscreen').style.display = 'none';
+    sessionStorage.setItem('sentinel_auth', 'admin');
+    init();
+  } else if (val === ACCESS_CODE) {
+    isAdmin = false;
+    document.getElementById('lockscreen').style.display = 'none';
+    sessionStorage.setItem('sentinel_auth', 'user');
+    init();
+  } else {
+    const err = document.getElementById('pwErr');
+    err.style.display = 'block';
+    document.getElementById('pwInput').value = '';
+    setTimeout(() => err.style.display = 'none', 3000);
+  }
+}
+// Check if already authenticated this session
+window.addEventListener('load', () => {
+  const auth = sessionStorage.getItem('sentinel_auth');
+  if (auth === 'admin') { isAdmin = true; document.getElementById('lockscreen').style.display = 'none'; init(); }
+  else if (auth === 'user') { isAdmin = false; document.getElementById('lockscreen').style.display = 'none'; init(); }
+});
+</script>
+</body>
+</html>
