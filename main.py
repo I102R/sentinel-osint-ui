@@ -362,6 +362,129 @@ def module_phone(target, job_id):
     emit(job_id, "module_done", {"module": "phone", "result": result})
     return result
 
+
+def module_email_investigate(target, job_id):
+    emit(job_id, "module_start", {"module": "email_investigate"})
+    lines = []
+    lines.append(f"TARGET EMAIL: {target}")
+    lines.append("")
+
+    # Run Holehe if installed
+    out, err, rc = run_cmd(f"python3 -m holehe {target} --only-used 2>/dev/null", timeout=120)
+    if out and "holehe" not in out.lower() and "error" not in out.lower():
+        lines.append("=" * 50)
+        lines.append("HOLEHE — ACCOUNT DETECTION (120+ SITES)")
+        lines.append("=" * 50)
+        lines.append("")
+        lines.append(out)
+        lines.append("")
+    
+    # EmailRep live check
+    try:
+        rep_out, _, _ = run_cmd(
+            f"curl -s 'https://emailrep.io/{target}' -H 'User-Agent: sentinel-osint' 2>/dev/null",
+            timeout=10
+        )
+        data = json.loads(rep_out)
+        details = data.get("details", {})
+        lines.append("=" * 50)
+        lines.append("EMAIL REPUTATION INTELLIGENCE")
+        lines.append("=" * 50)
+        lines.append("")
+        lines.append(f"Reputation:    {data.get('reputation', 'N/A')}")
+        lines.append(f"Suspicious:    {data.get('suspicious', False)}")
+        lines.append(f"Blacklisted:   {details.get('blacklisted', False)}")
+        lines.append(f"Data Breach:   {details.get('data_breach', False)}")
+        lines.append(f"Malicious:     {details.get('malicious_activity', False)}")
+        lines.append(f"Disposable:    {details.get('disposable', False)}")
+        lines.append(f"Free Provider: {details.get('free_provider', False)}")
+        lines.append(f"Profiles:      {', '.join(details.get('profiles', [])) or 'None detected'}")
+        lines.append(f"References:    {data.get('references', 0)}")
+        lines.append("")
+    except:
+        pass
+
+    # Extract domain from email for WHOIS
+    try:
+        domain = target.split("@")[1]
+        lines.append("=" * 50)
+        lines.append(f"EMAIL DOMAIN INTEL: {domain}")
+        lines.append("=" * 50)
+        lines.append("")
+        
+        # DNS for domain
+        dns_out, _, _ = run_cmd(f"dig +short A {domain} 2>/dev/null")
+        mx_out, _, _ = run_cmd(f"dig +short MX {domain} 2>/dev/null")
+        if dns_out:
+            lines.append(f"Domain IP:   {dns_out.split()[0] if dns_out else 'N/A'}")
+        if mx_out:
+            lines.append(f"Mail Server: {mx_out}")
+        lines.append("")
+    except:
+        pass
+
+    lines.append("=" * 50)
+    lines.append("DIRECT SEARCH LINKS")
+    lines.append("=" * 50)
+    lines.append("")
+
+    sites = [
+        ("TRUEPEOPLESEARCH", f"https://www.truepeoplesearch.com/results?emailaddress={target}"),
+        ("SPOKEO",           f"https://www.spokeo.com/email-search/{target}"),
+        ("BEENVERIFIED",     f"https://www.beenverified.com/email/{target}/"),
+        ("INTELIUS",         f"https://intelius.com/email-lookup/{target}/"),
+        ("EMAILREP",         f"https://emailrep.io/{target}"),
+        ("HUNTER.IO",        f"https://hunter.io/email-verifier/{target}"),
+        ("HAVEIBEENPWNED",   f"https://haveibeenpwned.com/account/{target}"),
+        ("DEHASHED",         f"https://www.dehashed.com/search?query={target}"),
+        ("EPIEOS",           f"https://epieos.com/?q={target}&t=email"),
+        ("GMAIL LOOKUP",     f"https://www.google.com/search?q=%22{target}%22"),
+    ]
+    for name, url in sites:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("SOCIAL MEDIA EMAIL SEARCH")
+    lines.append("=" * 50)
+    lines.append("")
+
+    social = [
+        ("Facebook",   f"https://www.facebook.com/search/people/?q={target}"),
+        ("LinkedIn",   f"https://www.linkedin.com/search/results/people/?keywords={target}"),
+        ("Twitter/X",  f"https://twitter.com/search?q={target}&f=user"),
+        ("Gravatar",   f"https://en.gravatar.com/{target}"),
+    ]
+    for name, url in social:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("GOOGLE DORKS")
+    lines.append("=" * 50)
+    lines.append("")
+
+    dorks = [
+        f'"{target}"',
+        f'"{target}" name address phone',
+        f'"{target}" site:linkedin.com',
+        f'"{target}" site:facebook.com',
+        f'"{target}" resume OR CV',
+        f'"{target}" site:pastebin.com',
+        f'"{target}" leaked OR breach OR hacked',
+    ]
+    for dork in dorks:
+        encoded = dork.replace(" ", "+").replace('"', '%22')
+        lines.append(f"  {dork}")
+        lines.append(f"  https://www.google.com/search?q={encoded}")
+        lines.append("")
+
+    result = "\n".join(lines)
+    emit(job_id, "module_done", {"module": "email_investigate", "result": result})
+    return result
+
 def module_theharvester(target, job_id):
     emit(job_id, "module_start", {"module": "theharvester"})
     out, err, rc = run_cmd(
@@ -569,6 +692,7 @@ def module_google_dorks(target, job_id):
 # ── Module registry ───────────────────────────────────────────────────────────
 MODULE_MAP = {
     "people":       module_people_search,
+    "email_investigate": module_email_investigate,
     "phone":        module_phone,
     "whois":        module_whois,
     "dns":          module_dns,
