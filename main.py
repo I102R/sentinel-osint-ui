@@ -364,6 +364,159 @@ def module_phone(target, job_id):
 
 
 
+
+def module_image_metadata(target, job_id):
+    """
+    Image metadata extraction - target should be a URL to an image
+    or the module is triggered with image data from frontend
+    """
+    emit(job_id, "module_start", {"module": "image_metadata"})
+    lines = []
+    lines.append(f"TARGET: {target}")
+    lines.append("")
+
+    # Try to fetch and analyze image from URL
+    if target.startswith("http"):
+        try:
+            # Download image to temp file
+            out, err, rc = run_cmd(
+                f"curl -s -L -o /tmp/sentinel_img.jpg '{target}' 2>/dev/null",
+                timeout=15
+            )
+            
+            # Extract EXIF with exiftool if available
+            exif_out, _, rc = run_cmd("exiftool /tmp/sentinel_img.jpg 2>/dev/null", timeout=10)
+            
+            if exif_out and rc == 0:
+                lines.append("=" * 50)
+                lines.append("EXIF METADATA EXTRACTED")
+                lines.append("=" * 50)
+                lines.append("")
+                
+                # Parse key fields
+                important_fields = [
+                    "GPS Latitude", "GPS Longitude", "GPS Position",
+                    "GPS Altitude", "GPS Date/Time",
+                    "Create Date", "Date/Time Original", "Modify Date",
+                    "Make", "Camera Model Name", "Software",
+                    "Image Width", "Image Height",
+                    "File Name", "File Size", "File Type",
+                    "Author", "Copyright", "Artist",
+                    "City", "State", "Country", "Location",
+                    "Subject", "Description", "Comment",
+                    "Serial Number", "Lens ID",
+                ]
+                
+                found_gps = False
+                gps_lat = ""
+                gps_lon = ""
+                
+                for line in exif_out.split("\n"):
+                    for field in important_fields:
+                        if field.lower() in line.lower():
+                            lines.append(f"  {line.strip()}")
+                            if "GPS Latitude" in line and "Ref" not in line:
+                                gps_lat = line.split(":")[-1].strip()
+                                found_gps = True
+                            if "GPS Longitude" in line and "Ref" not in line:
+                                gps_lon = line.split(":")[-1].strip()
+                
+                lines.append("")
+                
+                if found_gps and gps_lat and gps_lon:
+                    lines.append("=" * 50)
+                    lines.append("⚠ GPS COORDINATES FOUND!")
+                    lines.append("=" * 50)
+                    lines.append("")
+                    lines.append(f"Latitude:  {gps_lat}")
+                    lines.append(f"Longitude: {gps_lon}")
+                    lines.append("")
+                    lines.append("View on maps:")
+                    lines.append(f"  Google Maps: https://www.google.com/maps?q={gps_lat},{gps_lon}")
+                    lines.append(f"  Google Street View: https://www.google.com/maps?q=&layer=c&cbll={gps_lat},{gps_lon}")
+                    lines.append("")
+            else:
+                # Try strings command to extract any text metadata
+                str_out, _, _ = run_cmd("strings /tmp/sentinel_img.jpg | grep -i 'gps\|location\|date\|camera\|make\|model' 2>/dev/null | head -20")
+                if str_out:
+                    lines.append("=" * 50)
+                    lines.append("TEXT STRINGS FOUND IN IMAGE")
+                    lines.append("=" * 50)
+                    lines.append(str_out)
+                    lines.append("")
+                else:
+                    lines.append("No metadata found in image.")
+                    lines.append("The image may have had metadata stripped.")
+                    lines.append("")
+                    
+        except Exception as e:
+            lines.append(f"Image fetch failed: {str(e)}")
+            lines.append("")
+    
+    # Always provide manual analysis tools
+    lines.append("=" * 50)
+    lines.append("MANUAL IMAGE ANALYSIS TOOLS")
+    lines.append("=" * 50)
+    lines.append("")
+    
+    manual_tools = [
+        ("Jeffrey EXIF Viewer",     "http://exif.regex.info/exif.cgi"),
+        ("ExifTool Online",         "https://exiftool.org/"),
+        ("Metadata2Go",             "https://www.metadata2go.com/"),
+        ("Google Reverse Image",    f"https://images.google.com/searchbyimage?image_url={target}" if target.startswith("http") else "https://images.google.com/"),
+        ("TinEye Reverse Image",    f"https://tineye.com/search?url={target}" if target.startswith("http") else "https://tineye.com/"),
+        ("Yandex Reverse Image",    f"https://yandex.com/images/search?url={target}&rpt=imageview" if target.startswith("http") else "https://yandex.com/images/"),
+        ("Bing Visual Search",      "https://www.bing.com/images/search?view=detailv2&iss=sbi"),
+        ("FotoForensics",           f"https://fotoforensics.com/analysis.php?id=" ),
+        ("InVID/WeVerify",          "https://www.invid-project.eu/tools-and-services/invid-verification-plugin/"),
+    ]
+    for name, url in manual_tools:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("REVERSE IMAGE SEARCH LINKS")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("To find where else this image appears online:")
+    lines.append("")
+    
+    if target.startswith("http"):
+        rev_searches = [
+            ("Google Images",   f"https://images.google.com/searchbyimage?image_url={target}"),
+            ("TinEye",          f"https://tineye.com/search?url={target}"),
+            ("Yandex",          f"https://yandex.com/images/search?url={target}&rpt=imageview"),
+        ]
+        for name, url in rev_searches:
+            lines.append(f"[{name}]")
+            lines.append(f"  {url}")
+            lines.append("")
+    else:
+        lines.append("Paste an image URL in the search box to enable reverse image search links.")
+        lines.append("")
+        lines.append("Or drag and drop an image at:")
+        lines.append("  https://images.google.com/")
+        lines.append("  https://tineye.com/")
+        lines.append("  https://yandex.com/images/")
+        lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("HOW TO USE FOR FACEBOOK PHOTOS")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("1. Right-click any Facebook photo")
+    lines.append("2. Select 'Copy image address'")
+    lines.append("3. Paste the URL as your target and re-investigate")
+    lines.append("4. OR download the photo and upload to Jeffrey EXIF Viewer")
+    lines.append("")
+    lines.append("Note: Facebook strips GPS from uploaded photos")
+    lines.append("but timestamps and device info often remain.")
+
+    result = "\n".join(lines)
+    emit(job_id, "module_done", {"module": "image_metadata", "result": result})
+    return result
+
 def module_social_media(target, job_id):
     emit(job_id, "module_start", {"module": "social_media"})
     
@@ -874,6 +1027,7 @@ def module_google_dorks(target, job_id):
 MODULE_MAP = {
     "people":       module_people_search,
     "social_media":  module_social_media,
+    "image_metadata": module_image_metadata,
     "email_investigate": module_email_investigate,
     "phone":        module_phone,
     "whois":        module_whois,
