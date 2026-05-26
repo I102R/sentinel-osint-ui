@@ -139,7 +139,8 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
   <div style="width:48px;height:48px;border:2px solid #00e5ff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;animation:glow 3s infinite;">&#9678;</div>
   <div style="font-family:Share Tech Mono,monospace;font-size:16px;color:#00e5ff;letter-spacing:3px;text-align:center;">SENTINEL // OSINT</div>
   <div style="font-family:Share Tech Mono,monospace;font-size:10px;color:#4a6070;letter-spacing:2px;text-align:center;">AUTHORIZED ACCESS ONLY</div>
-  <input id="pwInput" type="password" placeholder="ENTER ACCESS CODE"
+  <input id="pwUsername" type="text" placeholder="USERNAME" style="width:100%;background:#060a0f;border:1px solid #1a2a3a;border-radius:4px;padding:12px 14px;color:#c8d8e8;font-family:Share Tech Mono,monospace;font-size:14px;outline:none;text-align:center;letter-spacing:2px;margin-bottom:0;" onkeydown="if(event.key==='Enter')document.getElementById('pwInput').focus()"/>
+  <input id="pwInput" type="password" placeholder="PASSWORD"
     style="width:100%;background:#060a0f;border:1px solid #1a2a3a;border-radius:4px;padding:12px 14px;color:#c8d8e8;font-family:Share Tech Mono,monospace;font-size:14px;outline:none;text-align:center;letter-spacing:4px;"
     onkeydown="if(event.key==='Enter')checkPw()"/>
   <button onclick="checkPw()" style="width:100%;padding:12px;background:#00e5ff;color:#060a0f;border:none;border-radius:4px;font-family:Share Tech Mono,monospace;font-size:13px;font-weight:bold;letter-spacing:2px;cursor:pointer;">AUTHENTICATE</button>
@@ -285,6 +286,8 @@ function init() {
   // Hide admin-only elements for regular users
   const cfg = document.getElementById('backendCfg');
   if (cfg) cfg.style.display = isAdmin ? 'block' : 'none';
+  const auditBtn = document.getElementById('auditBtn');
+  if (auditBtn) auditBtn.style.display = isAdmin ? 'inline-block' : 'none';
 }
 
 function renderTypes() {
@@ -367,6 +370,7 @@ async function runInvestigation() {
 
   addHistory(query);
   stats.queries++;
+  logAudit(currentUser?.username || 'unknown', 'SEARCH', `Target type: ${targetType}`, query);
   updateStats();
 
   // Clear results
@@ -563,34 +567,125 @@ document.getElementById('searchInput').addEventListener('keydown', e => {
 </script>
 <script>
 // ── Password Protection ───────────────────────────────────────────────────────
-const ACCESS_CODE = 'sentinel2026';   // INVESTIGATOR password
-const ADMIN_CODE  = 'adminsentinel26'; // ADMIN password - change this!
+// ── User Account System ──────────────────────────────────────────────────────
+const USERS = {
+  'ranglada':    { password: 'Admin2026!',  role: 'admin',       name: 'R Anglada' },
+  'tlopez':   { password: 'Invest2026!', role: 'investigator', name: 'T Lopez' },
+  'cmcpherson': { password: 'Invest2026!', role: 'investigator', name: 'C McPherson' },
+};
+// ADMIN: To add users, edit the USERS object above in index.html on GitHub
+// Format: 'username': { password: 'Password', role: 'admin' or 'investigator', name: 'Full Name' }
+
+let currentUser = null;
 let isAdmin = false;
+let auditLog = JSON.parse(localStorage.getItem('sentinel_audit') || '[]');
+let failedLogins = {};
 
 function checkPw() {
-  const val = document.getElementById('pwInput').value;
-  if (val === ADMIN_CODE) {
-    isAdmin = true;
+  const username = document.getElementById('pwUsername').value.trim().toLowerCase();
+  const password = document.getElementById('pwInput').value;
+  const now = new Date().toISOString();
+
+  // Check for lockout (5 failed attempts)
+  if (failedLogins[username] && failedLogins[username].count >= 5) {
+    const lockoutTime = new Date(failedLogins[username].lastAttempt);
+    const diff = (new Date() - lockoutTime) / 1000 / 60;
+    if (diff < 30) {
+      showPwErr(`Account locked. Try again in ${Math.ceil(30-diff)} minutes.`);
+      logAudit(username, 'LOGIN_BLOCKED', 'Account locked due to failed attempts');
+      return;
+    } else {
+      failedLogins[username] = { count: 0 };
+    }
+  }
+
+  const user = USERS[username];
+  if (user && user.password === password) {
+    currentUser = { username, ...user };
+    isAdmin = user.role === 'admin';
+    failedLogins[username] = { count: 0 };
+    sessionStorage.setItem('sentinel_auth', JSON.stringify(currentUser));
     document.getElementById('lockscreen').style.display = 'none';
-    sessionStorage.setItem('sentinel_auth', 'admin');
-    init();
-  } else if (val === ACCESS_CODE) {
-    isAdmin = false;
-    document.getElementById('lockscreen').style.display = 'none';
-    sessionStorage.setItem('sentinel_auth', 'user');
+    logAudit(username, 'LOGIN_SUCCESS', `User ${user.name} logged in`);
+    updateUserDisplay();
     init();
   } else {
-    const err = document.getElementById('pwErr');
-    err.style.display = 'block';
+    if (!failedLogins[username]) failedLogins[username] = { count: 0 };
+    failedLogins[username].count++;
+    failedLogins[username].lastAttempt = now;
+    logAudit(username || 'UNKNOWN', 'LOGIN_FAILED', `Failed login attempt (${failedLogins[username].count}/5)`);
+    showPwErr(`⚠ Invalid credentials (${failedLogins[username].count}/5 attempts)`);
     document.getElementById('pwInput').value = '';
-    setTimeout(() => err.style.display = 'none', 3000);
   }
 }
+
+function showPwErr(msg) {
+  const err = document.getElementById('pwErr');
+  err.textContent = msg;
+  err.style.display = 'block';
+  setTimeout(() => err.style.display = 'none', 4000);
+}
+
+function logAudit(username, action, detail, target) {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    username,
+    action,
+    detail: detail || '',
+    target: target || '',
+    ip: 'client-side'
+  };
+  auditLog.unshift(entry);
+  if (auditLog.length > 1000) auditLog = auditLog.slice(0, 1000);
+  localStorage.setItem('sentinel_audit', JSON.stringify(auditLog));
+}
+
+function updateUserDisplay() {
+  if (currentUser) {
+    const hdr = document.getElementById('userDisplay');
+    if (hdr) hdr.textContent = `${currentUser.name} (${currentUser.role.toUpperCase()})`;
+  }
+}
+
+function logout() {
+  logAudit(currentUser?.username || 'unknown', 'LOGOUT', 'User logged out');
+  sessionStorage.removeItem('sentinel_auth');
+  currentUser = null;
+  isAdmin = false;
+  location.reload();
+}
+
+function showAuditLog() {
+  if (!isAdmin) return;
+  const win = window.open('', '_blank');
+  win.document.write('<html><head><title>SENTINEL Audit Log</title>');
+  win.document.write('<style>body{background:#060a0f;color:#c8d8e8;font-family:monospace;padding:20px;}');
+  win.document.write('h1{color:#00e5ff;letter-spacing:3px;}table{width:100%;border-collapse:collapse;}');
+  win.document.write('th{background:#0b1118;color:#00e5ff;padding:8px;text-align:left;font-size:11px;letter-spacing:1px;}');
+  win.document.write('td{padding:6px 8px;font-size:11px;border-bottom:1px solid #1a2a3a;}');
+  win.document.write('.login{color:#39ff14}.logout{color:#4a6070}.search{color:#ffb300}.failed{color:#ff3b3b}.blocked{color:#ff3b3b}</style></head><body>');
+  win.document.write('<h1>◎ SENTINEL // AUDIT LOG</h1>');
+  win.document.write(`<p style="color:#4a6070;font-size:11px;margin-bottom:16px">Total entries: ${auditLog.length} | Generated: ${new Date().toISOString()}</p>`);
+  win.document.write('<table><tr><th>TIMESTAMP</th><th>USER</th><th>ACTION</th><th>DETAIL</th><th>TARGET</th></tr>');
+  auditLog.forEach(e => {
+    const cls = e.action.includes('SUCCESS') ? 'login' : e.action.includes('LOGOUT') ? 'logout' : e.action.includes('SEARCH') ? 'search' : e.action.includes('FAILED') ? 'failed' : 'blocked';
+    win.document.write(`<tr><td>${e.timestamp}</td><td>${e.username}</td><td class="${cls}">${e.action}</td><td>${e.detail}</td><td>${e.target||''}</td></tr>`);
+  });
+  win.document.write('</table></body></html>');
+}
+
 // Check if already authenticated this session
 window.addEventListener('load', () => {
-  const auth = sessionStorage.getItem('sentinel_auth');
-  if (auth === 'admin') { isAdmin = true; document.getElementById('lockscreen').style.display = 'none'; init(); }
-  else if (auth === 'user') { isAdmin = false; document.getElementById('lockscreen').style.display = 'none'; init(); }
+  const saved = sessionStorage.getItem('sentinel_auth');
+  if (saved) {
+    try {
+      currentUser = JSON.parse(saved);
+      isAdmin = currentUser.role === 'admin';
+      document.getElementById('lockscreen').style.display = 'none';
+      updateUserDisplay();
+      init();
+    } catch(e) { sessionStorage.removeItem('sentinel_auth'); }
+  }
 });
 </script>
 </body>
