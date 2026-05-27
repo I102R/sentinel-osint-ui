@@ -9,7 +9,8 @@ import subprocess, threading, json, os, time, queue, socket
 from datetime import datetime
 
 app = Flask(__name__)
-CORS(app)
+app.config['SERVER_NAME'] = None
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
 jobs = {}
 
