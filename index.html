@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SENTINEL // OSINT Agent</title>
+<title>FIVE T // OSINT Agent</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -137,7 +137,7 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
 <div id="lockscreen" style="position:fixed;inset:0;background:#060a0f;z-index:9999;display:flex;align-items:center;justify-content:center;background-image:linear-gradient(rgba(0,229,255,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,255,0.025) 1px,transparent 1px);background-size:40px 40px;">
 <div style="border:1px solid #1a2a3a;border-radius:6px;padding:36px 40px;background:#0b1118;display:flex;flex-direction:column;align-items:center;gap:18px;min-width:320px;max-width:360px;">
   <div style="width:48px;height:48px;border:2px solid #00e5ff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;animation:glow 3s infinite;">&#9678;</div>
-  <div style="font-family:Share Tech Mono,monospace;font-size:16px;color:#00e5ff;letter-spacing:3px;text-align:center;">SENTINEL // OSINT</div>
+  <div style="font-family:Share Tech Mono,monospace;font-size:16px;color:#00e5ff;letter-spacing:3px;text-align:center;">FIVE T // OSINT</div>
   <div style="font-family:Share Tech Mono,monospace;font-size:10px;color:#4a6070;letter-spacing:2px;text-align:center;">AUTHORIZED ACCESS ONLY</div>
   <input id="pwUsername" type="text" placeholder="USERNAME" style="width:100%;background:#060a0f;border:1px solid #1a2a3a;border-radius:4px;padding:12px 14px;color:#c8d8e8;font-family:Share Tech Mono,monospace;font-size:14px;outline:none;text-align:center;letter-spacing:2px;margin-bottom:0;" onkeydown="if(event.key==='Enter')document.getElementById('pwInput').focus()"/>
   <input id="pwInput" type="password" placeholder="PASSWORD"
@@ -154,7 +154,7 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
   <header>
     <div class="logo">
       <div class="logo-ring">◎</div>
-      SENTINEL // OSINT AGENT
+      FIVE T // OSINT AGENT
     </div>
     <div class="hdr-right">
       <span><span class="dot-live"></span>LIVE</span>
@@ -245,8 +245,8 @@ let targetType = 'DOMAIN';
 let activeModIds = new Set();
 let running = false;
 let allResults = {};
-let history = JSON.parse(localStorage.getItem('sentinel_history') || '[]');
-let stats = JSON.parse(localStorage.getItem('sentinel_stats') || '{"queries":0,"findings":0}');
+let history = JSON.parse(localStorage.getItem('fivet_history') || '[]');
+let stats = JSON.parse(localStorage.getItem('fivet_stats') || '{"queries":0,"findings":0}');
 
 const TARGET_TYPES = ['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','PLATE','LOCATION'];
 
@@ -332,7 +332,7 @@ async function testBackend(silent) {
   const url = document.getElementById('backendUrl').value.trim().replace(/\/$/, '');
   if (!url) { if (!silent) showCfgMsg('Enter your Replit URL first.', 'warn'); return; }
   BACKEND = url;
-  localStorage.setItem('sentinel_backend', url);
+  localStorage.setItem('fivet_backend', url);
   const statusEl = document.getElementById('backendStatus');
   try {
     statusEl.style.color = 'var(--warn)';
@@ -436,7 +436,7 @@ async function runInvestigation() {
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   stats.lastTime = elapsed + 's';
   document.getElementById('sTime').textContent = elapsed + 's';
-  localStorage.setItem('sentinel_stats', JSON.stringify(stats));
+  localStorage.setItem('fivet_stats', JSON.stringify(stats));
 
   setProgress(true, 100, `✓ COMPLETE — ${mods.length} modules in ${elapsed}s`);
   setTimeout(() => setProgress(false), 3500);
@@ -525,7 +525,7 @@ function scrollToEmpty() {
 
 function addHistory(q) {
   history = [q, ...history.filter(x => x !== q)].slice(0, 10);
-  localStorage.setItem('sentinel_history', JSON.stringify(history));
+  localStorage.setItem('fivet_history', JSON.stringify(history));
   renderHistory();
 }
 
@@ -578,7 +578,7 @@ const USERS = {
 
 let currentUser = null;
 let isAdmin = false;
-let auditLog = JSON.parse(localStorage.getItem('sentinel_audit') || '[]');
+let auditLog = JSON.parse(localStorage.getItem('fivet_audit') || '[]');
 let failedLogins = {};
 
 function checkPw() {
@@ -604,7 +604,7 @@ function checkPw() {
     currentUser = { username, ...user };
     isAdmin = user.role === 'admin';
     failedLogins[username] = { count: 0 };
-    sessionStorage.setItem('sentinel_auth', JSON.stringify(currentUser));
+    sessionStorage.setItem('fivet_auth', JSON.stringify(currentUser));
     document.getElementById('lockscreen').style.display = 'none';
     logAudit(username, 'LOGIN_SUCCESS', `User ${user.name} logged in`);
     updateUserDisplay();
@@ -637,7 +637,7 @@ function logAudit(username, action, detail, target) {
   };
   auditLog.unshift(entry);
   if (auditLog.length > 1000) auditLog = auditLog.slice(0, 1000);
-  localStorage.setItem('sentinel_audit', JSON.stringify(auditLog));
+  localStorage.setItem('fivet_audit', JSON.stringify(auditLog));
 }
 
 function updateUserDisplay() {
@@ -649,7 +649,7 @@ function updateUserDisplay() {
 
 function logout() {
   logAudit(currentUser?.username || 'unknown', 'LOGOUT', 'User logged out');
-  sessionStorage.removeItem('sentinel_auth');
+  sessionStorage.removeItem('fivet_auth');
   currentUser = null;
   isAdmin = false;
   location.reload();
@@ -658,13 +658,13 @@ function logout() {
 function showAuditLog() {
   if (!isAdmin) return;
   const win = window.open('', '_blank');
-  win.document.write('<html><head><title>SENTINEL Audit Log</title>');
+  win.document.write('<html><head><title>FIVE T Audit Log</title>');
   win.document.write('<style>body{background:#060a0f;color:#c8d8e8;font-family:monospace;padding:20px;}');
   win.document.write('h1{color:#00e5ff;letter-spacing:3px;}table{width:100%;border-collapse:collapse;}');
   win.document.write('th{background:#0b1118;color:#00e5ff;padding:8px;text-align:left;font-size:11px;letter-spacing:1px;}');
   win.document.write('td{padding:6px 8px;font-size:11px;border-bottom:1px solid #1a2a3a;}');
   win.document.write('.login{color:#39ff14}.logout{color:#4a6070}.search{color:#ffb300}.failed{color:#ff3b3b}.blocked{color:#ff3b3b}</style></head><body>');
-  win.document.write('<h1>◎ SENTINEL // AUDIT LOG</h1>');
+  win.document.write('<h1>◎ FIVE T // AUDIT LOG</h1>');
   win.document.write(`<p style="color:#4a6070;font-size:11px;margin-bottom:16px">Total entries: ${auditLog.length} | Generated: ${new Date().toISOString()}</p>`);
   win.document.write('<table><tr><th>TIMESTAMP</th><th>USER</th><th>ACTION</th><th>DETAIL</th><th>TARGET</th></tr>');
   auditLog.forEach(e => {
@@ -676,7 +676,7 @@ function showAuditLog() {
 
 // Check if already authenticated this session
 window.addEventListener('load', () => {
-  const saved = sessionStorage.getItem('sentinel_auth');
+  const saved = sessionStorage.getItem('fivet_auth');
   if (saved) {
     try {
       currentUser = JSON.parse(saved);
@@ -684,7 +684,7 @@ window.addEventListener('load', () => {
       document.getElementById('lockscreen').style.display = 'none';
       updateUserDisplay();
       init();
-    } catch(e) { sessionStorage.removeItem('sentinel_auth'); }
+    } catch(e) { sessionStorage.removeItem('fivet_auth'); }
   }
 });
 </script>
