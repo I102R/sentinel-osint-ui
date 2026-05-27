@@ -9,18 +9,18 @@
 *{box-sizing:border-box;margin:0;padding:0;}
 :root{
   --bg:#060a0f;--panel:#0b1118;--border:#1a2a3a;
-  --accent:#00e5ff;--accent2:#ff6b35;--accent3:#39ff14;
+  --accent:#00a896;--accent2:#ff6b35;--accent3:#39ff14;
   --text:#c8d8e8;--dim:#4a6070;--danger:#ff3b3b;--warn:#ffb300;
 }
 body{background:var(--bg);color:var(--text);font-family:'Rajdhani',sans-serif;font-size:15px;min-height:100vh;}
-body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,229,255,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,255,0.025) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
+body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,168,150,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,168,150,0.025) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
 .app{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh;overflow:hidden;}
 
 /* Header */
 header{border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:14px;background:rgba(6,10,15,0.98);flex-shrink:0;}
 .logo{font-family:'Share Tech Mono',monospace;font-size:16px;color:var(--accent);letter-spacing:2px;display:flex;align-items:center;gap:9px;}
 .logo-ring{width:26px;height:26px;border:2px solid var(--accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;animation:glow 3s ease-in-out infinite;}
-@keyframes glow{0%,100%{box-shadow:0 0 4px var(--accent)}50%{box-shadow:0 0 18px var(--accent),0 0 36px rgba(0,229,255,0.15)}}
+@keyframes glow{0%,100%{box-shadow:0 0 4px var(--accent)}50%{box-shadow:0 0 18px var(--accent),0 0 36px rgba(0,168,150,0.15)}}
 .hdr-right{margin-left:auto;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);display:flex;gap:20px;align-items:center;}
 .dot-live{width:6px;height:6px;border-radius:50%;background:var(--accent3);display:inline-block;margin-right:5px;animation:blink 1.5s infinite;}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0.2}}
@@ -41,7 +41,7 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
 
 /* Module list */
 .mod-item{display:flex;align-items:center;gap:8px;padding:7px 8px;border:1px solid var(--border);border-radius:3px;cursor:pointer;margin-bottom:5px;transition:all .15s;background:var(--panel);}
-.mod-item.active{border-color:rgba(0,229,255,0.3);background:rgba(0,229,255,0.04);}
+.mod-item.active{border-color:rgba(0,168,150,0.3);background:rgba(0,168,150,0.04);}
 .mod-dot{width:7px;height:7px;border-radius:50%;background:var(--dim);flex-shrink:0;transition:background .15s;}
 .mod-item.active .mod-dot{background:var(--accent3);}
 .mod-name{flex:1;font-size:12px;font-weight:600;color:var(--text);}
@@ -62,10 +62,10 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
 .input-wrap{flex:1;position:relative;}
 .input-wrap::before{content:'›';position:absolute;left:12px;top:50%;transform:translateY(-50%);font-family:'Share Tech Mono',monospace;color:var(--accent);font-size:18px;pointer-events:none;}
 #searchInput{width:100%;background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:11px 14px 11px 30px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:13px;outline:none;transition:border-color .2s;}
-#searchInput:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(0,229,255,0.08);}
+#searchInput:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(0,168,150,0.08);}
 #searchInput::placeholder{color:#2a3a4a;}
 .run-btn{padding:11px 22px;background:var(--accent);color:var(--bg);border:none;border-radius:4px;font-family:'Share Tech Mono',monospace;font-size:12px;font-weight:bold;letter-spacing:2px;cursor:pointer;transition:all .2s;white-space:nowrap;}
-.run-btn:hover{background:#33eeff;box-shadow:0 0 20px rgba(0,229,255,0.35);}
+.run-btn:hover{background:#00bfae;box-shadow:0 0 20px rgba(0,168,150,0.35);}
 .run-btn:disabled{background:#0d1720;color:#2a3a4a;cursor:not-allowed;}
 .clr-btn{padding:11px 12px;background:transparent;border:1px solid var(--border);color:var(--dim);font-family:'Share Tech Mono',monospace;font-size:10px;cursor:pointer;border-radius:4px;transition:all .2s;}
 .clr-btn:hover{border-color:var(--danger);color:var(--danger);}
@@ -94,7 +94,7 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
 #backendUrl{flex:1;background:#060a0f;border:1px solid var(--border);border-radius:3px;padding:8px 10px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:11px;outline:none;}
 #backendUrl:focus{border-color:var(--accent);}
 .cfg-btn{padding:8px 14px;background:transparent;border:1px solid var(--accent);color:var(--accent);font-family:'Share Tech Mono',monospace;font-size:10px;cursor:pointer;border-radius:3px;letter-spacing:1px;}
-.cfg-btn:hover{background:rgba(0,229,255,0.08);}
+.cfg-btn:hover{background:rgba(0,168,150,0.08);}
 
 /* Cards */
 .card{border:1px solid var(--border);border-left:3px solid var(--border);border-radius:4px;background:var(--panel);margin-bottom:10px;overflow:hidden;animation:fadeUp .3s ease;}
@@ -103,8 +103,8 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
 .card.done{border-left-color:var(--accent3);}
 .card.error{border-left-color:var(--danger);}
 .card-hdr{padding:9px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;background:rgba(0,0,0,0.2);user-select:none;}
-.card-hdr:hover{background:rgba(0,229,255,0.03);}
-.card-badge{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:2px;padding:2px 8px;border-radius:2px;background:rgba(0,229,255,0.1);color:var(--accent);border:1px solid rgba(0,229,255,0.2);}
+.card-hdr:hover{background:rgba(0,168,150,0.03);}
+.card-badge{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:2px;padding:2px 8px;border-radius:2px;background:rgba(0,168,150,0.1);color:var(--accent);border:1px solid rgba(0,168,150,0.2);}
 .card-title{flex:1;font-size:13px;font-weight:600;color:var(--text);}
 .card-status{font-family:'Share Tech Mono',monospace;font-size:10px;display:flex;align-items:center;gap:6px;}
 .card-status.running{color:var(--warn);}
@@ -129,21 +129,52 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
 .exp-btn:disabled{border-color:var(--border);color:var(--dim);cursor:not-allowed;}
 
 /* Scanline */
-.scanline{position:fixed;left:0;right:0;height:2px;background:linear-gradient(transparent,rgba(0,229,255,0.05),transparent);pointer-events:none;animation:scan 8s linear infinite;z-index:999;}
+.scanline{position:fixed;left:0;right:0;height:2px;background:linear-gradient(transparent,rgba(0,168,150,0.05),transparent);pointer-events:none;animation:scan 8s linear infinite;z-index:999;}
 @keyframes scan{0%{top:-2px}100%{top:100vh}}
 </style>
 </head>
 <body>
-<div id="lockscreen" style="position:fixed;inset:0;background:#060a0f;z-index:9999;display:flex;align-items:center;justify-content:center;background-image:linear-gradient(rgba(0,229,255,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,229,255,0.025) 1px,transparent 1px);background-size:40px 40px;">
+<div id="lockscreen" style="position:fixed;inset:0;background:#060a0f;z-index:9999;display:flex;align-items:center;justify-content:center;background-image:linear-gradient(rgba(0,168,150,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,168,150,0.025) 1px,transparent 1px);background-size:40px 40px;">
 <div style="border:1px solid #1a2a3a;border-radius:6px;padding:36px 40px;background:#0b1118;display:flex;flex-direction:column;align-items:center;gap:18px;min-width:320px;max-width:360px;">
-  <div style="width:48px;height:48px;border:2px solid #00e5ff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:22px;animation:glow 3s infinite;">&#9678;</div>
-  <div style="font-family:Share Tech Mono,monospace;font-size:16px;color:#00e5ff;letter-spacing:3px;text-align:center;">FIVE T // OSINT</div>
+  <svg width="100" height="72" viewBox="0 0 100 72" style="animation:glow 3s infinite;filter:drop-shadow(0 0 16px #00a896)">
+    <!-- Concentric scanning rings emanating outward -->
+    <circle cx="50" cy="36" r="48" fill="none" stroke="#00a896" stroke-width="0.5" opacity="0.08"/>
+    <circle cx="50" cy="36" r="42" fill="none" stroke="#00a896" stroke-width="0.6" opacity="0.12"/>
+    <circle cx="50" cy="36" r="36" fill="none" stroke="#00a896" stroke-width="0.7" opacity="0.18"/>
+    <circle cx="50" cy="36" r="30" fill="none" stroke="#00a896" stroke-width="0.8" opacity="0.25"/>
+    <circle cx="50" cy="36" r="24" fill="none" stroke="#00a896" stroke-width="1" opacity="0.35"/>
+    <!-- Eye background -->
+    <ellipse cx="50" cy="36" rx="46" ry="32" fill="#060a0f"/>
+    <!-- Upper eyelid -->
+    <path d="M4 36 Q50 4 96 36" fill="#060a0f" stroke="#00a896" stroke-width="1.8"/>
+    <!-- Lower eyelid -->
+    <path d="M4 36 Q50 68 96 36" fill="#060a0f" stroke="#00a896" stroke-width="1.8"/>
+    <!-- Eye white fill -->
+    <ellipse cx="50" cy="36" rx="46" ry="32" fill="none" stroke="#00a896" stroke-width="1.8"/>
+    <!-- Iris outer -->
+    <circle cx="50" cy="36" r="20" fill="#060a0f" stroke="#00a896" stroke-width="1.8"/>
+    <!-- Iris texture rings -->
+    <circle cx="50" cy="36" r="17" fill="none" stroke="#00a896" stroke-width="0.6" opacity="0.4"/>
+    <circle cx="50" cy="36" r="14" fill="none" stroke="#00a896" stroke-width="0.7" opacity="0.5"/>
+    <circle cx="50" cy="36" r="11" fill="none" stroke="#00a896" stroke-width="0.8" opacity="0.6"/>
+    <!-- Pupil -->
+    <circle cx="50" cy="36" r="8" fill="#00a896" opacity="0.85"/>
+    <circle cx="50" cy="36" r="5.5" fill="#060a0f"/>
+    <!-- Inner glow ring -->
+    <circle cx="50" cy="36" r="3" fill="none" stroke="#00a896" stroke-width="1" opacity="0.8"/>
+    <!-- Highlight -->
+    <circle cx="54" cy="31" r="2.5" fill="#00a896" opacity="0.6"/>
+    <circle cx="54" cy="31" r="1.2" fill="white" opacity="0.4"/>
+    <!-- Center -->
+    <circle cx="50" cy="36" r="1.5" fill="#00a896"/>
+  </svg>
+  <div style="font-family:Share Tech Mono,monospace;font-size:16px;color:#00a896;letter-spacing:3px;text-align:center;">FIVE T // OSINT</div>
   <div style="font-family:Share Tech Mono,monospace;font-size:10px;color:#4a6070;letter-spacing:2px;text-align:center;">AUTHORIZED ACCESS ONLY</div>
   <input id="pwUsername" type="text" placeholder="USERNAME" style="width:100%;background:#060a0f;border:1px solid #1a2a3a;border-radius:4px;padding:12px 14px;color:#c8d8e8;font-family:Share Tech Mono,monospace;font-size:14px;outline:none;text-align:center;letter-spacing:2px;margin-bottom:0;" onkeydown="if(event.key==='Enter')document.getElementById('pwInput').focus()"/>
   <input id="pwInput" type="password" placeholder="PASSWORD"
     style="width:100%;background:#060a0f;border:1px solid #1a2a3a;border-radius:4px;padding:12px 14px;color:#c8d8e8;font-family:Share Tech Mono,monospace;font-size:14px;outline:none;text-align:center;letter-spacing:4px;"
     onkeydown="if(event.key==='Enter')checkPw()"/>
-  <button onclick="checkPw()" style="width:100%;padding:12px;background:#00e5ff;color:#060a0f;border:none;border-radius:4px;font-family:Share Tech Mono,monospace;font-size:13px;font-weight:bold;letter-spacing:2px;cursor:pointer;">AUTHENTICATE</button>
+  <button onclick="checkPw()" style="width:100%;padding:12px;background:#00a896;color:#060a0f;border:none;border-radius:4px;font-family:Share Tech Mono,monospace;font-size:13px;font-weight:bold;letter-spacing:2px;cursor:pointer;">AUTHENTICATE</button>
   <div id="pwErr" style="font-family:Share Tech Mono,monospace;font-size:11px;color:#ff3b3b;letter-spacing:1px;display:none;">&#9888; ACCESS DENIED — INVALID CODE</div>
 </div>
 </div>
@@ -660,8 +691,8 @@ function showAuditLog() {
   const win = window.open('', '_blank');
   win.document.write('<html><head><title>FIVE T Audit Log</title>');
   win.document.write('<style>body{background:#060a0f;color:#c8d8e8;font-family:monospace;padding:20px;}');
-  win.document.write('h1{color:#00e5ff;letter-spacing:3px;}table{width:100%;border-collapse:collapse;}');
-  win.document.write('th{background:#0b1118;color:#00e5ff;padding:8px;text-align:left;font-size:11px;letter-spacing:1px;}');
+  win.document.write('h1{color:#00a896;letter-spacing:3px;}table{width:100%;border-collapse:collapse;}');
+  win.document.write('th{background:#0b1118;color:#00a896;padding:8px;text-align:left;font-size:11px;letter-spacing:1px;}');
   win.document.write('td{padding:6px 8px;font-size:11px;border-bottom:1px solid #1a2a3a;}');
   win.document.write('.login{color:#39ff14}.logout{color:#4a6070}.search{color:#ffb300}.failed{color:#ff3b3b}.blocked{color:#ff3b3b}</style></head><body>');
   win.document.write('<h1>◎ FIVE T // AUDIT LOG</h1>');
