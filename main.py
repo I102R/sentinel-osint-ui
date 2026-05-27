@@ -1,5 +1,5 @@
 """
-SENTINEL OSINT Agent - Backend Server
+FIVE T OSINT Agent - Backend Server
 Runs on Render.com (Python 3.10+)
 """
 
@@ -369,11 +369,22 @@ def module_phone(target, job_id):
 def module_plate_lookup(target, job_id):
     emit(job_id, "module_start", {"module": "plate_lookup"})
     
-    # Clean and parse plate
-    plate = target.upper().strip().replace(" ", "").replace("-", "")
+    # Clean and parse plate - preserve state if included
+    target_clean = target.upper().strip()
+    parts = target_clean.split()
+    
+    # Check if last part is a state abbreviation
+    states = ["NM","TX","AZ","CO","CA","FL","NY","IL","OH","GA","NC","MI","PA","WA","OR"]
+    if len(parts) >= 2 and parts[-1] in states:
+        plate = parts[0].replace("-", "")
+        state = parts[-1]
+    else:
+        plate = target_clean.replace(" ", "").replace("-", "")
+        state = "NM"  # default to NM
     
     lines = []
     lines.append(f"TARGET PLATE: {plate}")
+    lines.append(f"STATE:        {state}")
     lines.append(f"NOTE: Vehicle record access requires permissible purpose under DPPA.")
     lines.append(f"Law firms qualify for litigation, process serving, and investigations.")
     lines.append("")
@@ -389,8 +400,8 @@ def module_plate_lookup(target, job_id):
         ("IRB Search",              "https://www.irbsearch.com/"),
         ("Tracers",                 "https://www.tracers.com/"),
         ("NMVTIS (vehiclehistory)", "https://www.vehiclehistory.gov/"),
-        ("AutoCheck",               f"https://www.autocheck.com/vehiclehistory/search/go?stype=plate&plate={plate}&state=NM"),
-        ("VehicleHistory.com",      f"https://www.vehiclehistory.com/license-plate-search?plate={plate}&state=NM"),
+        ("AutoCheck",               f"https://www.autocheck.com/vehiclehistory/search/go?stype=plate&plate={plate}&state={state}"),
+        ("VehicleHistory.com",      f"https://www.vehiclehistory.com/license-plate-search?plate={plate}&state={state}"),
     ]
     for name, url in commercial:
         lines.append(f"[{name}]")
@@ -836,7 +847,7 @@ def module_email_investigate(target, job_id):
     # EmailRep live check
     try:
         rep_out, _, _ = run_cmd(
-            f"curl -s 'https://emailrep.io/{target}' -H 'User-Agent: sentinel-osint' 2>/dev/null",
+            f"curl -s 'https://emailrep.io/{target}' -H 'User-Agent: fivet-osint' 2>/dev/null",
             timeout=10
         )
         data = json.loads(rep_out)
@@ -1054,7 +1065,7 @@ def module_virustotal(target, job_id):
 def module_emailrep(target, job_id):
     emit(job_id, "module_start", {"module": "emailrep"})
     out, _, _ = run_cmd(
-        f"curl -s 'https://emailrep.io/{target}' -H 'User-Agent: sentinel-osint' 2>/dev/null"
+        f"curl -s 'https://emailrep.io/{target}' -H 'User-Agent: fivet-osint' 2>/dev/null"
     )
     try:
         data = json.loads(out)
@@ -1084,7 +1095,7 @@ def module_haveibeenpwned(target, job_id):
     else:
         out, _, _ = run_cmd(
             f"curl -s 'https://haveibeenpwned.com/api/v3/breachedaccount/{target}' "
-            f"-H 'hibp-api-key: {api_key}' -H 'User-Agent: sentinel-osint' 2>/dev/null"
+            f"-H 'hibp-api-key: {api_key}' -H 'User-Agent: fivet-osint' 2>/dev/null"
         )
         try:
             data = json.loads(out)
@@ -1227,7 +1238,7 @@ def health():
 
 @app.route("/")
 def index():
-    return "SENTINEL OSINT Backend running. Connect your frontend."
+    return "FIVE T OSINT Backend running. Connect your frontend."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
