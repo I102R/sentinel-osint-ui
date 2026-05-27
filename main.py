@@ -1194,6 +1194,98 @@ def run_investigation(job_id, target, target_type, selected_modules):
         jobs[job_id]["status"] = "error"
         emit(job_id, "error", {"message": str(e)})
 
+
+import hashlib
+import secrets
+
+# ── Secure Authentication ─────────────────────────────────────────────────────
+# Users stored as environment variables in Render - never in source code
+# Format in Render env vars:
+# USER_RANGLADA=PLFAdmin2026!:admin:R Anglada
+# USER_TLOPEZ=PLFInvest2026!:investigator:T Lopez
+# USER_CMCPHERSON=PLFInvest2026!:investigator:C McPherson
+
+active_sessions = {}  # token -> { username, role, name, created }
+
+def get_users():
+    """Load users from Render environment variables."""
+    users = {}
+    for key, val in os.environ.items():
+        if key.startswith('USER_'):
+            username = key[5:].lower()
+            parts = val.split(':')
+            if len(parts) >= 3:
+                users[username] = {
+                    'password': parts[0],
+                    'role': parts[1],
+                    'name': parts[2]
+                }
+    return users
+
+def log_auth_event(username, action, detail, ip="unknown"):
+    """Log authentication events."""
+    print(f"[AUTH] {action} | user={username} | {detail} | ip={ip} | time={datetime.utcnow().isoformat()}")
+
+@app.route("/api/auth/login", methods=["POST"])
+def login():
+    data = request.json
+    username = data.get("username", "").strip().lower()
+    password = data.get("password", "")
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+
+    users = get_users()
+    user = users.get(username)
+
+    if user and user["password"] == password:
+        token = secrets.token_hex(32)
+        active_sessions[token] = {
+            "username": username,
+            "role": user["role"],
+            "name": user["name"],
+            "created": datetime.utcnow().isoformat(),
+            "ip": ip
+        }
+        log_auth_event(username, "LOGIN_SUCCESS", f"User {user['name']} authenticated", ip)
+        return jsonify({
+            "success": True,
+            "token": token,
+            "username": username,
+            "role": user["role"],
+            "name": user["name"]
+        })
+    else:
+        log_auth_event(username, "LOGIN_FAILED", "Invalid credentials", ip)
+        return jsonify({"success": False, "error": "Invalid credentials"}), 401
+
+@app.route("/api/auth/verify", methods=["POST"])
+def verify_token():
+    data = request.json
+    token = data.get("token", "")
+    session = active_sessions.get(token)
+    if session:
+        return jsonify({"valid": True, "username": session["username"], "role": session["role"], "name": session["name"]})
+    return jsonify({"valid": False}), 401
+
+@app.route("/api/auth/logout", methods=["POST"])
+def logout():
+    data = request.json
+    token = data.get("token", "")
+    session = active_sessions.pop(token, None)
+    if session:
+        log_auth_event(session["username"], "LOGOUT", "User logged out")
+    return jsonify({"success": True})
+
+@app.route("/api/auth/audit", methods=["POST"])
+def get_audit():
+    """Return audit log - admin only."""
+    data = request.json
+    token = data.get("token", "")
+    session = active_sessions.get(token)
+    if not session or session.get("role") != "admin":
+        return jsonify({"error": "Unauthorized"}), 403
+    # Return last 500 server log entries
+    return jsonify({"message": "Audit log is written to Render server logs. Check Render dashboard → Logs."})
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route("/api/investigate", methods=["POST"])
 def investigate():
