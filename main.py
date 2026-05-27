@@ -385,6 +385,172 @@ def module_phone(target, job_id):
 
 
 
+
+def module_business(target, job_id):
+    emit(job_id, "module_start", {"module": "business"})
+    
+    name_plus = target.replace(" ", "+")
+    name_url = target.replace(" ", "-").lower()
+    
+    lines = []
+    lines.append(f"TARGET: {target}")
+    lines.append("")
+
+    # ── Live OpenCorporates API (free) ────────────────────────────────────────
+    try:
+        out, _, _ = run_cmd(
+            f"curl -s 'https://api.opencorporates.com/v0.4/companies/search?q={name_plus}&jurisdiction_code=us_nm&format=json' 2>/dev/null",
+            timeout=10
+        )
+        data = json.loads(out)
+        companies = data.get("results", {}).get("companies", [])
+        if companies:
+            lines.append("=" * 50)
+            lines.append("OPENCORPORATES — NEW MEXICO RESULTS")
+            lines.append("=" * 50)
+            lines.append("")
+            for c in companies[:5]:
+                co = c.get("company", {})
+                lines.append(f"  Name:       {co.get('name', 'N/A')}")
+                lines.append(f"  Status:     {co.get('current_status', 'N/A')}")
+                lines.append(f"  Type:       {co.get('company_type', 'N/A')}")
+                lines.append(f"  Registered: {co.get('incorporation_date', 'N/A')}")
+                lines.append(f"  Number:     {co.get('company_number', 'N/A')}")
+                lines.append(f"  URL:        {co.get('opencorporates_url', 'N/A')}")
+                lines.append("")
+        else:
+            lines.append("No NM results from OpenCorporates.")
+            lines.append("")
+    except Exception as e:
+        lines.append(f"OpenCorporates: {str(e)}")
+        lines.append("")
+
+    # ── Secretary of State Lookups ────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("SECRETARY OF STATE — DIRECT SEARCHES")
+    lines.append("=" * 50)
+    lines.append("")
+
+    sos_sites = [
+        ("NM SOS Business Search",      f"https://portal.sos.state.nm.us/BFS/online/CorporationFormation/SearchBusinesses?SearchCriteria={name_plus}"),
+        ("NM SOS (alternate)",          f"https://businessportal.sos.nm.gov/"),
+        ("TX SOS Business Search",      f"https://mycpa.cpa.state.tx.us/coa/Index.html"),
+        ("AZ SOS Business Search",      f"https://ecorp.azcc.gov/BusinessSearch/BusinessSearch?SearchTerm={name_plus}"),
+        ("CO SOS Business Search",      f"https://www.sos.state.co.us/biz/BusinessEntityCriteriaExt.do?nameTyp=ENT&masterFileId=&entityName={name_plus}"),
+        ("CA SOS Business Search",      f"https://bizfileonline.sos.ca.gov/search/business"),
+        ("FL SOS Business Search",      f"https://search.sunbiz.org/Inquiry/CorporationSearch/SearchResults?searchNameOrder={name_plus}"),
+        ("NY SOS Business Search",      f"https://apps.dos.ny.gov/publicInquiry/EntitySearch"),
+    ]
+    for name, url in sos_sites:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Federal Business Databases ────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("FEDERAL BUSINESS DATABASES")
+    lines.append("=" * 50)
+    lines.append("")
+
+    federal = [
+        ("SAM.gov (Federal Contractors)",   f"https://sam.gov/search/?keywords={name_plus}&sort=relevanceScore&index=ei&is_active=true&page=1"),
+        ("USASpending.gov",                  f"https://www.usaspending.gov/search/?hash="),
+        ("SEC EDGAR (Public Companies)",     f"https://www.sec.gov/cgi-bin/browse-edgar?company={name_plus}&CIK=&type=&dateb=&owner=include&count=40&search_text=&action=getcompany"),
+        ("FCC License Search",               f"https://wireless2.fcc.gov/UlsApp/UlsSearch/searchLicense.jsp"),
+        ("PACER Business Search",            f"https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
+        ("BetterBusiness Bureau",            f"https://www.bbb.org/search?find_text={name_plus}&find_loc=Albuquerque%2C+NM"),
+        ("OpenCorporates All States",        f"https://opencorporates.com/companies?q={name_plus}&jurisdiction_code=us&utf8=✓"),
+    ]
+    for name, url in federal:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Business Intelligence Sites ───────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("BUSINESS INTELLIGENCE")
+    lines.append("=" * 50)
+    lines.append("")
+
+    intel = [
+        ("LinkedIn Company",        f"https://www.linkedin.com/search/results/companies/?keywords={name_plus}"),
+        ("Dun & Bradstreet",        f"https://www.dnb.com/business-directory/company-search.html#{name_plus}"),
+        ("Manta",                   f"https://www.manta.com/mb_{name_url}"),
+        ("Yelp Business",           f"https://www.yelp.com/search?find_desc={name_plus}&find_loc=Albuquerque%2C+NM"),
+        ("Google Business",         f"https://www.google.com/search?q={name_plus}+Albuquerque+NM+business"),
+        ("Glassdoor",               f"https://www.glassdoor.com/Search/results.htm?keyword={name_plus}"),
+        ("Indeed Company",          f"https://www.indeed.com/cmp/{name_url}"),
+        ("Bizapedia",               f"https://www.bizapedia.com/nm/"),
+        ("Corporationwiki",         f"https://www.corporationwiki.com/search/results?term={name_plus}"),
+    ]
+    for name, url in intel:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Registered Agent & Officer Search ────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("REGISTERED AGENT & OFFICER SEARCH")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("To find who owns or runs this business:")
+    lines.append("")
+    
+    officer_searches = [
+        ("OpenCorporates Officers",  f"https://opencorporates.com/officers?q={name_plus}&utf8=✓"),
+        ("Corporationwiki Network",  f"https://www.corporationwiki.com/search/results?term={name_plus}"),
+        ("NM SOS Officer Search",   f"https://portal.sos.state.nm.us/BFS/online/CorporationFormation/SearchBusinesses?SearchCriteria={name_plus}"),
+    ]
+    for name, url in officer_searches:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Google Dorks ──────────────────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("GOOGLE DORKS")
+    lines.append("=" * 50)
+    lines.append("")
+
+    dorks = [
+        f'"{target}" owner OR CEO OR president',
+        f'"{target}" registered agent New Mexico',
+        f'"{target}" lawsuit OR lawsuit OR litigation',
+        f'"{target}" BBB complaint',
+        f'"{target}" fraud OR scam OR complaint',
+        f'"{target}" annual report',
+        f'"{target}" site:linkedin.com',
+        f'"{target}" New Mexico corporation',
+    ]
+    for dork in dorks:
+        encoded = dork.replace(" ", "+").replace('"', '%22')
+        lines.append(f"  {dork}")
+        lines.append(f"  https://www.google.com/search?q={encoded}")
+        lines.append("")
+
+    # ── Live DuckDuckGo ───────────────────────────────────────────────────────
+    try:
+        ddg_out, _, _ = run_cmd(
+            f"curl -s 'https://api.duckduckgo.com/?q={name_plus}+company&format=json&no_html=1' 2>/dev/null",
+            timeout=10
+        )
+        ddg_data = json.loads(ddg_out)
+        if ddg_data.get("Abstract"):
+            lines.append("=" * 50)
+            lines.append("PUBLIC BUSINESS SUMMARY")
+            lines.append("=" * 50)
+            lines.append("")
+            lines.append(ddg_data["Abstract"])
+            if ddg_data.get("AbstractURL"):
+                lines.append(f"Source: {ddg_data['AbstractURL']}")
+            lines.append("")
+    except:
+        pass
+
+    result = "\n".join(lines)
+    emit(job_id, "module_done", {"module": "business", "result": result})
+    return result
+
 def module_plate_lookup(target, job_id):
     emit(job_id, "module_start", {"module": "plate_lookup"})
     
@@ -1177,6 +1343,7 @@ def module_google_dorks(target, job_id):
 MODULE_MAP = {
     "people":       module_people_search,
     "social_media":  module_social_media,
+    "business":      module_business,
     "plate_lookup":   module_plate_lookup,
     "image_metadata": module_image_metadata,
     "email_investigate": module_email_investigate,
