@@ -188,8 +188,11 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
       FIVE T // OSINT AGENT
     </div>
     <div class="hdr-right">
+      <span id="userDisplay" style="font-size:10px;color:#00a896;letter-spacing:1px;"></span>
       <span><span class="dot-live"></span>LIVE</span>
       <span id="backendStatus" style="color:var(--warn)">⬤ BACKEND: NOT CONNECTED</span>
+      <button onclick="showAuditLog()" id="auditBtn" style="display:none;padding:4px 10px;background:transparent;border:1px solid #00a896;color:#00a896;font-family:Share Tech Mono,monospace;font-size:9px;cursor:pointer;border-radius:2px;letter-spacing:1px;">AUDIT LOG</button>
+      <button onclick="logout()" style="padding:4px 10px;background:transparent;border:1px solid #ff3b3b;color:#ff3b3b;font-family:Share Tech Mono,monospace;font-size:9px;cursor:pointer;border-radius:2px;letter-spacing:1px;">LOGOUT</button>
       <span id="clock"></span>
     </div>
   </header>
