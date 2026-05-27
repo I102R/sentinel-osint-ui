@@ -9,8 +9,26 @@ import subprocess, threading, json, os, time, queue, socket
 from datetime import datetime
 
 app = Flask(__name__)
-app.config['SERVER_NAME'] = None
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+app.config['PROPAGATE_EXCEPTIONS'] = True
+CORS(app)
+
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
+
+@app.before_request
+def handle_options():
+    from flask import request as req
+    if req.method == 'OPTIONS':
+        from flask import make_response
+        response = make_response()
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+        return response
 
 jobs = {}
 
@@ -1334,5 +1352,5 @@ def index():
     return "FIVE T OSINT Backend running. Connect your frontend."
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port, debug=False)
