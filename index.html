@@ -600,9 +600,9 @@ document.getElementById('searchInput').addEventListener('keydown', e => {
 // ── Password Protection ───────────────────────────────────────────────────────
 // ── User Account System ──────────────────────────────────────────────────────
 const USERS = {
-  'ranglada':    { password: 'PLFAdmin2026!',  role: 'admin',       name: 'R Anglada' },
-  'tlopez':   { password: 'PLFInvest2026!', role: 'investigator', name: 'T Lopez' },
-  'cmcpherson': { password: 'PLFInvest2026!', role: 'investigator', name: 'C McPherson' },
+  'ranglada':    { password: 'Admin2026!',  role: 'admin',       name: 'R Anglada' },
+  'tlopez':   { password: 'Invest2026!', role: 'investigator', name: 'T Lopez' },
+  'cmcpherson': { password: 'Invest2026!', role: 'investigator', name: 'C McPherson' },
 };
 // ADMIN: To add users, edit the USERS object above in index.html on GitHub
 // Format: 'username': { password: 'Password', role: 'admin' or 'investigator', name: 'Full Name' }
@@ -678,11 +678,20 @@ function updateUserDisplay() {
   }
 }
 
-function logout() {
-  logAudit(currentUser?.username || 'unknown', 'LOGOUT', 'User logged out');
+async function logout() {
+  try {
+    if (authToken) {
+      await fetch(`${BACKEND}/api/auth/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: authToken })
+      });
+    }
+  } catch(e) {}
   sessionStorage.removeItem('fivet_auth');
   currentUser = null;
   isAdmin = false;
+  authToken = null;
   location.reload();
 }
 
@@ -706,16 +715,38 @@ function showAuditLog() {
 }
 
 // Check if already authenticated this session
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
   const saved = sessionStorage.getItem('fivet_auth');
   if (saved) {
     try {
-      currentUser = JSON.parse(saved);
-      isAdmin = currentUser.role === 'admin';
-      document.getElementById('lockscreen').style.display = 'none';
-      updateUserDisplay();
-      init();
-    } catch(e) { sessionStorage.removeItem('fivet_auth'); }
+      const parsed = JSON.parse(saved);
+      authToken = parsed.token;
+      // Verify token is still valid with backend
+      const res = await fetch(`${BACKEND}/api/auth/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: authToken })
+      });
+      const data = await res.json();
+      if (data.valid) {
+        currentUser = { username: data.username, role: data.role, name: data.name };
+        isAdmin = data.role === 'admin';
+        document.getElementById('lockscreen').style.display = 'none';
+        updateUserDisplay();
+        init();
+      } else {
+        sessionStorage.removeItem('fivet_auth');
+      }
+    } catch(e) { 
+      // If backend unreachable, still allow cached session
+      try {
+        currentUser = JSON.parse(saved);
+        isAdmin = currentUser.role === 'admin';
+        document.getElementById('lockscreen').style.display = 'none';
+        updateUserDisplay();
+        init();
+      } catch(e2) { sessionStorage.removeItem('fivet_auth'); }
+    }
   }
 });
 </script>
