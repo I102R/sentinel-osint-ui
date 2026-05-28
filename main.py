@@ -11,10 +11,6 @@ from datetime import datetime
 app = Flask(__name__)
 app.config['PROPAGATE_EXCEPTIONS'] = True
 
-# Fix Werkzeug host allowlist issue
-from werkzeug.middleware.proxy_fix import ProxyFix
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
-
 CORS(app)
 
 @app.after_request
