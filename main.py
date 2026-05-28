@@ -10,8 +10,15 @@ from datetime import datetime
 
 app = Flask(__name__)
 app.config['PROPAGATE_EXCEPTIONS'] = True
-
 CORS(app)
+
+@app.route('/api/<path:path>', methods=['OPTIONS'])
+def options_handler(path):
+    response = app.make_default_options_response()
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    return response
 
 @app.after_request
 def after_request(response):
@@ -1474,12 +1481,21 @@ def get_audit():
     return jsonify({"message": "Audit log is written to Render server logs. Check Render dashboard → Logs."})
 
 # ── Routes ────────────────────────────────────────────────────────────────────
-@app.route("/api/investigate", methods=["POST"])
+@app.route("/api/investigate", methods=["GET", "POST"])
 def investigate():
-    data = request.json
+    if request.method == "POST":
+        data = request.json or {}
+    else:
+        data = request.args
     target = data.get("target", "").strip()
     target_type = data.get("type", "DOMAIN")
-    selected_modules = data.get("modules", list(MODULE_MAP.keys()))
+    modules_param = data.get("modules", "")
+    if isinstance(modules_param, str) and modules_param:
+        selected_modules = modules_param.split(",")
+    elif isinstance(modules_param, list):
+        selected_modules = modules_param
+    else:
+        selected_modules = list(MODULE_MAP.keys())
     if not target:
         return jsonify({"error": "No target provided"}), 400
     job_id = f"job_{int(time.time()*1000)}"
