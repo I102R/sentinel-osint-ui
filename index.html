@@ -290,6 +290,7 @@ const ALL_MODULES = [
   { id:'email_investigate', name:'Email Investigation', tag:'EMAIL', types:['EMAIL'] },
   { id:'social_media',      name:'Social Media Search',  tag:'SOCL',  types:['PERSON','USERNAME'] },
   { id:'plate_lookup',      name:'License Plate Lookup', tag:'PLATE', types:['PLATE'] },
+  { id:'business',          name:'Business Search',      tag:'BIZ',   types:['COMPANY'] },
   { id:'image_metadata',    name:'Image Metadata',        tag:'IMG',   types:['DOMAIN','IP','PERSON','USERNAME'] },
   { id:'whois',        name:'WHOIS Lookup',        tag:'WHOIS', types:['DOMAIN','IP'] },
   { id:'dns',          name:'DNS Records',          tag:'DNS',   types:['DOMAIN'] },
@@ -429,10 +430,13 @@ async function runInvestigation() {
 
   try {
     // POST to backend
-    const res = await fetch(`${BACKEND}/api/investigate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ target: query, type: targetType, modules: mods }),
+    const params = new URLSearchParams({
+      target: query,
+      type: targetType,
+      modules: mods.join(',')
+    });
+    const res = await fetch(`${BACKEND}/api/investigate?${params}`, {
+      method: 'GET',
     });
     const { job_id } = await res.json();
 
