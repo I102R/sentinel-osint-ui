@@ -10,15 +10,19 @@ from datetime import datetime
 
 app = Flask(__name__)
 app.config['PROPAGATE_EXCEPTIONS'] = True
-CORS(app)
 
-@app.route('/api/<path:path>', methods=['OPTIONS'])
-def options_handler(path):
-    response = app.make_default_options_response()
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-    return response
+# Allow all hosts
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
+# Disable trusted hosts check
+try:
+    from werkzeug.serving import WSGIRequestHandler
+    WSGIRequestHandler.server_version = "FIVE-T"
+except:
+    pass
+
+CORS(app)
 
 @app.after_request
 def after_request(response):
@@ -70,18 +74,74 @@ def tool_available(name):
 def module_people_search(target, job_id):
     emit(job_id, "module_start", {"module": "people"})
 
+    # ── Smart Name Parser ────────────────────────────────────────────────────
+    US_STATES = {
+        'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN',
+        'IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV',
+        'NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN',
+        'TX','UT','VT','VA','WA','WV','WI','WY','DC'
+    }
+
     if "," in target:
+        # Format: "First [Middle] Last, City ST"
         name_part = target.split(",")[0].strip()
         location_part = target.split(",")[1].strip()
     else:
         parts = target.split()
-        name_part = " ".join(parts[:2]) if len(parts) >= 2 else target
-        location_part = " ".join(parts[2:]) if len(parts) > 2 else ""
+        # Check if last word is a state abbreviation
+        if len(parts) >= 3 and parts[-1].upper() in US_STATES:
+            # Last word is state, second to last is city start
+            # Find where location starts - look for state
+            state = parts[-1].upper()
+            # Check if second to last is also a state (e.g. "New Mexico" = 2 words)
+            # Assume last 2 parts are "City State" or last 1 is state
+            # Name is everything before the last 2 words
+            if len(parts) >= 4:
+                name_part = " ".join(parts[:-2])
+                location_part = " ".join(parts[-2:])
+            else:
+                # Only 3 words like "John Smith NM" - last is state, no city
+                name_part = " ".join(parts[:-1])
+                location_part = parts[-1]
+        elif len(parts) == 1:
+            name_part = target
+            location_part = ""
+        elif len(parts) == 2:
+            # "First Last" - just a name
+            name_part = target
+            location_part = ""
+        elif len(parts) == 3:
+            # Could be "First Middle Last" or "First Last City"
+            # If middle part is 1-2 chars (initial), treat as name
+            if len(parts[1].replace('.','')) <= 2:
+                name_part = target  # "Patricia L Annis"
+                location_part = ""
+            else:
+                # "First Last City" - ambiguous, treat all as name
+                name_part = target
+                location_part = ""
+        else:
+            # 4+ words without state - first 2-3 as name, rest as location
+            # Check if part[2] looks like a middle initial
+            if len(parts[1].replace('.','')) <= 2:
+                # "First MI Last City..." format
+                name_part = " ".join(parts[:3])
+                location_part = " ".join(parts[3:])
+            else:
+                name_part = " ".join(parts[:2])
+                location_part = " ".join(parts[2:])
 
-    wp_first = name_part.split()[0] if name_part else ""
-    wp_last = name_part.split()[-1] if len(name_part.split()) > 1 else ""
-    wp_city = location_part.split()[0] if location_part else ""
-    wp_state = location_part.split()[-1] if location_part else ""
+    # Parse name components
+    name_words = name_part.split()
+    wp_first = name_words[0] if name_words else ""
+    wp_last = name_words[-1] if len(name_words) > 1 else ""
+    wp_middle = name_words[1] if len(name_words) == 3 else ""
+
+    # Parse location components  
+    loc_words = location_part.split() if location_part else []
+    wp_state = loc_words[-1].upper() if loc_words else ""
+    wp_city = " ".join(loc_words[:-1]) if len(loc_words) > 1 else loc_words[0] if loc_words else ""
+
     name_plus = name_part.replace(" ", "+")
     loc_plus = location_part.replace(" ", "+")
     name_url = name_part.replace(" ", "-").lower()
