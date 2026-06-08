@@ -912,7 +912,7 @@ def module_social_media(target, job_id):
     first = parts[0] if parts else target
     last = parts[-1] if len(parts) > 1 else ""
     wp_first_s = first
-    wp_last_s = last""
+    wp_last_s = last
     
     lines = []
     lines.append(f"TARGET: {name_quoted}")
