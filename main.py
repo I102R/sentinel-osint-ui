@@ -5,17 +5,15 @@ Runs on Render.com (Python 3.10+)
 
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
-import subprocess, threading, json, os, time, queue, socket
+import subprocess, threading, json, os, time, queue, socket, re
 from datetime import datetime
 
 app = Flask(__name__)
 app.config['PROPAGATE_EXCEPTIONS'] = True
 
-# Allow all hosts
 from werkzeug.middleware.proxy_fix import ProxyFix
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
-# Disable trusted hosts check
 try:
     from werkzeug.serving import WSGIRequestHandler
     WSGIRequestHandler.server_version = "FIVE-T"
@@ -74,7 +72,6 @@ def tool_available(name):
 def module_people_search(target, job_id):
     emit(job_id, "module_start", {"module": "people"})
 
-    # ── Smart Name Parser ────────────────────────────────────────────────────
     US_STATES = {
         'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN',
         'IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV',
@@ -83,61 +80,40 @@ def module_people_search(target, job_id):
     }
 
     if "," in target:
-        # Format: "First [Middle] Last, City ST"
         name_part = target.split(",")[0].strip()
         location_part = target.split(",")[1].strip()
     else:
         parts = target.split()
-        # Check if last word is a state abbreviation
         if len(parts) >= 3 and parts[-1].upper() in US_STATES:
-            # Last word is state, second to last is city start
-            # Find where location starts - look for state
             state = parts[-1].upper()
-            # Check if second to last is also a state (e.g. "New Mexico" = 2 words)
-            # Assume last 2 parts are "City State" or last 1 is state
-            # Name is everything before the last 2 words
             if len(parts) >= 4:
                 name_part = " ".join(parts[:-2])
                 location_part = " ".join(parts[-2:])
             else:
-                # Only 3 words like "John Smith NM" - last is state, no city
                 name_part = " ".join(parts[:-1])
                 location_part = parts[-1]
-        elif len(parts) == 1:
-            name_part = target
-            location_part = ""
-        elif len(parts) == 2:
-            # "First Last" - just a name
+        elif len(parts) <= 2:
             name_part = target
             location_part = ""
         elif len(parts) == 3:
-            # Could be "First Middle Last" or "First Last City"
-            # If middle part is 1-2 chars (initial), treat as name
             if len(parts[1].replace('.','')) <= 2:
-                name_part = target  # "Patricia L Annis"
+                name_part = target
                 location_part = ""
             else:
-                # "First Last City" - ambiguous, treat all as name
                 name_part = target
                 location_part = ""
         else:
-            # 4+ words without state - first 2-3 as name, rest as location
-            # Check if part[2] looks like a middle initial
             if len(parts[1].replace('.','')) <= 2:
-                # "First MI Last City..." format
                 name_part = " ".join(parts[:3])
                 location_part = " ".join(parts[3:])
             else:
                 name_part = " ".join(parts[:2])
                 location_part = " ".join(parts[2:])
 
-    # Parse name components
     name_words = name_part.split()
     wp_first = name_words[0] if name_words else ""
     wp_last = name_words[-1] if len(name_words) > 1 else ""
-    wp_middle = name_words[1] if len(name_words) == 3 else ""
 
-    # Parse location components  
     loc_words = location_part.split() if location_part else []
     wp_state = loc_words[-1].upper() if loc_words else ""
     wp_city = " ".join(loc_words[:-1]) if len(loc_words) > 1 else loc_words[0] if loc_words else ""
@@ -157,22 +133,20 @@ def module_people_search(target, job_id):
     lines.append("=" * 50)
     lines.append("")
 
-    # Only free sources that return real data without paywalls
     sites = [
-        ("TRUEPEOPLESEARCH",  f"https://www.truepeoplesearch.com/results?name={name_plus}&citystatezip={loc_plus}"),
-        ("FASTPEOPLESEARCH",  f"https://www.fastpeoplesearch.com/name/{name_url}"),
-        ("WHITEPAGES (free)", f"https://www.whitepages.com/name/{wp_first}-{wp_last}/{wp_city}-{wp_state}"),
-        ("USPHONEBOOK",       f"https://www.usphonebook.com/{wp_first}-{wp_last}"),
-        ("CHECKPEOPLE",       f"https://checkpeople.com/search?firstName={wp_first}&lastName={wp_last}&state={wp_state}"),
-        ("RADARIS",           f"https://radaris.com/p/{wp_first}-{wp_last}/"),
-        ("VOTERRECORDS",      f"https://voterrecords.com/voters/{name_url}/1"),
-        ("CLUSTRMAPS",        f"https://clustrmaps.com/person/{wp_last}-{wp_first}/"),
+        ("TRUEPEOPLESEARCH",     f"https://www.truepeoplesearch.com/results?name={name_plus}&citystatezip={loc_plus}"),
+        ("FASTPEOPLESEARCH",     f"https://www.fastpeoplesearch.com/name/{name_url}"),
+        ("WHITEPAGES (free)",    f"https://www.whitepages.com/name/{wp_first}-{wp_last}/{wp_city}-{wp_state}"),
+        ("USPHONEBOOK",          f"https://www.usphonebook.com/{wp_first}-{wp_last}"),
+        ("CHECKPEOPLE",          f"https://checkpeople.com/search?firstName={wp_first}&lastName={wp_last}&state={wp_state}"),
+        ("RADARIS",              f"https://radaris.com/p/{wp_first}-{wp_last}/"),
+        ("VOTERRECORDS",         f"https://voterrecords.com/voters/{name_url}/1"),
+        ("CLUSTRMAPS",           f"https://clustrmaps.com/person/{wp_last}-{wp_first}/"),
         ("PUBLICRECORDS.ONLINE", f"https://publicrecords.online/search/?first_name={wp_first}&last_name={wp_last}&state={wp_state}"),
-        ("SEARCHPEOPLEFREE",  f"https://www.searchpeoplefree.com/find/{wp_first}-{wp_last}"),
-        ("NUWBER",            f"https://nuwber.com/search?firstName={wp_first}&lastName={wp_last}&city={wp_city}&state={wp_state}"),
-        ("ADDRESSES.COM",     f"https://www.addresses.com/people/{wp_first}+{wp_last}/{wp_state}/"),
+        ("SEARCHPEOPLEFREE",     f"https://www.searchpeoplefree.com/find/{wp_first}-{wp_last}"),
+        ("NUWBER",               f"https://nuwber.com/search?firstName={wp_first}&lastName={wp_last}&city={wp_city}&state={wp_state}"),
+        ("ADDRESSES.COM",        f"https://www.addresses.com/people/{wp_first}+{wp_last}/{wp_state}/"),
     ]
-
     for name, url in sites:
         lines.append(f"[{name}]")
         lines.append(f"  {url}")
@@ -205,8 +179,8 @@ def module_people_search(target, job_id):
     courts = [
         ("PACER Federal Courts",    "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
         ("OpenSanctions Watchlist", f"https://www.opensanctions.org/search/?q={name_plus}"),
-        ("NM Courts (CourtLook)",   f"https://caselookup.nmcourts.gov/caselookup/app"),
-        ("VINE Offender Search",    f"https://vinelink.vineapps.com/search/NM/Person"),
+        ("NM Courts (CourtLook)",   "https://caselookup.nmcourts.gov/caselookup/app"),
+        ("VINE Offender Search",    "https://vinelink.vineapps.com/search/NM/Person"),
     ]
     for name, url in courts:
         lines.append(f"[{name}]")
@@ -236,7 +210,6 @@ def module_people_search(target, job_id):
         lines.append(f"  https://www.google.com/search?q={encoded}")
         lines.append("")
 
-    # Live sanctions check
     try:
         san_out, _, _ = run_cmd(
             f"curl -s 'https://api.opensanctions.org/search/default?q={name_plus}&schema=Person' 2>/dev/null",
@@ -261,6 +234,7 @@ def module_people_search(target, job_id):
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "people", "result": result})
     return result
+
 
 def module_whois(target, job_id):
     emit(job_id, "module_start", {"module": "whois"})
@@ -292,6 +266,7 @@ def module_whois(target, job_id):
     emit(job_id, "module_done", {"module": "whois", "result": result})
     return result
 
+
 def module_dns(target, job_id):
     emit(job_id, "module_start", {"module": "dns"})
     lines = []
@@ -302,6 +277,7 @@ def module_dns(target, job_id):
     result = "\n".join(lines) if lines else "No DNS records found."
     emit(job_id, "module_done", {"module": "dns", "result": result})
     return result
+
 
 def module_nmap(target, job_id):
     emit(job_id, "module_start", {"module": "nmap"})
@@ -329,9 +305,9 @@ def module_nmap(target, job_id):
     emit(job_id, "module_done", {"module": "nmap", "result": result})
     return result
 
+
 def module_phone(target, job_id):
     emit(job_id, "module_start", {"module": "phone"})
-    # Clean phone number - remove formatting
     clean = target.replace("-","").replace("(","").replace(")","").replace(" ","").replace("+1","").strip()
     formatted = f"({clean[:3]}) {clean[3:6]}-{clean[6:]}" if len(clean) == 10 else target
     phone_plus1 = f"+1{clean}" if len(clean) == 10 else target
@@ -341,21 +317,40 @@ def module_phone(target, job_id):
     lines.append(f"CLEANED:   {clean}")
     lines.append("")
 
-    # Live carrier/spam lookup via IPQualityScore (free, no key needed for basic)
-    try:
-        out, _, _ = run_cmd(
-            f"curl -s 'https://www.ipqualityscore.com/api/json/phone/YOUR_KEY/{clean}' 2>/dev/null",
-            timeout=10
-        )
-        # Even without API key, try numverify free tier
-        nv_out, _, _ = run_cmd(
-            f"curl -s 'http://apilayer.net/api/validate?access_key=free&number={clean}&country_code=US&format=1' 2>/dev/null",
-            timeout=10
-        )
+    # ── Live carrier lookup — uses env vars, no hardcoded keys ───────────────
+    ipqs_key = os.environ.get("IPQS_API_KEY", "")
+    nv_key = os.environ.get("NUMVERIFY_API_KEY", "")
+
+    if ipqs_key:
         try:
+            ipqs_out, _, _ = run_cmd(
+                f"curl -s 'https://www.ipqualityscore.com/api/json/phone/{ipqs_key}/{clean}' 2>/dev/null",
+                timeout=10
+            )
+            ipqs_data = json.loads(ipqs_out)
+            if ipqs_data.get("success"):
+                lines.append("=== CARRIER INTELLIGENCE (IPQS) ===")
+                lines.append(f"Valid:        {ipqs_data.get('valid', 'N/A')}")
+                lines.append(f"Line Type:    {ipqs_data.get('line_type', 'N/A')}")
+                lines.append(f"Carrier:      {ipqs_data.get('carrier', 'N/A')}")
+                lines.append(f"Country:      {ipqs_data.get('country', 'N/A')}")
+                lines.append(f"Risky:        {ipqs_data.get('risky', False)}")
+                lines.append(f"Spam Score:   {ipqs_data.get('fraud_score', 'N/A')}")
+                lines.append(f"VoIP:         {ipqs_data.get('VOIP', False)}")
+                lines.append(f"Prepaid:      {ipqs_data.get('prepaid', False)}")
+                lines.append("")
+        except:
+            pass
+
+    if nv_key:
+        try:
+            nv_out, _, _ = run_cmd(
+                f"curl -s 'http://apilayer.net/api/validate?access_key={nv_key}&number={clean}&country_code=US&format=1' 2>/dev/null",
+                timeout=10
+            )
             nv_data = json.loads(nv_out)
             if nv_data.get("valid"):
-                lines.append("=== CARRIER INTELLIGENCE ===")
+                lines.append("=== CARRIER INTELLIGENCE (NUMVERIFY) ===")
                 lines.append(f"Valid:        {nv_data.get('valid', 'N/A')}")
                 lines.append(f"Line Type:    {nv_data.get('line_type', 'N/A')}")
                 lines.append(f"Carrier:      {nv_data.get('carrier', 'N/A')}")
@@ -364,8 +359,11 @@ def module_phone(target, job_id):
                 lines.append("")
         except:
             pass
-    except:
-        pass
+
+    if not ipqs_key and not nv_key:
+        lines.append("=== CARRIER INTELLIGENCE ===")
+        lines.append("Add IPQS_API_KEY or NUMVERIFY_API_KEY to Render env vars for live carrier data.")
+        lines.append("")
 
     lines.append("=" * 50)
     lines.append("REVERSE LOOKUP SITES — CLICK TO SEARCH")
@@ -374,7 +372,7 @@ def module_phone(target, job_id):
 
     sites = [
         ("TRUEPEOPLESEARCH", f"https://www.truepeoplesearch.com/results?phoneno={clean}"),
-        ("WHITEPAGES",       f"https://www.whitepages.com/phone/{formatted.replace(' ','-').replace('(','').replace(')','').replace(' ','-')}"),
+        ("WHITEPAGES",       f"https://www.whitepages.com/phone/{clean}"),
         ("SPOKEO",           f"https://www.spokeo.com/phone-search/{clean}"),
         ("BEENVERIFIED",     f"https://www.beenverified.com/phone/{clean}/"),
         ("INTELIUS",         f"https://intelius.com/phone-lookup/{clean}/"),
@@ -382,7 +380,7 @@ def module_phone(target, job_id):
         ("USPHONEBOOK",      f"https://www.usphonebook.com/{clean}"),
         ("411.COM",          f"https://www.411.com/phone/{clean}"),
         ("CALLERMART",       f"https://www.callermart.com/phone/{clean}"),
-        ("ZLOOKUP",          f"https://www.zlookup.com/"),
+        ("ZLOOKUP",          "https://www.zlookup.com/"),
     ]
     for name, url in sites:
         lines.append(f"[{name}]")
@@ -395,12 +393,12 @@ def module_phone(target, job_id):
     lines.append("")
 
     spam_sites = [
-        ("800NOTES",      f"https://800notes.com/Phone.aspx/{clean}"),
-        ("CALLERCENTER",  f"https://callercenter.com/{clean}"),
-        ("WHOCALLEDUS",   f"https://whocalledus.com/calls/{clean}/"),
-        ("CALLERCOMMENTS",f"https://callercomments.com/calls/{clean}/"),
-        ("NOMOROBO",      f"https://www.nomorobo.com/lookup/{clean}"),
-        ("SPAMCALLS",     f"https://spamcalls.net/en/search?n={clean}"),
+        ("800NOTES",       f"https://800notes.com/Phone.aspx/{clean}"),
+        ("CALLERCENTER",   f"https://callercenter.com/{clean}"),
+        ("WHOCALLEDUS",    f"https://whocalledus.com/calls/{clean}/"),
+        ("CALLERCOMMENTS", f"https://callercomments.com/calls/{clean}/"),
+        ("NOMOROBO",       f"https://www.nomorobo.com/lookup/{clean}"),
+        ("SPAMCALLS",      f"https://spamcalls.net/en/search?n={clean}"),
     ]
     for name, url in spam_sites:
         lines.append(f"[{name}]")
@@ -413,9 +411,9 @@ def module_phone(target, job_id):
     lines.append("")
 
     social = [
-        ("Facebook",  f"https://www.facebook.com/search/people/?q={clean}"),
-        ("TrueCaller", f"https://www.truecaller.com/search/us/{clean}"),
-        ("Telegram",  f"https://t.me/+1{clean}"),
+        ("Facebook",   f"https://www.facebook.com/search/people/?q={clean}"),
+        ("TrueCaller",  f"https://www.truecaller.com/search/us/{clean}"),
+        ("Telegram",   f"https://t.me/+1{clean}"),
     ]
     for name, url in social:
         lines.append(f"[{name}]")
@@ -448,21 +446,15 @@ def module_phone(target, job_id):
     return result
 
 
-
-
-
-
 def module_business(target, job_id):
     emit(job_id, "module_start", {"module": "business"})
-    
     name_plus = target.replace(" ", "+")
     name_url = target.replace(" ", "-").lower()
-    
+
     lines = []
     lines.append(f"TARGET: {target}")
     lines.append("")
 
-    # ── Live OpenCorporates API (free) ────────────────────────────────────────
     try:
         out, _, _ = run_cmd(
             f"curl -s 'https://api.opencorporates.com/v0.4/companies/search?q={name_plus}&jurisdiction_code=us_nm&format=json' 2>/dev/null",
@@ -491,80 +483,73 @@ def module_business(target, job_id):
         lines.append(f"OpenCorporates: {str(e)}")
         lines.append("")
 
-    # ── Secretary of State Lookups ────────────────────────────────────────────
     lines.append("=" * 50)
     lines.append("SECRETARY OF STATE — DIRECT SEARCHES")
     lines.append("=" * 50)
     lines.append("")
 
     sos_sites = [
-        ("NM SOS Business Search",      f"https://portal.sos.state.nm.us/BFS/online/CorporationFormation/SearchBusinesses?SearchCriteria={name_plus}"),
-        ("NM SOS (alternate)",          f"https://businessportal.sos.nm.gov/"),
-        ("TX SOS Business Search",      f"https://mycpa.cpa.state.tx.us/coa/Index.html"),
-        ("AZ SOS Business Search",      f"https://ecorp.azcc.gov/BusinessSearch/BusinessSearch?SearchTerm={name_plus}"),
-        ("CO SOS Business Search",      f"https://www.sos.state.co.us/biz/BusinessEntityCriteriaExt.do?nameTyp=ENT&masterFileId=&entityName={name_plus}"),
-        ("CA SOS Business Search",      f"https://bizfileonline.sos.ca.gov/search/business"),
-        ("FL SOS Business Search",      f"https://search.sunbiz.org/Inquiry/CorporationSearch/SearchResults?searchNameOrder={name_plus}"),
-        ("NY SOS Business Search",      f"https://apps.dos.ny.gov/publicInquiry/EntitySearch"),
+        ("NM SOS Business Search",  f"https://portal.sos.state.nm.us/BFS/online/CorporationFormation/SearchBusinesses?SearchCriteria={name_plus}"),
+        ("NM SOS (alternate)",      "https://businessportal.sos.nm.gov/"),
+        ("TX SOS Business Search",  "https://mycpa.cpa.state.tx.us/coa/Index.html"),
+        ("AZ SOS Business Search",  f"https://ecorp.azcc.gov/BusinessSearch/BusinessSearch?SearchTerm={name_plus}"),
+        ("CO SOS Business Search",  f"https://www.sos.state.co.us/biz/BusinessEntityCriteriaExt.do?nameTyp=ENT&masterFileId=&entityName={name_plus}"),
+        ("CA SOS Business Search",  "https://bizfileonline.sos.ca.gov/search/business"),
+        ("FL SOS Business Search",  f"https://search.sunbiz.org/Inquiry/CorporationSearch/SearchResults?searchNameOrder={name_plus}"),
+        ("NY SOS Business Search",  "https://apps.dos.ny.gov/publicInquiry/EntitySearch"),
     ]
     for name, url in sos_sites:
         lines.append(f"[{name}]")
         lines.append(f"  {url}")
         lines.append("")
 
-    # ── Federal Business Databases ────────────────────────────────────────────
     lines.append("=" * 50)
     lines.append("FEDERAL BUSINESS DATABASES")
     lines.append("=" * 50)
     lines.append("")
 
     federal = [
-        ("SAM.gov (Federal Contractors)",   f"https://sam.gov/search/?keywords={name_plus}&sort=relevanceScore&index=ei&is_active=true&page=1"),
-        ("USASpending.gov",                  f"https://www.usaspending.gov/search/?hash="),
-        ("SEC EDGAR (Public Companies)",     f"https://www.sec.gov/cgi-bin/browse-edgar?company={name_plus}&CIK=&type=&dateb=&owner=include&count=40&search_text=&action=getcompany"),
-        ("FCC License Search",               f"https://wireless2.fcc.gov/UlsApp/UlsSearch/searchLicense.jsp"),
-        ("PACER Business Search",            f"https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
-        ("BetterBusiness Bureau",            f"https://www.bbb.org/search?find_text={name_plus}&find_loc=Albuquerque%2C+NM"),
-        ("OpenCorporates All States",        f"https://opencorporates.com/companies?q={name_plus}&jurisdiction_code=us&utf8=✓"),
+        ("SAM.gov (Federal Contractors)",  f"https://sam.gov/search/?keywords={name_plus}&sort=relevanceScore&index=ei&is_active=true&page=1"),
+        ("SEC EDGAR (Public Companies)",    f"https://www.sec.gov/cgi-bin/browse-edgar?company={name_plus}&CIK=&type=&dateb=&owner=include&count=40&search_text=&action=getcompany"),
+        ("FCC License Search",              "https://wireless2.fcc.gov/UlsApp/UlsSearch/searchLicense.jsp"),
+        ("PACER Business Search",           "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
+        ("BetterBusiness Bureau",           f"https://www.bbb.org/search?find_text={name_plus}&find_loc=Albuquerque%2C+NM"),
+        ("OpenCorporates All States",       f"https://opencorporates.com/companies?q={name_plus}&jurisdiction_code=us&utf8=✓"),
     ]
     for name, url in federal:
         lines.append(f"[{name}]")
         lines.append(f"  {url}")
         lines.append("")
 
-    # ── Business Intelligence Sites ───────────────────────────────────────────
     lines.append("=" * 50)
     lines.append("BUSINESS INTELLIGENCE")
     lines.append("=" * 50)
     lines.append("")
 
     intel = [
-        ("LinkedIn Company",        f"https://www.linkedin.com/search/results/companies/?keywords={name_plus}"),
-        ("Dun & Bradstreet",        f"https://www.dnb.com/business-directory/company-search.html#{name_plus}"),
-        ("Manta",                   f"https://www.manta.com/mb_{name_url}"),
-        ("Yelp Business",           f"https://www.yelp.com/search?find_desc={name_plus}&find_loc=Albuquerque%2C+NM"),
-        ("Google Business",         f"https://www.google.com/search?q={name_plus}+Albuquerque+NM+business"),
-        ("Glassdoor",               f"https://www.glassdoor.com/Search/results.htm?keyword={name_plus}"),
-        ("Indeed Company",          f"https://www.indeed.com/cmp/{name_url}"),
-        ("Bizapedia",               f"https://www.bizapedia.com/nm/"),
-        ("Corporationwiki",         f"https://www.corporationwiki.com/search/results?term={name_plus}"),
+        ("LinkedIn Company",   f"https://www.linkedin.com/search/results/companies/?keywords={name_plus}"),
+        ("Dun & Bradstreet",   f"https://www.dnb.com/business-directory/company-search.html#{name_plus}"),
+        ("Manta",              f"https://www.manta.com/mb_{name_url}"),
+        ("Yelp Business",      f"https://www.yelp.com/search?find_desc={name_plus}&find_loc=Albuquerque%2C+NM"),
+        ("Google Business",    f"https://www.google.com/search?q={name_plus}+Albuquerque+NM+business"),
+        ("Glassdoor",          f"https://www.glassdoor.com/Search/results.htm?keyword={name_plus}"),
+        ("Indeed Company",     f"https://www.indeed.com/cmp/{name_url}"),
+        ("Bizapedia",          "https://www.bizapedia.com/nm/"),
+        ("Corporationwiki",    f"https://www.corporationwiki.com/search/results?term={name_plus}"),
     ]
     for name, url in intel:
         lines.append(f"[{name}]")
         lines.append(f"  {url}")
         lines.append("")
 
-    # ── Registered Agent & Officer Search ────────────────────────────────────
     lines.append("=" * 50)
     lines.append("REGISTERED AGENT & OFFICER SEARCH")
     lines.append("=" * 50)
     lines.append("")
-    lines.append("To find who owns or runs this business:")
-    lines.append("")
-    
+
     officer_searches = [
-        ("OpenCorporates Officers",  f"https://opencorporates.com/officers?q={name_plus}&utf8=✓"),
-        ("Corporationwiki Network",  f"https://www.corporationwiki.com/search/results?term={name_plus}"),
+        ("OpenCorporates Officers", f"https://opencorporates.com/officers?q={name_plus}&utf8=✓"),
+        ("Corporationwiki Network", f"https://www.corporationwiki.com/search/results?term={name_plus}"),
         ("NM SOS Officer Search",   f"https://portal.sos.state.nm.us/BFS/online/CorporationFormation/SearchBusinesses?SearchCriteria={name_plus}"),
     ]
     for name, url in officer_searches:
@@ -572,7 +557,6 @@ def module_business(target, job_id):
         lines.append(f"  {url}")
         lines.append("")
 
-    # ── Google Dorks ──────────────────────────────────────────────────────────
     lines.append("=" * 50)
     lines.append("GOOGLE DORKS")
     lines.append("=" * 50)
@@ -581,7 +565,7 @@ def module_business(target, job_id):
     dorks = [
         f'"{target}" owner OR CEO OR president',
         f'"{target}" registered agent New Mexico',
-        f'"{target}" lawsuit OR lawsuit OR litigation',
+        f'"{target}" lawsuit OR litigation',
         f'"{target}" BBB complaint',
         f'"{target}" fraud OR scam OR complaint',
         f'"{target}" annual report',
@@ -594,7 +578,6 @@ def module_business(target, job_id):
         lines.append(f"  https://www.google.com/search?q={encoded}")
         lines.append("")
 
-    # ── Live DuckDuckGo ───────────────────────────────────────────────────────
     try:
         ddg_out, _, _ = run_cmd(
             f"curl -s 'https://api.duckduckgo.com/?q={name_plus}+company&format=json&no_html=1' 2>/dev/null",
@@ -617,22 +600,19 @@ def module_business(target, job_id):
     emit(job_id, "module_done", {"module": "business", "result": result})
     return result
 
+
 def module_plate_lookup(target, job_id):
     emit(job_id, "module_start", {"module": "plate_lookup"})
-    
-    # Clean and parse plate - preserve state if included
     target_clean = target.upper().strip()
     parts = target_clean.split()
-    
-    # Check if last part is a state abbreviation
     states = ["NM","TX","AZ","CO","CA","FL","NY","IL","OH","GA","NC","MI","PA","WA","OR"]
     if len(parts) >= 2 and parts[-1] in states:
         plate = parts[0].replace("-", "")
         state = parts[-1]
     else:
         plate = target_clean.replace(" ", "").replace("-", "")
-        state = "NM"  # default to NM
-    
+        state = "NM"
+
     lines = []
     lines.append(f"TARGET PLATE: {plate}")
     lines.append(f"STATE:        {state}")
@@ -644,7 +624,7 @@ def module_plate_lookup(target, job_id):
     lines.append("COMMERCIAL DATABASE LOOKUPS")
     lines.append("=" * 50)
     lines.append("")
-    
+
     commercial = [
         ("CLEAR (Thomson Reuters)", "https://clear.thomsonreuters.com/"),
         ("TLO (TransUnion)",        "https://www.tlo.com/"),
@@ -663,12 +643,12 @@ def module_plate_lookup(target, job_id):
     lines.append("NEW MEXICO SPECIFIC RESOURCES")
     lines.append("=" * 50)
     lines.append("")
-    
+
     nm_resources = [
-        ("NM MVD Records Request",     "https://www.mvd.newmexico.gov/"),
-        ("NM Courts - Vehicle Cases",  "https://caselookup.nmcourts.gov/caselookup/app"),
-        ("NM Public Records Request",  "https://www.nmag.gov/public-records-requests.aspx"),
-        ("NM Taxation & Revenue MVD",  "https://www.mvd.newmexico.gov/"),
+        ("NM MVD Records Request",    "https://www.mvd.newmexico.gov/"),
+        ("NM Courts - Vehicle Cases", "https://caselookup.nmcourts.gov/caselookup/app"),
+        ("NM Public Records Request", "https://www.nmag.gov/public-records-requests.aspx"),
+        ("NM Taxation & Revenue MVD", "https://www.mvd.newmexico.gov/"),
     ]
     for name, url in nm_resources:
         lines.append(f"[{name}]")
@@ -681,12 +661,12 @@ def module_plate_lookup(target, job_id):
     lines.append("")
 
     free_resources = [
-        ("VINCheck (NICB stolen)",     f"https://www.nicb.org/vincheck"),
-        ("NHTSA VIN Decoder",          f"https://vpic.nhtsa.dot.gov/decoder/"),
-        ("NMVTIS Vehicle History",     f"https://www.vehiclehistory.gov/"),
-        ("RecallsByVIN",               f"https://www.nhtsa.gov/recalls"),
-        ("Plate Search (freecarvin)",  f"https://www.freecarvin.com/"),
-        ("VehicleHistory",             f"https://www.vehiclehistory.com/license-plate-search?plate={plate}&state=NM"),
+        ("VINCheck (NICB stolen)",    "https://www.nicb.org/vincheck"),
+        ("NHTSA VIN Decoder",         "https://vpic.nhtsa.dot.gov/decoder/"),
+        ("NMVTIS Vehicle History",    "https://www.vehiclehistory.gov/"),
+        ("RecallsByVIN",              "https://www.nhtsa.gov/recalls"),
+        ("Plate Search (freecarvin)", "https://www.freecarvin.com/"),
+        ("VehicleHistory",            f"https://www.vehiclehistory.com/license-plate-search?plate={plate}&state=NM"),
     ]
     for name, url in free_resources:
         lines.append(f"[{name}]")
@@ -718,12 +698,12 @@ def module_plate_lookup(target, job_id):
     lines.append("")
     lines.append("People sometimes post photos showing their plates on social media.")
     lines.append("")
-    
+
     social = [
-        ("Facebook",   f"https://www.facebook.com/search/posts/?q={plate}"),
-        ("Instagram",  f"https://www.instagram.com/explore/search/keyword/?q={plate}"),
-        ("Twitter/X",  f"https://twitter.com/search?q=%22{plate}%22&f=live"),
-        ("Reddit",     f"https://www.reddit.com/search/?q=%22{plate}%22"),
+        ("Facebook",  f"https://www.facebook.com/search/posts/?q={plate}"),
+        ("Instagram", f"https://www.instagram.com/explore/search/keyword/?q={plate}"),
+        ("Twitter/X", f"https://twitter.com/search?q=%22{plate}%22&f=live"),
+        ("Reddit",    f"https://www.reddit.com/search/?q=%22{plate}%22"),
     ]
     for name, url in social:
         lines.append(f"[{name}]")
@@ -747,35 +727,24 @@ def module_plate_lookup(target, job_id):
     emit(job_id, "module_done", {"module": "plate_lookup", "result": result})
     return result
 
+
 def module_image_metadata(target, job_id):
-    """
-    Image metadata extraction - target should be a URL to an image
-    or the module is triggered with image data from frontend
-    """
     emit(job_id, "module_start", {"module": "image_metadata"})
     lines = []
     lines.append(f"TARGET: {target}")
     lines.append("")
 
-    # Try to fetch and analyze image from URL
     if target.startswith("http"):
         try:
-            # Download image to temp file
-            out, err, rc = run_cmd(
-                f"curl -s -L -o /tmp/sentinel_img.jpg '{target}' 2>/dev/null",
-                timeout=15
-            )
-            
-            # Extract EXIF with exiftool if available
+            run_cmd(f"curl -s -L -o /tmp/sentinel_img.jpg '{target}' 2>/dev/null", timeout=15)
             exif_out, _, rc = run_cmd("exiftool /tmp/sentinel_img.jpg 2>/dev/null", timeout=10)
-            
+
             if exif_out and rc == 0:
                 lines.append("=" * 50)
                 lines.append("EXIF METADATA EXTRACTED")
                 lines.append("=" * 50)
                 lines.append("")
-                
-                # Parse key fields
+
                 important_fields = [
                     "GPS Latitude", "GPS Longitude", "GPS Position",
                     "GPS Altitude", "GPS Date/Time",
@@ -788,11 +757,11 @@ def module_image_metadata(target, job_id):
                     "Subject", "Description", "Comment",
                     "Serial Number", "Lens ID",
                 ]
-                
+
                 found_gps = False
                 gps_lat = ""
                 gps_lon = ""
-                
+
                 for line in exif_out.split("\n"):
                     for field in important_fields:
                         if field.lower() in line.lower():
@@ -802,9 +771,9 @@ def module_image_metadata(target, job_id):
                                 found_gps = True
                             if "GPS Longitude" in line and "Ref" not in line:
                                 gps_lon = line.split(":")[-1].strip()
-                
+
                 lines.append("")
-                
+
                 if found_gps and gps_lat and gps_lon:
                     lines.append("=" * 50)
                     lines.append("⚠ GPS COORDINATES FOUND!")
@@ -814,12 +783,11 @@ def module_image_metadata(target, job_id):
                     lines.append(f"Longitude: {gps_lon}")
                     lines.append("")
                     lines.append("View on maps:")
-                    lines.append(f"  Google Maps: https://www.google.com/maps?q={gps_lat},{gps_lon}")
+                    lines.append(f"  Google Maps:       https://www.google.com/maps?q={gps_lat},{gps_lon}")
                     lines.append(f"  Google Street View: https://www.google.com/maps?q=&layer=c&cbll={gps_lat},{gps_lon}")
                     lines.append("")
             else:
-                # Try strings command to extract any text metadata
-                str_out, _, _ = run_cmd("strings /tmp/sentinel_img.jpg | grep -i 'gps\|location\|date\|camera\|make\|model' 2>/dev/null | head -20")
+                str_out, _, _ = run_cmd("strings /tmp/sentinel_img.jpg | grep -i 'gps\\|location\\|date\\|camera\\|make\\|model' 2>/dev/null | head -20")
                 if str_out:
                     lines.append("=" * 50)
                     lines.append("TEXT STRINGS FOUND IN IMAGE")
@@ -830,57 +798,47 @@ def module_image_metadata(target, job_id):
                     lines.append("No metadata found in image.")
                     lines.append("The image may have had metadata stripped.")
                     lines.append("")
-                    
         except Exception as e:
             lines.append(f"Image fetch failed: {str(e)}")
             lines.append("")
-    
-    # Always provide manual analysis tools
+
     lines.append("=" * 50)
     lines.append("MANUAL IMAGE ANALYSIS TOOLS")
     lines.append("=" * 50)
     lines.append("")
-    
+
     manual_tools = [
-        ("Jeffrey EXIF Viewer",     "http://exif.regex.info/exif.cgi"),
-        ("ExifTool Online",         "https://exiftool.org/"),
-        ("Metadata2Go",             "https://www.metadata2go.com/"),
-        ("Google Reverse Image",    f"https://images.google.com/searchbyimage?image_url={target}" if target.startswith("http") else "https://images.google.com/"),
-        ("TinEye Reverse Image",    f"https://tineye.com/search?url={target}" if target.startswith("http") else "https://tineye.com/"),
-        ("Yandex Reverse Image",    f"https://yandex.com/images/search?url={target}&rpt=imageview" if target.startswith("http") else "https://yandex.com/images/"),
-        ("Bing Visual Search",      "https://www.bing.com/images/search?view=detailv2&iss=sbi"),
-        ("FotoForensics",           f"https://fotoforensics.com/analysis.php?id=" ),
-        ("InVID/WeVerify",          "https://www.invid-project.eu/tools-and-services/invid-verification-plugin/"),
+        ("Jeffrey EXIF Viewer",            "http://exif.regex.info/exif.cgi"),
+        ("ExifTool Online",                "https://exiftool.org/"),
+        ("Metadata2Go",                    "https://www.metadata2go.com/"),
+        ("Google Reverse Image",           f"https://images.google.com/searchbyimage?image_url={target}" if target.startswith("http") else "https://images.google.com/"),
+        ("TinEye Reverse Image",           f"https://tineye.com/search?url={target}" if target.startswith("http") else "https://tineye.com/"),
+        ("Yandex Reverse Image",           f"https://yandex.com/images/search?url={target}&rpt=imageview" if target.startswith("http") else "https://yandex.com/images/"),
+        ("Bing Visual Search",             "https://www.bing.com/images/search?view=detailv2&iss=sbi"),
+        ("FotoForensics",                  "https://fotoforensics.com/"),
+        ("InVID/WeVerify",                 "https://www.invid-project.eu/tools-and-services/invid-verification-plugin/"),
     ]
     for name, url in manual_tools:
         lines.append(f"[{name}]")
         lines.append(f"  {url}")
         lines.append("")
 
-    lines.append("=" * 50)
-    lines.append("REVERSE IMAGE SEARCH LINKS")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("To find where else this image appears online:")
-    lines.append("")
-    
     if target.startswith("http"):
+        lines.append("=" * 50)
+        lines.append("REVERSE IMAGE SEARCH LINKS")
+        lines.append("=" * 50)
+        lines.append("")
         rev_searches = [
-            ("Google Images",   f"https://images.google.com/searchbyimage?image_url={target}"),
-            ("TinEye",          f"https://tineye.com/search?url={target}"),
-            ("Yandex",          f"https://yandex.com/images/search?url={target}&rpt=imageview"),
+            ("Google Images", f"https://images.google.com/searchbyimage?image_url={target}"),
+            ("TinEye",        f"https://tineye.com/search?url={target}"),
+            ("Yandex",        f"https://yandex.com/images/search?url={target}&rpt=imageview"),
         ]
         for name, url in rev_searches:
             lines.append(f"[{name}]")
             lines.append(f"  {url}")
             lines.append("")
     else:
-        lines.append("Paste an image URL in the search box to enable reverse image search links.")
-        lines.append("")
-        lines.append("Or drag and drop an image at:")
-        lines.append("  https://images.google.com/")
-        lines.append("  https://tineye.com/")
-        lines.append("  https://yandex.com/images/")
+        lines.append("Paste an image URL as your target to enable reverse image search links.")
         lines.append("")
 
     lines.append("=" * 50)
@@ -899,10 +857,10 @@ def module_image_metadata(target, job_id):
     emit(job_id, "module_done", {"module": "image_metadata", "result": result})
     return result
 
+
 def module_social_media(target, job_id):
     emit(job_id, "module_start", {"module": "social_media"})
-    
-    # Parse name and location for social media module
+
     if "," in target:
         name_quoted = target.split(",")[0].strip()
     else:
@@ -911,158 +869,146 @@ def module_social_media(target, job_id):
     parts = name_quoted.split()
     first = parts[0] if parts else target
     last = parts[-1] if len(parts) > 1 else ""
-    wp_first_s = first
-    wp_last_s = last
-    
+
     lines = []
     lines.append(f"TARGET: {name_quoted}")
     lines.append("")
 
-    # ── Facebook ─────────────────────────────────────────────────────────────
     lines.append("=" * 50)
     lines.append("FACEBOOK INTELLIGENCE")
     lines.append("=" * 50)
     lines.append("")
     fb_searches = [
-        ("People Search",      f"https://www.facebook.com/search/people/?q={name_plus}"),
-        ("Posts mentioning",   f"https://www.facebook.com/search/posts/?q={name_plus}"),
-        ("Photos tagged",      f"https://www.facebook.com/search/photos/?q={name_plus}"),
-        ("Check-ins",          f"https://www.facebook.com/search/places/?q={name_plus}"),
-        ("Groups",             f"https://www.facebook.com/search/groups/?q={name_plus}"),
-        ("Events",             f"https://www.facebook.com/search/events/?q={name_plus}"),
-        ("Marketplace",        f"https://www.facebook.com/marketplace/search/?query={name_plus}"),
+        ("People Search",    f"https://www.facebook.com/search/people/?q={name_plus}"),
+        ("Posts mentioning", f"https://www.facebook.com/search/posts/?q={name_plus}"),
+        ("Photos tagged",    f"https://www.facebook.com/search/photos/?q={name_plus}"),
+        ("Check-ins",        f"https://www.facebook.com/search/places/?q={name_plus}"),
+        ("Groups",           f"https://www.facebook.com/search/groups/?q={name_plus}"),
+        ("Events",           f"https://www.facebook.com/search/events/?q={name_plus}"),
+        ("Marketplace",      f"https://www.facebook.com/marketplace/search/?query={name_plus}"),
     ]
     for label, url in fb_searches:
         lines.append(f"[{label}]")
         lines.append(f"  {url}")
         lines.append("")
 
-    # ── Instagram ─────────────────────────────────────────────────────────────
     lines.append("=" * 50)
     lines.append("INSTAGRAM INTELLIGENCE")
     lines.append("=" * 50)
     lines.append("")
     ig_searches = [
-        ("Profile Search",     f"https://www.instagram.com/explore/search/keyword/?q={name_plus}"),
-        ("Hashtag Search",     f"https://www.instagram.com/explore/tags/{name_plus.replace('+','')}/"),
-        ("Google IG Search",   f"https://www.google.com/search?q=site:instagram.com+%22{name_plus}%22"),
+        ("Profile Search",   f"https://www.instagram.com/explore/search/keyword/?q={name_plus}"),
+        ("Hashtag Search",   f"https://www.instagram.com/explore/tags/{name_plus.replace('+','')}/"),
+        ("Google IG Search", f"https://www.google.com/search?q=site:instagram.com+%22{name_plus}%22"),
     ]
     for label, url in ig_searches:
         lines.append(f"[{label}]")
         lines.append(f"  {url}")
         lines.append("")
 
-    # ── Twitter/X ─────────────────────────────────────────────────────────────
     lines.append("=" * 50)
     lines.append("TWITTER/X INTELLIGENCE")
     lines.append("=" * 50)
     lines.append("")
     tw_searches = [
-        ("People Search",      f"https://twitter.com/search?q=%22{name_plus}%22&f=user"),
-        ("Recent Posts",       f"https://twitter.com/search?q=%22{name_plus}%22&f=live"),
-        ("Top Posts",          f"https://twitter.com/search?q=%22{name_plus}%22&f=top"),
-        ("With Location",      f"https://twitter.com/search?q=%22{name_plus}%22+near%3A%22Albuquerque%22"),
+        ("People Search",  f"https://twitter.com/search?q=%22{name_plus}%22&f=user"),
+        ("Recent Posts",   f"https://twitter.com/search?q=%22{name_plus}%22&f=live"),
+        ("Top Posts",      f"https://twitter.com/search?q=%22{name_plus}%22&f=top"),
+        ("With Location",  f"https://twitter.com/search?q=%22{name_plus}%22+near%3A%22Albuquerque%22"),
     ]
     for label, url in tw_searches:
         lines.append(f"[{label}]")
         lines.append(f"  {url}")
         lines.append("")
 
-    # ── LinkedIn ──────────────────────────────────────────────────────────────
     lines.append("=" * 50)
     lines.append("LINKEDIN INTELLIGENCE")
     lines.append("=" * 50)
     lines.append("")
     li_searches = [
-        ("People Search",      f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
-        ("Posts Search",       f"https://www.linkedin.com/search/results/content/?keywords={name_plus}"),
-        ("Google LI Search",   f"https://www.google.com/search?q=site:linkedin.com/in+%22{name_plus}%22"),
+        ("People Search",    f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
+        ("Posts Search",     f"https://www.linkedin.com/search/results/content/?keywords={name_plus}"),
+        ("Google LI Search", f"https://www.google.com/search?q=site:linkedin.com/in+%22{name_plus}%22"),
     ]
     for label, url in li_searches:
         lines.append(f"[{label}]")
         lines.append(f"  {url}")
         lines.append("")
 
-    # ── TikTok ────────────────────────────────────────────────────────────────
     lines.append("=" * 50)
     lines.append("TIKTOK INTELLIGENCE")
     lines.append("=" * 50)
     lines.append("")
     tt_searches = [
-        ("User Search",        f"https://www.tiktok.com/search/user?q={name_plus}"),
-        ("Video Search",       f"https://www.tiktok.com/search?q={name_plus}"),
-        ("Google TT Search",   f"https://www.google.com/search?q=site:tiktok.com+%22{name_plus}%22"),
+        ("User Search",      f"https://www.tiktok.com/search/user?q={name_plus}"),
+        ("Video Search",     f"https://www.tiktok.com/search?q={name_plus}"),
+        ("Google TT Search", f"https://www.google.com/search?q=site:tiktok.com+%22{name_plus}%22"),
     ]
     for label, url in tt_searches:
         lines.append(f"[{label}]")
         lines.append(f"  {url}")
         lines.append("")
 
-    # ── YouTube ───────────────────────────────────────────────────────────────
     lines.append("=" * 50)
     lines.append("YOUTUBE INTELLIGENCE")
     lines.append("=" * 50)
     lines.append("")
     yt_searches = [
-        ("Channel Search",     f"https://www.youtube.com/results?search_query={name_plus}&sp=EgIQAg%253D%253D"),
-        ("Video Search",       f"https://www.youtube.com/results?search_query={name_plus}"),
+        ("Channel Search", f"https://www.youtube.com/results?search_query={name_plus}&sp=EgIQAg%253D%253D"),
+        ("Video Search",   f"https://www.youtube.com/results?search_query={name_plus}"),
     ]
     for label, url in yt_searches:
         lines.append(f"[{label}]")
         lines.append(f"  {url}")
         lines.append("")
 
-    # ── Reddit ────────────────────────────────────────────────────────────────
     lines.append("=" * 50)
     lines.append("REDDIT INTELLIGENCE")
     lines.append("=" * 50)
     lines.append("")
     rd_searches = [
-        ("User Search",        f"https://www.reddit.com/search/?q=%22{name_quoted}%22&type=user"),
-        ("Posts Search",       f"https://www.reddit.com/search/?q=%22{name_quoted}%22"),
+        ("User Search",  f"https://www.reddit.com/search/?q=%22{name_quoted}%22&type=user"),
+        ("Posts Search", f"https://www.reddit.com/search/?q=%22{name_quoted}%22"),
     ]
     for label, url in rd_searches:
         lines.append(f"[{label}]")
         lines.append(f"  {url}")
         lines.append("")
 
-    # ── Snapchat ──────────────────────────────────────────────────────────────
     lines.append("=" * 50)
     lines.append("SNAPCHAT / OTHER PLATFORMS")
     lines.append("=" * 50)
     lines.append("")
     other_searches = [
-        ("Snapchat",           f"https://www.snapchat.com/add/{wp_first_s.lower()}{wp_last_s.lower()}"),
-        ("Pinterest",          f"https://www.pinterest.com/search/people/?q={name_plus}"),
-        ("Tumblr",             f"https://www.tumblr.com/search/{name_plus}"),
-        ("Nextdoor",           f"https://nextdoor.com/find-neighbors/"),
-        ("Meetup",             f"https://www.meetup.com/find/?keywords={name_plus}"),
-        ("Venmo",              f"https://venmo.com/{wp_first_s.lower()}{wp_last_s.lower()}"),
-        ("Cash App",           f"https://cash.app/${wp_first_s.lower()}{wp_last_s.lower()}"),
+        ("Snapchat",  f"https://www.snapchat.com/add/{first.lower()}{last.lower()}"),
+        ("Pinterest", f"https://www.pinterest.com/search/people/?q={name_plus}"),
+        ("Tumblr",    f"https://www.tumblr.com/search/{name_plus}"),
+        ("Nextdoor",  "https://nextdoor.com/find-neighbors/"),
+        ("Meetup",    f"https://www.meetup.com/find/?keywords={name_plus}"),
+        ("Venmo",     f"https://venmo.com/{first.lower()}{last.lower()}"),
+        ("Cash App",  f"https://cash.app/${first.lower()}{last.lower()}"),
     ]
     for label, url in other_searches:
         lines.append(f"[{label}]")
         lines.append(f"  {url}")
         lines.append("")
 
-    # ── Location-Specific Social Searches ────────────────────────────────────
     lines.append("=" * 50)
     lines.append("LOCATION INDICATOR SEARCHES")
     lines.append("=" * 50)
     lines.append("")
     location_searches = [
-        ("FB Check-ins NM",    f"https://www.facebook.com/search/places/?q={name_plus}+new+mexico"),
-        ("Twitter Near ABQ",   f"https://twitter.com/search?q=%22{name_plus}%22+near%3AAlbuquerque&f=live"),
-        ("Google Maps",        f"https://www.google.com/maps/search/{name_plus}"),
-        ("Nextdoor NM",        f"https://nextdoor.com/find-neighbors/"),
-        ("Yelp Reviews",       f"https://www.yelp.com/search?find_desc={name_plus}"),
+        ("FB Check-ins NM",  f"https://www.facebook.com/search/places/?q={name_plus}+new+mexico"),
+        ("Twitter Near ABQ", f"https://twitter.com/search?q=%22{name_plus}%22+near%3AAlbuquerque&f=live"),
+        ("Google Maps",      f"https://www.google.com/maps/search/{name_plus}"),
+        ("Nextdoor NM",      "https://nextdoor.com/find-neighbors/"),
+        ("Yelp Reviews",     f"https://www.yelp.com/search?find_desc={name_plus}"),
     ]
     for label, url in location_searches:
         lines.append(f"[{label}]")
         lines.append(f"  {url}")
         lines.append("")
 
-    # ── Live DuckDuckGo check ─────────────────────────────────────────────────
     try:
         ddg_out, _, _ = run_cmd(
             f"curl -s 'https://api.duckduckgo.com/?q={name_plus}+social+media&format=json&no_html=1' 2>/dev/null",
@@ -1085,13 +1031,13 @@ def module_social_media(target, job_id):
     emit(job_id, "module_done", {"module": "social_media", "result": result})
     return result
 
+
 def module_email_investigate(target, job_id):
     emit(job_id, "module_start", {"module": "email_investigate"})
     lines = []
     lines.append(f"TARGET EMAIL: {target}")
     lines.append("")
 
-    # Run Holehe if installed
     out, err, rc = run_cmd(f"python3 -m holehe {target} --only-used 2>/dev/null", timeout=120)
     if out and "holehe" not in out.lower() and "error" not in out.lower():
         lines.append("=" * 50)
@@ -1100,8 +1046,7 @@ def module_email_investigate(target, job_id):
         lines.append("")
         lines.append(out)
         lines.append("")
-    
-    # EmailRep live check
+
     try:
         rep_out, _, _ = run_cmd(
             f"curl -s 'https://emailrep.io/{target}' -H 'User-Agent: fivet-osint' 2>/dev/null",
@@ -1126,19 +1071,16 @@ def module_email_investigate(target, job_id):
     except:
         pass
 
-    # Extract domain from email for WHOIS
     try:
         domain = target.split("@")[1]
         lines.append("=" * 50)
         lines.append(f"EMAIL DOMAIN INTEL: {domain}")
         lines.append("=" * 50)
         lines.append("")
-        
-        # DNS for domain
         dns_out, _, _ = run_cmd(f"dig +short A {domain} 2>/dev/null")
         mx_out, _, _ = run_cmd(f"dig +short MX {domain} 2>/dev/null")
         if dns_out:
-            lines.append(f"Domain IP:   {dns_out.split()[0] if dns_out else 'N/A'}")
+            lines.append(f"Domain IP:   {dns_out.split()[0]}")
         if mx_out:
             lines.append(f"Mail Server: {mx_out}")
         lines.append("")
@@ -1173,10 +1115,10 @@ def module_email_investigate(target, job_id):
     lines.append("")
 
     social = [
-        ("Facebook",   f"https://www.facebook.com/search/people/?q={target}"),
-        ("LinkedIn",   f"https://www.linkedin.com/search/results/people/?keywords={target}"),
-        ("Twitter/X",  f"https://twitter.com/search?q={target}&f=user"),
-        ("Gravatar",   f"https://en.gravatar.com/{target}"),
+        ("Facebook",  f"https://www.facebook.com/search/people/?q={target}"),
+        ("LinkedIn",  f"https://www.linkedin.com/search/results/people/?keywords={target}"),
+        ("Twitter/X", f"https://twitter.com/search?q={target}&f=user"),
+        ("Gravatar",  f"https://en.gravatar.com/{target}"),
     ]
     for name, url in social:
         lines.append(f"[{name}]")
@@ -1207,6 +1149,7 @@ def module_email_investigate(target, job_id):
     emit(job_id, "module_done", {"module": "email_investigate", "result": result})
     return result
 
+
 def module_theharvester(target, job_id):
     emit(job_id, "module_start", {"module": "theharvester"})
     out, err, rc = run_cmd(
@@ -1217,15 +1160,6 @@ def module_theharvester(target, job_id):
     emit(job_id, "module_done", {"module": "theharvester", "result": result})
     return result
 
-def module_sherlock(target, job_id):
-    emit(job_id, "module_start", {"module": "sherlock"})
-    out, err, rc = run_cmd(
-        f"python3 -m sherlock {target} --timeout 8 2>/dev/null",
-        timeout=120
-    )
-    result = out if out else f"Sherlock: {err or 'No results'}"
-    emit(job_id, "module_done", {"module": "sherlock", "result": result})
-    return result
 
 def module_shodan(target, job_id):
     emit(job_id, "module_start", {"module": "shodan"})
@@ -1258,6 +1192,7 @@ def module_shodan(target, job_id):
     emit(job_id, "module_done", {"module": "shodan", "result": result})
     return result
 
+
 def module_subdomains(target, job_id):
     emit(job_id, "module_start", {"module": "subdomains"})
     out, _, _ = run_cmd(
@@ -1268,6 +1203,7 @@ def module_subdomains(target, job_id):
     result = out if out else "No subdomains found via crt.sh."
     emit(job_id, "module_done", {"module": "subdomains", "result": result})
     return result
+
 
 def module_geoip(target, job_id):
     emit(job_id, "module_start", {"module": "geoip"})
@@ -1289,6 +1225,7 @@ def module_geoip(target, job_id):
         result = f"GeoIP lookup failed: {str(e)}"
     emit(job_id, "module_done", {"module": "geoip", "result": result})
     return result
+
 
 def module_virustotal(target, job_id):
     emit(job_id, "module_start", {"module": "virustotal"})
@@ -1319,6 +1256,7 @@ def module_virustotal(target, job_id):
     emit(job_id, "module_done", {"module": "virustotal", "result": result})
     return result
 
+
 def module_emailrep(target, job_id):
     emit(job_id, "module_start", {"module": "emailrep"})
     out, _, _ = run_cmd(
@@ -1344,6 +1282,7 @@ def module_emailrep(target, job_id):
     emit(job_id, "module_done", {"module": "emailrep", "result": result})
     return result
 
+
 def module_haveibeenpwned(target, job_id):
     emit(job_id, "module_start", {"module": "hibp"})
     api_key = os.environ.get("HIBP_API_KEY", "")
@@ -1366,6 +1305,7 @@ def module_haveibeenpwned(target, job_id):
     emit(job_id, "module_done", {"module": "hibp", "result": result})
     return result
 
+
 def module_metadata(target, job_id):
     emit(job_id, "module_start", {"module": "metadata"})
     query = target.replace(" ", "+")
@@ -1387,6 +1327,7 @@ def module_metadata(target, job_id):
         result = "Metadata lookup failed."
     emit(job_id, "module_done", {"module": "metadata", "result": result})
     return result
+
 
 def module_google_dorks(target, job_id):
     emit(job_id, "module_start", {"module": "dorks"})
@@ -1414,7 +1355,7 @@ def module_google_dorks(target, job_id):
 
 def module_property(target, job_id):
     emit(job_id, "module_start", {"module": "property"})
-    
+
     if "," in target:
         name_part = target.split(",")[0].strip()
         location_part = target.split(",")[1].strip()
@@ -1422,7 +1363,7 @@ def module_property(target, job_id):
         parts = target.split()
         name_part = " ".join(parts[:2]) if len(parts) >= 2 else target
         location_part = " ".join(parts[2:]) if len(parts) > 2 else ""
-    
+
     name_plus = name_part.replace(" ", "+")
     wp_first = name_part.split()[0] if name_part else ""
     wp_last = name_part.split()[-1] if len(name_part.split()) > 1 else ""
@@ -1439,13 +1380,13 @@ def module_property(target, job_id):
     lines.append("")
 
     nm_counties = [
-        ("Bernalillo County Assessor",  "https://assessor.bernco.gov/public.access/search/commonsearch.aspx?mode=owner"),
-        ("Sandoval County Assessor",    "https://www.sandovalcountynm.gov/assessor/property-search/"),
-        ("Santa Fe County Assessor",    "https://www.santafecountynm.gov/assessor"),
-        ("Valencia County Assessor",    "https://www.co.valencia.nm.us/assessor"),
-        ("Dona Ana County Assessor",    "https://assessor.donaanacounty.org/"),
-        ("Chavez County Assessor",      "https://www.chaves.nm.us/departments/assessor"),
-        ("NM All Counties",             "https://www.nmcourts.gov/"),
+        ("Bernalillo County Assessor", "https://assessor.bernco.gov/public.access/search/commonsearch.aspx?mode=owner"),
+        ("Sandoval County Assessor",   "https://www.sandovalcountynm.gov/assessor/property-search/"),
+        ("Santa Fe County Assessor",   "https://www.santafecountynm.gov/assessor"),
+        ("Valencia County Assessor",   "https://www.co.valencia.nm.us/assessor"),
+        ("Dona Ana County Assessor",   "https://assessor.donaanacounty.org/"),
+        ("Chavez County Assessor",     "https://www.chaves.nm.us/departments/assessor"),
+        ("NM All Counties",            "https://www.nmcourts.gov/"),
     ]
     for name, url in nm_counties:
         lines.append(f"[{name}]")
@@ -1462,9 +1403,9 @@ def module_property(target, job_id):
         ("PropWire (Free Owner Search)", f"https://propwire.com/search?q={name_plus}"),
         ("Zillow Owner Search",          f"https://www.zillow.com/homes/{name_plus}_rb/"),
         ("Realtor.com",                  f"https://www.realtor.com/realestateandhomes-search/{location_part.replace(' ','-')}/"),
-        ("PropertyShark",               f"https://www.propertyshark.com/mason/property-search/us/"),
+        ("PropertyShark",                "https://www.propertyshark.com/mason/property-search/us/"),
         ("Attom Data",                   "https://www.attomdata.com/"),
-        ("County Office",               f"https://www.countyoffice.org/property-records-search/?q={name_plus}"),
+        ("County Office",                f"https://www.countyoffice.org/property-records-search/?q={name_plus}"),
         ("Black Knight (Parcel)",        "https://bkiconnect.com/"),
         ("FamilyTreeNow (Address Hist)", f"https://www.familytreenow.com/search/people/results?first={wp_first}&last={wp_last}"),
     ]
@@ -1479,10 +1420,10 @@ def module_property(target, job_id):
     lines.append("")
 
     tax = [
-        ("NM Taxation & Revenue",        "https://tap.state.nm.us/tap/_/"),
-        ("Federal Tax Liens (PACER)",    "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
-        ("UCC Filings NM",               f"https://portal.sos.state.nm.us/BFS/online/UCCFilings/SearchUCC"),
-        ("Bankruptcy Search",            f"https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
+        ("NM Taxation & Revenue",     "https://tap.state.nm.us/tap/_/"),
+        ("Federal Tax Liens (PACER)", "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
+        ("UCC Filings NM",            "https://portal.sos.state.nm.us/BFS/online/UCCFilings/SearchUCC"),
+        ("Bankruptcy Search",         "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
     ]
     for name, url in tax:
         lines.append(f"[{name}]")
@@ -1526,21 +1467,21 @@ def module_photo_forensics(target, job_id):
 
     if is_url:
         rev = [
-            ("Google Reverse Image",   f"https://images.google.com/searchbyimage?image_url={target}"),
-            ("TinEye",                 f"https://tineye.com/search?url={target}"),
-            ("Yandex (Best for faces)",f"https://yandex.com/images/search?url={target}&rpt=imageview"),
-            ("Bing Visual Search",     f"https://www.bing.com/images/search?view=detailv2&iss=sbi&q=imgurl:{target}"),
-            ("Lenso.ai (Face Search)", f"https://lenso.ai/en?url={target}"),
-            ("PimEyes (Face Search)",  f"https://pimeyes.com/en"),
+            ("Google Reverse Image",    f"https://images.google.com/searchbyimage?image_url={target}"),
+            ("TinEye",                  f"https://tineye.com/search?url={target}"),
+            ("Yandex (Best for faces)", f"https://yandex.com/images/search?url={target}&rpt=imageview"),
+            ("Bing Visual Search",      f"https://www.bing.com/images/search?view=detailv2&iss=sbi&q=imgurl:{target}"),
+            ("Lenso.ai (Face Search)",  f"https://lenso.ai/en?url={target}"),
+            ("PimEyes (Face Search)",   "https://pimeyes.com/en"),
         ]
     else:
         rev = [
-            ("Google Reverse Image",   "https://images.google.com/"),
-            ("TinEye",                 "https://tineye.com/"),
-            ("Yandex (Best for faces)","https://yandex.com/images/"),
-            ("Bing Visual Search",     "https://www.bing.com/images/search?view=detailv2&iss=sbi"),
-            ("Lenso.ai (Face Search)", "https://lenso.ai/en"),
-            ("PimEyes (Face Search)",  "https://pimeyes.com/en"),
+            ("Google Reverse Image",    "https://images.google.com/"),
+            ("TinEye",                  "https://tineye.com/"),
+            ("Yandex (Best for faces)", "https://yandex.com/images/"),
+            ("Bing Visual Search",      "https://www.bing.com/images/search?view=detailv2&iss=sbi"),
+            ("Lenso.ai (Face Search)",  "https://lenso.ai/en"),
+            ("PimEyes (Face Search)",   "https://pimeyes.com/en"),
         ]
     for name, url in rev:
         lines.append(f"[{name}]")
@@ -1553,12 +1494,12 @@ def module_photo_forensics(target, job_id):
     lines.append("")
 
     meta = [
-        ("Jeffrey EXIF Viewer",     "http://exif.regex.info/exif.cgi"),
-        ("ExifTool Online",         "https://exiftool.org/"),
-        ("Metadata2Go",             "https://www.metadata2go.com/"),
-        ("FotoForensics (manipulation)", "https://fotoforensics.com/"),
+        ("Jeffrey EXIF Viewer",            "http://exif.regex.info/exif.cgi"),
+        ("ExifTool Online",                "https://exiftool.org/"),
+        ("Metadata2Go",                    "https://www.metadata2go.com/"),
+        ("FotoForensics (manipulation)",   "https://fotoforensics.com/"),
         ("Forensically (clone detection)", "https://29a.ch/photo-forensics/"),
-        ("ImageEdited (edit detect)", "https://imageedited.com/"),
+        ("ImageEdited (edit detect)",      "https://imageedited.com/"),
     ]
     for name, url in meta:
         lines.append(f"[{name}]")
@@ -1571,9 +1512,9 @@ def module_photo_forensics(target, job_id):
     lines.append("")
 
     video = [
-        ("InVID WeVerify",          "https://www.invid-project.eu/tools-and-services/invid-verification-plugin/"),
-        ("YouTube DataViewer",      "https://citizenevidence.amnestyusa.org/"),
-        ("TrueMedia.org",           "https://www.truemedia.org/"),
+        ("InVID WeVerify",   "https://www.invid-project.eu/tools-and-services/invid-verification-plugin/"),
+        ("YouTube DataViewer", "https://citizenevidence.amnestyusa.org/"),
+        ("TrueMedia.org",    "https://www.truemedia.org/"),
     ]
     for name, url in video:
         lines.append(f"[{name}]")
@@ -1637,13 +1578,13 @@ def module_geolocation(target, job_id):
     lines.append("")
 
     maps = [
-        ("Google Maps",             f"https://www.google.com/maps/search/{loc_plus}"),
-        ("Google Street View",      f"https://www.google.com/maps?q={loc_plus}&layer=c"),
-        ("Google Earth Web",        f"https://earth.google.com/web/search/{loc_plus}"),
-        ("Bing Maps",               f"https://www.bing.com/maps?q={loc_plus}"),
-        ("OpenStreetMap",           f"https://www.openstreetmap.org/search?query={loc_plus}"),
-        ("Apple Maps",              f"https://maps.apple.com/?q={loc_plus}"),
-        ("Waze",                    f"https://www.waze.com/en/live-map/directions?to=ll.{loc_plus}"),
+        ("Google Maps",        f"https://www.google.com/maps/search/{loc_plus}"),
+        ("Google Street View", f"https://www.google.com/maps?q={loc_plus}&layer=c"),
+        ("Google Earth Web",   f"https://earth.google.com/web/search/{loc_plus}"),
+        ("Bing Maps",          f"https://www.bing.com/maps?q={loc_plus}"),
+        ("OpenStreetMap",      f"https://www.openstreetmap.org/search?query={loc_plus}"),
+        ("Apple Maps",         f"https://maps.apple.com/?q={loc_plus}"),
+        ("Waze",               f"https://www.waze.com/en/live-map/directions?to=ll.{loc_plus}"),
     ]
     for name, url in maps:
         lines.append(f"[{name}]")
@@ -1673,21 +1614,19 @@ def module_geolocation(target, job_id):
     lines.append("")
 
     special = [
-        ("Wigle.net (WiFi Networks)",    f"https://wigle.net/search#fullSearch"),
-        ("Overpass Turbo",               f"https://overpass-turbo.eu/"),
-        ("What3Words",                   f"https://what3words.com/{loc_plus.replace('+','.')}"),
-        ("FlightAware (Aircraft)",       f"https://flightaware.com/live/airport/{loc_plus}"),
-        ("MarineTraffic (Ships)",        f"https://www.marinetraffic.com/en/ais/home/centerx:-87/centery:20/zoom:4"),
-        ("SunCalc (Sun Position)",       f"https://www.suncalc.org/"),
-        ("CalcMaps (Distance/Area)",     f"https://www.calcmaps.com/map-distance/"),
+        ("Wigle.net (WiFi Networks)", "https://wigle.net/search#fullSearch"),
+        ("Overpass Turbo",            "https://overpass-turbo.eu/"),
+        ("What3Words",                f"https://what3words.com/{loc_plus.replace('+','.')}"),
+        ("FlightAware (Aircraft)",    f"https://flightaware.com/live/airport/{loc_plus}"),
+        ("MarineTraffic (Ships)",     "https://www.marinetraffic.com/en/ais/home/centerx:-87/centery:20/zoom:4"),
+        ("SunCalc (Sun Position)",    "https://www.suncalc.org/"),
+        ("CalcMaps (Distance/Area)",  "https://www.calcmaps.com/map-distance/"),
     ]
     for name, url in special:
         lines.append(f"[{name}]")
         lines.append(f"  {url}")
         lines.append("")
 
-    # Live GeoIP if it looks like an IP
-    import re
     if re.match(r'^\d+\.\d+\.\d+\.\d+$', target):
         try:
             out, _, _ = run_cmd(f"curl -s 'https://ipapi.co/{target}/json/' 2>/dev/null")
@@ -1726,14 +1665,12 @@ def module_username_search(target, job_id):
     lines.append("=" * 50)
     lines.append("")
 
-    # Run Sherlock
     out, _, _ = run_cmd(f"python3 -m sherlock {target} --timeout 8 2>/dev/null", timeout=120)
     if out and "not found" not in out.lower():
         lines.append("[SHERLOCK — 300+ PLATFORMS]")
         lines.append(out)
         lines.append("")
 
-    # Run Maigret if available
     out2, _, rc2 = run_cmd(f"python3 -m maigret {target} --top-sites 50 2>/dev/null", timeout=120)
     if out2 and rc2 == 0:
         lines.append("[MAIGRET — FULL DOSSIER]")
@@ -1746,13 +1683,13 @@ def module_username_search(target, job_id):
     lines.append("")
 
     sites = [
-        ("WhatsMyName",         f"https://whatsmyname.app/?q={target}"),
-        ("Namechk",             f"https://namechk.com/{target}"),
-        ("UserSearch.org",      f"https://usersearch.org/results_normal.php?q={target}"),
-        ("CheckUsernames",      f"https://checkusernames.com/?q={target}"),
-        ("KnowEm",              f"https://knowem.com/checkusernames.php?u={target}"),
-        ("Instant Username",    f"https://instantusername.com/#/{target}"),
-        ("Sherlock Web",        f"https://sherlock-project.github.io/"),
+        ("WhatsMyName",      f"https://whatsmyname.app/?q={target}"),
+        ("Namechk",          f"https://namechk.com/{target}"),
+        ("UserSearch.org",   f"https://usersearch.org/results_normal.php?q={target}"),
+        ("CheckUsernames",   f"https://checkusernames.com/?q={target}"),
+        ("KnowEm",           f"https://knowem.com/checkusernames.php?u={target}"),
+        ("Instant Username", f"https://instantusername.com/#/{target}"),
+        ("Sherlock Web",     "https://sherlock-project.github.io/"),
     ]
     for name, url in sites:
         lines.append(f"[{name}]")
@@ -1780,7 +1717,7 @@ def module_username_search(target, job_id):
         ("Venmo",          f"https://venmo.com/{target}"),
         ("Cash App",       f"https://cash.app/${target}"),
         ("Telegram",       f"https://t.me/{target}"),
-        ("Discord Lookup", f"https://discord.id/"),
+        ("Discord Lookup", "https://discord.id/"),
         ("Roblox",         f"https://www.roblox.com/user.aspx?username={target}"),
         ("Patreon",        f"https://www.patreon.com/{target}"),
         ("OnlyFans",       f"https://onlyfans.com/{target}"),
@@ -1839,14 +1776,14 @@ def module_public_records(target, job_id):
     lines.append("")
 
     free_people = [
-        ("FamilyTreeNow (FREE — best)",  f"https://www.familytreenow.com/search/people/results?first={wp_first}&last={wp_last}"),
-        ("TruePeopleSearch",             f"https://www.truepeoplesearch.com/results?name={name_plus}"),
-        ("FastPeopleSearch",             f"https://www.fastpeoplesearch.com/name/{name_part.replace(' ','-').lower()}"),
-        ("ClustrMaps",                   f"https://clustrmaps.com/person/{wp_last}-{wp_first}/"),
-        ("SearchPeopleFree",             f"https://www.searchpeoplefree.com/find/{wp_first}-{wp_last}"),
-        ("Nuwber",                       f"https://nuwber.com/search?firstName={wp_first}&lastName={wp_last}"),
-        ("PublicRecords.Online",         f"https://publicrecords.online/search/?first_name={wp_first}&last_name={wp_last}"),
-        ("PublicRecordsNow",             f"https://www.publicrecordsnow.com/"),
+        ("FamilyTreeNow (FREE — best)", f"https://www.familytreenow.com/search/people/results?first={wp_first}&last={wp_last}"),
+        ("TruePeopleSearch",            f"https://www.truepeoplesearch.com/results?name={name_plus}"),
+        ("FastPeopleSearch",            f"https://www.fastpeoplesearch.com/name/{name_part.replace(' ','-').lower()}"),
+        ("ClustrMaps",                  f"https://clustrmaps.com/person/{wp_last}-{wp_first}/"),
+        ("SearchPeopleFree",            f"https://www.searchpeoplefree.com/find/{wp_first}-{wp_last}"),
+        ("Nuwber",                      f"https://nuwber.com/search?firstName={wp_first}&lastName={wp_last}"),
+        ("PublicRecords.Online",        f"https://publicrecords.online/search/?first_name={wp_first}&last_name={wp_last}"),
+        ("PublicRecordsNow",            "https://www.publicrecordsnow.com/"),
     ]
     for name, url in free_people:
         lines.append(f"[{name}]")
@@ -1859,16 +1796,16 @@ def module_public_records(target, job_id):
     lines.append("")
 
     criminal = [
-        ("NM Courts (CourtLook)",        f"https://caselookup.nmcourts.gov/caselookup/app"),
-        ("PACER Federal Courts",         f"https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
-        ("CourtListener (Free Federal)", f"https://www.courtlistener.com/?q={name_plus}&type=p"),
-        ("VINE Offender Search NM",      f"https://vinelink.vineapps.com/search/NM/Person"),
-        ("NM Corrections Inmate",        f"https://www.cd.nm.gov/divisions/oid/offender-search/"),
-        ("ArrestFacts",                  f"https://arrestfacts.com/search?name={name_plus}"),
-        ("BustedMugshots",               f"https://bustedmugshots.com/search?name={name_plus}"),
-        ("MugshotSearch",               f"https://www.mugshots.com/search?q={name_plus}"),
-        ("OpenSanctions Watchlist",      f"https://www.opensanctions.org/search/?q={name_plus}"),
-        ("Sex Offender Registry NM",     f"https://www.nmsexoffender.dps.nm.gov/"),
+        ("NM Courts (CourtLook)",          "https://caselookup.nmcourts.gov/caselookup/app"),
+        ("PACER Federal Courts",           "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
+        ("CourtListener (Free Federal)",   f"https://www.courtlistener.com/?q={name_plus}&type=p"),
+        ("VINE Offender Search NM",        "https://vinelink.vineapps.com/search/NM/Person"),
+        ("NM Corrections Inmate",          "https://www.cd.nm.gov/divisions/oid/offender-search/"),
+        ("ArrestFacts",                    f"https://arrestfacts.com/search?name={name_plus}"),
+        ("BustedMugshots",                 f"https://bustedmugshots.com/search?name={name_plus}"),
+        ("MugshotSearch",                  f"https://www.mugshots.com/search?q={name_plus}"),
+        ("OpenSanctions Watchlist",        f"https://www.opensanctions.org/search/?q={name_plus}"),
+        ("Sex Offender Registry NM",       "https://www.nmsexoffender.dps.nm.gov/"),
         ("Sex Offender Registry National", f"https://www.nsopw.gov/Search/Results?firstName={wp_first}&lastName={wp_last}"),
     ]
     for name, url in criminal:
@@ -1882,12 +1819,12 @@ def module_public_records(target, job_id):
     lines.append("")
 
     vital = [
-        ("FamilySearch (Free)",       f"https://www.familysearch.org/search/record/results?q.givenName={wp_first}&q.surname={wp_last}"),
-        ("Ancestry (limited free)",   f"https://www.ancestry.com/search/?name={wp_first}_{wp_last}"),
-        ("FindAGrave",                f"https://www.findagrave.com/memorial/search?firstname={wp_first}&lastname={wp_last}"),
-        ("BillionGraves",             f"https://billiongraves.com/search/results/#firstname={wp_first}&lastname={wp_last}"),
-        ("Legacy.com Obituaries",     f"https://www.legacy.com/obituaries/search?keyword={name_plus}"),
-        ("NamUs Missing Persons",     f"https://www.namus.gov/MissingPersons/Search#/results"),
+        ("FamilySearch (Free)",      f"https://www.familysearch.org/search/record/results?q.givenName={wp_first}&q.surname={wp_last}"),
+        ("Ancestry (limited free)",  f"https://www.ancestry.com/search/?name={wp_first}_{wp_last}"),
+        ("FindAGrave",               f"https://www.findagrave.com/memorial/search?firstname={wp_first}&lastname={wp_last}"),
+        ("BillionGraves",            f"https://billiongraves.com/search/results/#firstname={wp_first}&lastname={wp_last}"),
+        ("Legacy.com Obituaries",    f"https://www.legacy.com/obituaries/search?keyword={name_plus}"),
+        ("NamUs Missing Persons",    "https://www.namus.gov/MissingPersons/Search#/results"),
     ]
     for name, url in vital:
         lines.append(f"[{name}]")
@@ -1900,19 +1837,18 @@ def module_public_records(target, job_id):
     lines.append("")
 
     licenses = [
-        ("NM License Lookup",         f"https://www.rld.nm.gov/licensing-and-regulation/"),
-        ("NM Medical Board",          f"https://www.nmmb.state.nm.us/"),
-        ("NM Bar Association",        f"https://www.nmbar.org/"),
-        ("License.IQVIA (National)",  f"https://www.iqvia.com/"),
-        ("NPPES (Medical NPI)",       f"https://npiregistry.cms.hhs.gov/search?search_type=ind&first_name={wp_first}&last_name={wp_last}"),
-        ("BLS License Lookup",        f"https://www.careeronestop.org/Toolkit/Credentials/find-licenses.aspx"),
+        ("NM License Lookup",        "https://www.rld.nm.gov/licensing-and-regulation/"),
+        ("NM Medical Board",         "https://www.nmmb.state.nm.us/"),
+        ("NM Bar Association",       "https://www.nmbar.org/"),
+        ("License.IQVIA (National)", "https://www.iqvia.com/"),
+        ("NPPES (Medical NPI)",      f"https://npiregistry.cms.hhs.gov/search?search_type=ind&first_name={wp_first}&last_name={wp_last}"),
+        ("BLS License Lookup",       "https://www.careeronestop.org/Toolkit/Credentials/find-licenses.aspx"),
     ]
     for name, url in licenses:
         lines.append(f"[{name}]")
         lines.append(f"  {url}")
         lines.append("")
 
-    # Live CourtListener check
     try:
         out, _, _ = run_cmd(
             f"curl -s 'https://www.courtlistener.com/api/rest/v3/people/?name_last={wp_last}&name_first={wp_first}&format=json' 2>/dev/null",
@@ -1936,32 +1872,59 @@ def module_public_records(target, job_id):
     emit(job_id, "module_done", {"module": "public_records", "result": result})
     return result
 
-# ── Module registry ───────────────────────────────────────────────────────────
+
+# ── Module Registry ───────────────────────────────────────────────────────────
+# NOTE: sherlock is intentionally NOT listed here as a standalone entry.
+# It runs inside module_username_search to avoid double execution.
+
 MODULE_MAP = {
-    "people":       module_people_search,
-    "property":      module_property,
-    "photo_forensics": module_photo_forensics,
-    "geolocation":   module_geolocation,
-    "username_search": module_username_search,
-    "public_records": module_public_records,
-    "social_media":  module_social_media,
-    "business":      module_business,
-    "plate_lookup":   module_plate_lookup,
-    "image_metadata": module_image_metadata,
+    "people":            module_people_search,
+    "property":          module_property,
+    "photo_forensics":   module_photo_forensics,
+    "geolocation":       module_geolocation,
+    "username_search":   module_username_search,
+    "public_records":    module_public_records,
+    "social_media":      module_social_media,
+    "business":          module_business,
+    "plate_lookup":      module_plate_lookup,
+    "image_metadata":    module_image_metadata,
     "email_investigate": module_email_investigate,
-    "phone":        module_phone,
-    "whois":        module_whois,
-    "dns":          module_dns,
-        "nmap":         module_nmap,
-    "geoip":        module_geoip,
-        "sherlock":     module_sherlock,
-    "shodan":       module_shodan,
-    "virustotal":   module_virustotal,
-                "dorks":        module_google_dorks,
+    "phone":             module_phone,
+    "whois":             module_whois,
+    "dns":               module_dns,
+    "nmap":              module_nmap,
+    "geoip":             module_geoip,
+    "shodan":            module_shodan,
+    "virustotal":        module_virustotal,
+    "dorks":             module_google_dorks,
 }
+
+# Modules that only make sense for domain/IP targets
+DOMAIN_IP_MODULES = {"whois", "dns", "nmap", "geoip", "shodan", "virustotal"}
+
+# Modules that only make sense for person targets
+PERSON_ONLY_MODULES = {"people", "public_records", "property", "plate_lookup"}
+
 
 def run_investigation(job_id, target, target_type, selected_modules):
     try:
+        # Prune stale jobs older than 1 hour to prevent memory leak
+        cutoff = time.time() - 3600
+        stale = [
+            jid for jid, j in list(jobs.items())
+            if datetime.fromisoformat(j["started"]).timestamp() < cutoff
+        ]
+        for jid in stale:
+            del jobs[jid]
+
+        # Gate modules by target type
+        tt = (target_type or "PERSON").upper()
+
+        if tt == "PERSON":
+            selected_modules = [m for m in selected_modules if m not in DOMAIN_IP_MODULES]
+        elif tt in ("DOMAIN", "IP"):
+            selected_modules = [m for m in selected_modules if m not in PERSON_ONLY_MODULES]
+
         threads = []
         for mod_id in selected_modules:
             fn = MODULE_MAP.get(mod_id)
@@ -1978,20 +1941,12 @@ def run_investigation(job_id, target, target_type, selected_modules):
         emit(job_id, "error", {"message": str(e)})
 
 
-import hashlib
+# ── Authentication ────────────────────────────────────────────────────────────
 import secrets
 
-# ── Secure Authentication ─────────────────────────────────────────────────────
-# Users stored as environment variables in Render - never in source code
-# Format in Render env vars:
-# USER_RANGLADA=PLFAdmin2026!:admin:R Anglada
-# USER_TLOPEZ=PLFInvest2026!:investigator:T Lopez
-# USER_CMCPHERSON=PLFInvest2026!:investigator:C McPherson
-
-active_sessions = {}  # token -> { username, role, name, created }
+active_sessions = {}
 
 def get_users():
-    """Load users from Render environment variables."""
     users = {}
     for key, val in os.environ.items():
         if key.startswith('USER_'):
@@ -2006,7 +1961,6 @@ def get_users():
     return users
 
 def log_auth_event(username, action, detail, ip="unknown"):
-    """Log authentication events."""
     print(f"[AUTH] {action} | user={username} | {detail} | ip={ip} | time={datetime.utcnow().isoformat()}")
 
 @app.route("/api/auth/login", methods=["POST"])
@@ -2015,10 +1969,8 @@ def login():
     username = data.get("username", "").strip().lower()
     password = data.get("password", "")
     ip = request.headers.get("X-Forwarded-For", request.remote_addr)
-
     users = get_users()
     user = users.get(username)
-
     if user and user["password"] == password:
         token = secrets.token_hex(32)
         active_sessions[token] = {
@@ -2060,14 +2012,13 @@ def logout():
 
 @app.route("/api/auth/audit", methods=["POST"])
 def get_audit():
-    """Return audit log - admin only."""
     data = request.json
     token = data.get("token", "")
     session = active_sessions.get(token)
     if not session or session.get("role") != "admin":
         return jsonify({"error": "Unauthorized"}), 403
-    # Return last 500 server log entries
     return jsonify({"message": "Audit log is written to Render server logs. Check Render dashboard → Logs."})
+
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route("/api/investigate", methods=["GET", "POST"])
@@ -2077,7 +2028,7 @@ def investigate():
     else:
         data = request.args
     target = data.get("target", "").strip()
-    target_type = data.get("type", "DOMAIN")
+    target_type = data.get("type", "PERSON")
     modules_param = data.get("modules", "")
     if isinstance(modules_param, str) and modules_param:
         selected_modules = modules_param.split(",")
@@ -2123,6 +2074,7 @@ def health():
 @app.route("/")
 def index():
     return "FIVE T OSINT Backend running. Connect your frontend."
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
