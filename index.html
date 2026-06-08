@@ -137,35 +137,24 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
 <div id="lockscreen" style="position:fixed;inset:0;background:#060a0f;z-index:9999;display:flex;align-items:center;justify-content:center;background-image:linear-gradient(rgba(0,168,150,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,168,150,0.025) 1px,transparent 1px);background-size:40px 40px;">
 <div style="border:1px solid #1a2a3a;border-radius:6px;padding:36px 40px;background:#0b1118;display:flex;flex-direction:column;align-items:center;gap:18px;min-width:320px;max-width:360px;">
   <svg width="100" height="72" viewBox="0 0 100 72" style="animation:glow 3s infinite;filter:drop-shadow(0 0 16px #00a896)">
-    <!-- Concentric scanning rings emanating outward -->
     <circle cx="50" cy="36" r="48" fill="none" stroke="#00a896" stroke-width="0.5" opacity="0.08"/>
     <circle cx="50" cy="36" r="42" fill="none" stroke="#00a896" stroke-width="0.6" opacity="0.12"/>
     <circle cx="50" cy="36" r="36" fill="none" stroke="#00a896" stroke-width="0.7" opacity="0.18"/>
     <circle cx="50" cy="36" r="30" fill="none" stroke="#00a896" stroke-width="0.8" opacity="0.25"/>
     <circle cx="50" cy="36" r="24" fill="none" stroke="#00a896" stroke-width="1" opacity="0.35"/>
-    <!-- Eye background -->
     <ellipse cx="50" cy="36" rx="46" ry="32" fill="#060a0f"/>
-    <!-- Upper eyelid -->
     <path d="M4 36 Q50 4 96 36" fill="#060a0f" stroke="#00a896" stroke-width="1.8"/>
-    <!-- Lower eyelid -->
     <path d="M4 36 Q50 68 96 36" fill="#060a0f" stroke="#00a896" stroke-width="1.8"/>
-    <!-- Eye white fill -->
     <ellipse cx="50" cy="36" rx="46" ry="32" fill="none" stroke="#00a896" stroke-width="1.8"/>
-    <!-- Iris outer -->
     <circle cx="50" cy="36" r="20" fill="#060a0f" stroke="#00a896" stroke-width="1.8"/>
-    <!-- Iris texture rings -->
     <circle cx="50" cy="36" r="17" fill="none" stroke="#00a896" stroke-width="0.6" opacity="0.4"/>
     <circle cx="50" cy="36" r="14" fill="none" stroke="#00a896" stroke-width="0.7" opacity="0.5"/>
     <circle cx="50" cy="36" r="11" fill="none" stroke="#00a896" stroke-width="0.8" opacity="0.6"/>
-    <!-- Pupil -->
     <circle cx="50" cy="36" r="8" fill="#00a896" opacity="0.85"/>
     <circle cx="50" cy="36" r="5.5" fill="#060a0f"/>
-    <!-- Inner glow ring -->
     <circle cx="50" cy="36" r="3" fill="none" stroke="#00a896" stroke-width="1" opacity="0.8"/>
-    <!-- Highlight -->
     <circle cx="54" cy="31" r="2.5" fill="#00a896" opacity="0.6"/>
     <circle cx="54" cy="31" r="1.2" fill="white" opacity="0.4"/>
-    <!-- Center -->
     <circle cx="50" cy="36" r="1.5" fill="#00a896"/>
   </svg>
   <div style="font-family:Share Tech Mono,monospace;font-size:16px;color:#00a896;letter-spacing:3px;text-align:center;">FIVE T // OSINT</div>
@@ -274,7 +263,8 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
 
 <script>
 // ── Config ────────────────────────────────────────────────────────────────────
-let BACKEND = 'https://sentinel-osint-ui.onrender.com'; // HARDCODED - admin only
+let authToken = null;
+let BACKEND = 'https://sentinel-osint-ui.onrender.com';
 let targetType = 'DOMAIN';
 let activeModIds = new Set();
 let running = false;
@@ -284,34 +274,36 @@ let stats = JSON.parse(localStorage.getItem('fivet_stats') || '{"queries":0,"fin
 
 const TARGET_TYPES = ['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','PLATE','LOCATION'];
 
+// ── FIX: dorks no longer uses always:true — it behaves like all other modules
+// ── and only fires when the user has it checked. No more auto-firing on every run.
 const ALL_MODULES = [
   // ── PERSON ────────────────────────────────────────────────────────────────
-  { id:'people',          name:'People Search',           tag:'PEOP',  types:['PERSON'] },
-  { id:'public_records',  name:'Public Records',          tag:'PREC',  types:['PERSON'] },
-  { id:'property',        name:'Property Records',        tag:'PROP',  types:['PERSON','COMPANY'] },
-  { id:'social_media',    name:'Social Media Search',     tag:'SOCL',  types:['PERSON','USERNAME'] },
-  { id:'photo_forensics', name:'Photo & Video Forensics', tag:'FOTO',  types:['PERSON','USERNAME'] },
+  { id:'people',            name:'People Search',           tag:'PEOP',  types:['PERSON'] },
+  { id:'public_records',    name:'Public Records',          tag:'PREC',  types:['PERSON'] },
+  { id:'property',          name:'Property Records',        tag:'PROP',  types:['PERSON','COMPANY'] },
+  { id:'social_media',      name:'Social Media Search',     tag:'SOCL',  types:['PERSON','USERNAME'] },
+  { id:'photo_forensics',   name:'Photo & Video Forensics', tag:'FOTO',  types:['PERSON','USERNAME'] },
   // ── USERNAME ──────────────────────────────────────────────────────────────
-  { id:'username_search', name:'Username Search',         tag:'USER',  types:['USERNAME'] },
+  { id:'username_search',   name:'Username Search',         tag:'USER',  types:['USERNAME'] },
   // ── PHONE ─────────────────────────────────────────────────────────────────
-  { id:'phone',           name:'Phone Lookup',            tag:'PHONE', types:['PHONE'] },
+  { id:'phone',             name:'Phone Lookup',            tag:'PHONE', types:['PHONE'] },
   // ── EMAIL ─────────────────────────────────────────────────────────────────
-  { id:'email_investigate', name:'Email Investigation',   tag:'EMAIL', types:['EMAIL'] },
+  { id:'email_investigate', name:'Email Investigation',     tag:'EMAIL', types:['EMAIL'] },
   // ── PLATE ─────────────────────────────────────────────────────────────────
-  { id:'plate_lookup',    name:'License Plate Lookup',    tag:'PLATE', types:['PLATE'] },
+  { id:'plate_lookup',      name:'License Plate Lookup',    tag:'PLATE', types:['PLATE'] },
   // ── COMPANY ───────────────────────────────────────────────────────────────
-  { id:'business',        name:'Business Search',         tag:'BIZ',   types:['COMPANY'] },
+  { id:'business',          name:'Business Search',         tag:'BIZ',   types:['COMPANY'] },
   // ── LOCATION ──────────────────────────────────────────────────────────────
-  { id:'geolocation',     name:'Geolocation Intel',       tag:'GEO',   types:['LOCATION','IP'] },
+  { id:'geolocation',       name:'Geolocation Intel',       tag:'GEO',   types:['LOCATION','IP'] },
   // ── DOMAIN/IP ─────────────────────────────────────────────────────────────
-  { id:'whois',           name:'WHOIS Lookup',            tag:'WHOIS', types:['DOMAIN','IP'] },
-  { id:'dns',             name:'DNS Records',             tag:'DNS',   types:['DOMAIN'] },
-  { id:'nmap',            name:'Port Scan',               tag:'NMAP',  types:['DOMAIN','IP'] },
-  { id:'geoip',           name:'GeoIP Location',          tag:'GEOIP', types:['IP','DOMAIN'] },
-  { id:'shodan',          name:'Shodan',                  tag:'SHDN',  types:['IP','DOMAIN'] },
-  { id:'virustotal',      name:'VirusTotal',              tag:'VT',    types:['DOMAIN','IP','EMAIL'] },
-  // ── ALWAYS ────────────────────────────────────────────────────────────────
-  { id:'dorks',           name:'Google Dorks',            tag:'DORK',  always:true },
+  { id:'whois',             name:'WHOIS Lookup',            tag:'WHOIS', types:['DOMAIN','IP'] },
+  { id:'dns',               name:'DNS Records',             tag:'DNS',   types:['DOMAIN'] },
+  { id:'nmap',              name:'Port Scan',               tag:'NMAP',  types:['DOMAIN','IP'] },
+  { id:'geoip',             name:'GeoIP Location',          tag:'GEOIP', types:['IP','DOMAIN'] },
+  { id:'shodan',            name:'Shodan',                  tag:'SHDN',  types:['IP','DOMAIN'] },
+  { id:'virustotal',        name:'VirusTotal',              tag:'VT',    types:['DOMAIN','IP','EMAIL'] },
+  // ── GOOGLE DORKS — available for all types but NOT auto-selected ──────────
+  { id:'dorks',             name:'Google Dorks',            tag:'DORK',  types:['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','PLATE','LOCATION'] },
 ];
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -325,7 +317,6 @@ function init() {
     document.getElementById('clock').textContent = new Date().toLocaleTimeString();
   }, 1000);
   if (BACKEND) testBackend(true);
-  // Hide admin-only elements for regular users
   const cfg = document.getElementById('backendCfg');
   if (cfg) cfg.style.display = isAdmin ? 'block' : 'none';
   const auditBtn = document.getElementById('auditBtn');
@@ -343,6 +334,8 @@ function setType(t, btn) {
   targetType = t;
   document.querySelectorAll('.tbtn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+  // Reset active modules to only those relevant to the new type
+  activeModIds = new Set();
   renderModules();
 }
 
@@ -350,15 +343,21 @@ function renderModules() {
   const list = document.getElementById('modList');
   list.innerHTML = '';
   ALL_MODULES.forEach(mod => {
-    const relevant = mod.always || (mod.types && mod.types.includes(targetType));
-    if (relevant && !activeModIds.has(mod.id)) activeModIds.add(mod.id);
+    const relevant = mod.types && mod.types.includes(targetType);
+    // Auto-select relevant modules, but NOT dorks (user must opt in)
+    if (relevant && mod.id !== 'dorks' && !activeModIds.has(mod.id)) {
+      activeModIds.add(mod.id);
+    }
+    // Always show dorks in the list but don't auto-check it
+    const show = relevant;
+    if (!show) return;
     const active = activeModIds.has(mod.id);
     const el = document.createElement('div');
     el.className = `mod-item${active?' active':''}`;
     el.dataset.id = mod.id;
     el.innerHTML = `<div class="mod-dot"></div><div class="mod-name">${mod.name}</div><div class="mod-tag">${mod.tag}</div>`;
     el.onclick = () => {
-      if (!isAdmin) return; // only admin can toggle modules
+      if (!isAdmin) return;
       if (activeModIds.has(mod.id)) activeModIds.delete(mod.id);
       else activeModIds.add(mod.id);
       el.classList.toggle('active');
@@ -372,7 +371,7 @@ function renderModules() {
 // ── Backend test ──────────────────────────────────────────────────────────────
 async function testBackend(silent) {
   const url = document.getElementById('backendUrl').value.trim().replace(/\/$/, '');
-  if (!url) { if (!silent) showCfgMsg('Enter your Replit URL first.', 'warn'); return; }
+  if (!url) { if (!silent) showCfgMsg('Enter your backend URL first.', 'warn'); return; }
   BACKEND = url;
   localStorage.setItem('fivet_backend', url);
   const statusEl = document.getElementById('backendStatus');
@@ -415,16 +414,13 @@ async function runInvestigation() {
   logAudit(currentUser?.username || 'unknown', 'SEARCH', `Target type: ${targetType}`, query);
   updateStats();
 
-  // Clear results
   const resultsEl = document.getElementById('results');
   resultsEl.innerHTML = '';
   const mods = [...activeModIds];
   const modCards = {};
 
-  // Show progress
   setProgress(true, 0, 'LAUNCHING MODULES…');
 
-  // Create all cards upfront
   mods.forEach(id => {
     const mod = ALL_MODULES.find(m => m.id === id);
     if (!mod) return;
@@ -436,7 +432,6 @@ async function runInvestigation() {
   const t0 = Date.now();
 
   try {
-    // POST to backend
     const params = new URLSearchParams({
       target: query,
       type: targetType,
@@ -447,7 +442,6 @@ async function runInvestigation() {
     });
     const { job_id } = await res.json();
 
-    // Stream results via SSE
     let done = 0;
     await new Promise((resolve, reject) => {
       const es = new EventSource(`${BACKEND}/api/stream/${job_id}`);
@@ -546,6 +540,7 @@ function setProgress(show, pct, label) {
 
 function clearAll() {
   allResults = {};
+  activeModIds = new Set();
   document.getElementById('results').innerHTML = `
     <div class="empty" id="emptyState">
       <div class="empty-icon">◎</div>
@@ -562,6 +557,7 @@ function clearAll() {
     </div>`;
   setProgress(false);
   document.getElementById('expBtn').disabled = true;
+  renderModules();
 }
 
 function scrollToEmpty() {
@@ -594,47 +590,41 @@ function updateStats() {
 function exportReport() {
   const target = document.getElementById('searchInput').value.trim();
   if (!Object.keys(allResults).length) return;
-  let r = `SENTINEL OSINT REPORT\n${'='.repeat(50)}\nTarget: ${target}\nType: ${targetType}\nDate: ${new Date().toUTCString()}\n${'='.repeat(50)}\n`;
+  let r = `FIVE T OSINT REPORT\n${'='.repeat(50)}\nTarget: ${target}\nType: ${targetType}\nDate: ${new Date().toUTCString()}\n${'='.repeat(50)}\n`;
   Object.entries(allResults).forEach(([mod, content]) => {
     r += `\n\n${mod.toUpperCase()}\n${'-'.repeat(30)}\n${content}\n`;
   });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([r], { type: 'text/plain' }));
-  a.download = `sentinel_${target.replace(/\s+/g,'_')}.txt`;
+  a.download = `fivet_${target.replace(/\s+/g,'_')}.txt`;
   a.click();
 }
 
 document.getElementById('searchInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') runInvestigation();
 });
-
-// init() called after password check
 </script>
+
 <script>
-// ── Password Protection ───────────────────────────────────────────────────────
-// ── User Account System ──────────────────────────────────────────────────────
-const USERS = {
-  'ranglada':    { password: 'PLFAdmin2026!',  role: 'admin',       name: 'R Anglada' },
-  'tlopez':   { password: 'PLFInvest2026!', role: 'investigator', name: 'T Lopez' },
-  'cmcpherson': { password: 'PLFInvest2026!', role: 'investigator', name: 'C McPherson' },
-};
-// ADMIN: To add users, edit the USERS object above in index.html on GitHub
-// Format: 'username': { password: 'Password', role: 'admin' or 'investigator', name: 'Full Name' }
+// ── Authentication ─────────────────────────────────────────────────────────────
+// Passwords are stored in Render environment variables — NOT in this file.
+// To add/change users, edit USER_* vars in your Render dashboard.
+// Format: USER_USERNAME=password:role:Full Name
+// Example: USER_RANGLADA=PLFAdmin2026!:admin:R Anglada
 
 let currentUser = null;
 let isAdmin = false;
 let auditLog = JSON.parse(localStorage.getItem('fivet_audit') || '[]');
 let failedLogins = {};
 
-function checkPw() {
+async function checkPw() {
   const username = document.getElementById('pwUsername').value.trim().toLowerCase();
   const password = document.getElementById('pwInput').value;
   const now = new Date().toISOString();
 
-  // Check for lockout (5 failed attempts)
+  // Client-side lockout (5 failed attempts = 30 min lock)
   if (failedLogins[username] && failedLogins[username].count >= 5) {
-    const lockoutTime = new Date(failedLogins[username].lastAttempt);
-    const diff = (new Date() - lockoutTime) / 1000 / 60;
+    const diff = (new Date() - new Date(failedLogins[username].lastAttempt)) / 1000 / 60;
     if (diff < 30) {
       showPwErr(`Account locked. Try again in ${Math.ceil(30-diff)} minutes.`);
       logAudit(username, 'LOGIN_BLOCKED', 'Account locked due to failed attempts');
@@ -644,23 +634,33 @@ function checkPw() {
     }
   }
 
-  const user = USERS[username];
-  if (user && user.password === password) {
-    currentUser = { username, ...user };
-    isAdmin = user.role === 'admin';
-    failedLogins[username] = { count: 0 };
-    sessionStorage.setItem('fivet_auth', JSON.stringify(currentUser));
-    document.getElementById('lockscreen').style.display = 'none';
-    logAudit(username, 'LOGIN_SUCCESS', `User ${user.name} logged in`);
-    updateUserDisplay();
-    init();
-  } else {
-    if (!failedLogins[username]) failedLogins[username] = { count: 0 };
-    failedLogins[username].count++;
-    failedLogins[username].lastAttempt = now;
-    logAudit(username || 'UNKNOWN', 'LOGIN_FAILED', `Failed login attempt (${failedLogins[username].count}/5)`);
-    showPwErr(`⚠ Invalid credentials (${failedLogins[username].count}/5 attempts)`);
-    document.getElementById('pwInput').value = '';
+  try {
+    const res = await fetch(`${BACKEND}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      authToken = data.token;
+      currentUser = { username, role: data.role, name: data.name, token: data.token };
+      isAdmin = data.role === 'admin';
+      failedLogins[username] = { count: 0 };
+      sessionStorage.setItem('fivet_auth', JSON.stringify(currentUser));
+      document.getElementById('lockscreen').style.display = 'none';
+      logAudit(username, 'LOGIN_SUCCESS', `User ${data.name} logged in`);
+      updateUserDisplay();
+      init();
+    } else {
+      if (!failedLogins[username]) failedLogins[username] = { count: 0 };
+      failedLogins[username].count++;
+      failedLogins[username].lastAttempt = now;
+      showPwErr(`⚠ Invalid credentials (${failedLogins[username].count}/5 attempts)`);
+      document.getElementById('pwInput').value = '';
+    }
+  } catch(e) {
+    showPwErr('⚠ Cannot reach backend — check connection');
   }
 }
 
@@ -735,7 +735,6 @@ window.addEventListener('load', async () => {
     try {
       const parsed = JSON.parse(saved);
       authToken = parsed.token;
-      // Verify token is still valid with backend
       const res = await fetch(`${BACKEND}/api/auth/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -751,8 +750,8 @@ window.addEventListener('load', async () => {
       } else {
         sessionStorage.removeItem('fivet_auth');
       }
-    } catch(e) { 
-      // If backend unreachable, still allow cached session
+    } catch(e) {
+      // Backend unreachable — allow cached session
       try {
         currentUser = JSON.parse(saved);
         isAdmin = currentUser.role === 'admin';
