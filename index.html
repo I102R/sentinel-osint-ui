@@ -345,10 +345,11 @@ function renderModules() {
   ALL_MODULES.forEach(mod => {
     const relevant = mod.types && mod.types.includes(targetType);
     // Auto-select relevant modules, but NOT dorks (user must opt in)
-    if (relevant && mod.id !== 'dorks' && !activeModIds.has(mod.id)) {
+   if (relevant && mod.id !== 'dorks' && !activeModIds.has(mod.id)) {
       activeModIds.add(mod.id);
     }
-    // Always show dorks in the list but don't auto-check it
+    // Always ensure dorks starts unchecked
+    activeModIds.delete('dorks');
     const show = relevant;
     if (!show) return;
     const active = activeModIds.has(mod.id);
