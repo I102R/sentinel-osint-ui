@@ -239,7 +239,7 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
         <div class="empty" id="emptyState">
           <div class="empty-icon">◎</div>
           <div class="empty-title">AWAITING TARGET</div>
-          <div class="empty-sub">All modules run in parallel — WHOIS, DNS, Nmap, theHarvester, Sherlock, Shodan, Subdomains, GeoIP, VirusTotal, EmailRep, HIBP, Metadata & Google Dorks.</div>
+          <div class="empty-sub">All modules run in parallel — People Search, Public Records, Property, Social Media, Phone, Email, Username, Plate, Business, Geolocation, WHOIS, DNS, Port Scan, Shodan, VirusTotal & Google Dorks.</div>
           <div class="backend-cfg" id="backendCfg">
             <div class="cfg-label">BACKEND URL (your Replit URL)</div>
             <div class="cfg-row">
@@ -285,26 +285,33 @@ let stats = JSON.parse(localStorage.getItem('fivet_stats') || '{"queries":0,"fin
 const TARGET_TYPES = ['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','PLATE','LOCATION'];
 
 const ALL_MODULES = [
-  { id:'people',       name:'People Search',       tag:'PEOP',  types:['PERSON'] },
-  { id:'phone',        name:'Phone Lookup',         tag:'PHONE', types:['PHONE'] },
-  { id:'email_investigate', name:'Email Investigation', tag:'EMAIL', types:['EMAIL'] },
-  { id:'social_media',      name:'Social Media Search',  tag:'SOCL',  types:['PERSON','USERNAME'] },
-  { id:'plate_lookup',      name:'License Plate Lookup', tag:'PLATE', types:['PLATE'] },
-  { id:'business',          name:'Business Search',      tag:'BIZ',   types:['COMPANY'] },
-  { id:'image_metadata',    name:'Image Metadata',        tag:'IMG',   types:['DOMAIN','IP','PERSON','USERNAME'] },
-  { id:'whois',        name:'WHOIS Lookup',        tag:'WHOIS', types:['DOMAIN','IP'] },
-  { id:'dns',          name:'DNS Records',          tag:'DNS',   types:['DOMAIN'] },
-  { id:'subdomains',   name:'Subdomain Enum',       tag:'SUBS',  types:['DOMAIN'] },
-  { id:'nmap',         name:'Port Scan',            tag:'NMAP',  types:['DOMAIN','IP'] },
-  { id:'geoip',        name:'GeoIP Location',       tag:'GEO',   types:['IP','DOMAIN'] },
-  { id:'theharvester', name:'theHarvester',         tag:'HARV',  types:['DOMAIN','EMAIL','COMPANY'] },
-  { id:'sherlock',     name:'Sherlock (usernames)', tag:'SHRL',  types:['USERNAME','PERSON'] },
-  { id:'shodan',       name:'Shodan',               tag:'SHDN',  types:['IP','DOMAIN'] },
-  { id:'virustotal',   name:'VirusTotal',           tag:'VT',    types:['DOMAIN','IP','EMAIL'] },
-  { id:'emailrep',     name:'EmailRep',             tag:'EREP',  types:['EMAIL'] },
-  { id:'hibp',         name:'HaveIBeenPwned',       tag:'HIBP',  types:['EMAIL'] },
-  { id:'metadata',     name:'Public Metadata',      tag:'META',  always:true },
-  { id:'dorks',        name:'Google Dorks',         tag:'DORK',  always:true },
+  // ── PERSON ────────────────────────────────────────────────────────────────
+  { id:'people',          name:'People Search',           tag:'PEOP',  types:['PERSON'] },
+  { id:'public_records',  name:'Public Records',          tag:'PREC',  types:['PERSON'] },
+  { id:'property',        name:'Property Records',        tag:'PROP',  types:['PERSON','COMPANY'] },
+  { id:'social_media',    name:'Social Media Search',     tag:'SOCL',  types:['PERSON','USERNAME'] },
+  { id:'photo_forensics', name:'Photo & Video Forensics', tag:'FOTO',  types:['PERSON','USERNAME'] },
+  // ── USERNAME ──────────────────────────────────────────────────────────────
+  { id:'username_search', name:'Username Search',         tag:'USER',  types:['USERNAME'] },
+  // ── PHONE ─────────────────────────────────────────────────────────────────
+  { id:'phone',           name:'Phone Lookup',            tag:'PHONE', types:['PHONE'] },
+  // ── EMAIL ─────────────────────────────────────────────────────────────────
+  { id:'email_investigate', name:'Email Investigation',   tag:'EMAIL', types:['EMAIL'] },
+  // ── PLATE ─────────────────────────────────────────────────────────────────
+  { id:'plate_lookup',    name:'License Plate Lookup',    tag:'PLATE', types:['PLATE'] },
+  // ── COMPANY ───────────────────────────────────────────────────────────────
+  { id:'business',        name:'Business Search',         tag:'BIZ',   types:['COMPANY'] },
+  // ── LOCATION ──────────────────────────────────────────────────────────────
+  { id:'geolocation',     name:'Geolocation Intel',       tag:'GEO',   types:['LOCATION','IP'] },
+  // ── DOMAIN/IP ─────────────────────────────────────────────────────────────
+  { id:'whois',           name:'WHOIS Lookup',            tag:'WHOIS', types:['DOMAIN','IP'] },
+  { id:'dns',             name:'DNS Records',             tag:'DNS',   types:['DOMAIN'] },
+  { id:'nmap',            name:'Port Scan',               tag:'NMAP',  types:['DOMAIN','IP'] },
+  { id:'geoip',           name:'GeoIP Location',          tag:'GEOIP', types:['IP','DOMAIN'] },
+  { id:'shodan',          name:'Shodan',                  tag:'SHDN',  types:['IP','DOMAIN'] },
+  { id:'virustotal',      name:'VirusTotal',              tag:'VT',    types:['DOMAIN','IP','EMAIL'] },
+  // ── ALWAYS ────────────────────────────────────────────────────────────────
+  { id:'dorks',           name:'Google Dorks',            tag:'DORK',  always:true },
 ];
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -543,7 +550,7 @@ function clearAll() {
     <div class="empty" id="emptyState">
       <div class="empty-icon">◎</div>
       <div class="empty-title">AWAITING TARGET</div>
-      <div class="empty-sub">All modules run in parallel — WHOIS, DNS, Nmap, theHarvester, Sherlock, Shodan, Subdomains, GeoIP, VirusTotal, EmailRep, HIBP, Metadata & Google Dorks.</div>
+      <div class="empty-sub">All modules run in parallel — People Search, Public Records, Property, Social Media, Phone, Email, Username, Plate, Business, Geolocation, WHOIS, DNS, Port Scan, Shodan, VirusTotal & Google Dorks.</div>
       <div class="backend-cfg" id="backendCfg">
         <div class="cfg-label">BACKEND URL (your Replit URL)</div>
         <div class="cfg-row">
