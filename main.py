@@ -728,6 +728,299 @@ def module_plate_lookup(target, job_id):
     return result
 
 
+def module_vin_investigation(target, job_id):
+    emit(job_id, "module_start", {"module": "vin_investigation"})
+
+    vin = target.upper().strip().replace(" ", "").replace("-", "")
+    lines = []
+
+    # ── VIN Validation ────────────────────────────────────────────────────────
+    lines.append(f"TARGET VIN: {vin}")
+    lines.append(f"LENGTH:     {len(vin)} characters {'✓ VALID' if len(vin) == 17 else '✗ INVALID — must be 17 characters'}")
+    lines.append("")
+
+    if len(vin) != 17:
+        lines.append("⚠ VIN must be exactly 17 characters.")
+        lines.append("Common issues: spaces, dashes, letter O vs zero, letter I vs one.")
+        result = "\n".join(lines)
+        emit(job_id, "module_done", {"module": "vin_investigation", "result": result})
+        return result
+
+    # ── Check digit validation ────────────────────────────────────────────────
+    def validate_check_digit(v):
+        transliterate = {
+            'A':1,'B':2,'C':3,'D':4,'E':5,'F':6,'G':7,'H':8,
+            'J':1,'K':2,'L':3,'M':4,'N':5,'P':7,'R':9,
+            'S':2,'T':3,'V':5,'W':6,'X':7,'Y':8,'Z':9
+        }
+        weights = [8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2]
+        total = 0
+        for i, ch in enumerate(v):
+            val = int(ch) if ch.isdigit() else transliterate.get(ch, 0)
+            total += val * weights[i]
+        rem = total % 11
+        expected = 'X' if rem == 10 else str(rem)
+        return expected == v[8], expected, v[8]
+
+    check_ok, expected_digit, actual_digit = validate_check_digit(vin)
+    lines.append(f"CHECK DIGIT (pos 9): {actual_digit} — {'✓ VALID' if check_ok else f'✗ MISMATCH (expected {expected_digit}) — verify VIN accuracy'}")
+    lines.append("")
+
+    # ── VIN Decode — NHTSA vPIC API (free, no key required) ──────────────────
+    lines.append("=" * 50)
+    lines.append("NHTSA vPIC VEHICLE DECODE (LIVE)")
+    lines.append("=" * 50)
+    lines.append("")
+
+    nhtsa_make = "UNKNOWN"
+    nhtsa_model = "UNKNOWN"
+    nhtsa_year = "UNKNOWN"
+
+    try:
+        nhtsa_out, _, rc = run_cmd(
+            f"curl -s --max-time 15 'https://vpic.nhtsa.dot.gov/api/vehicles/decodevinvalues/{vin}?format=json' 2>/dev/null",
+            timeout=20
+        )
+        if rc == 0 and nhtsa_out:
+            nhtsa_data = json.loads(nhtsa_out)
+            r = nhtsa_data.get("Results", [{}])[0]
+
+            nhtsa_make    = r.get("Make", "N/A")
+            nhtsa_model   = r.get("Model", "N/A")
+            nhtsa_year    = r.get("ModelYear", "N/A")
+            series        = r.get("Series", "")
+            trim          = r.get("Trim", "")
+            body          = r.get("BodyClass", "N/A")
+            drive         = r.get("DriveType", "N/A")
+            fuel          = r.get("FuelTypePrimary", "N/A")
+            engine_l      = r.get("DisplacementL", "")
+            cylinders     = r.get("EngineCylinders", "")
+            trans         = r.get("TransmissionStyle", "N/A")
+            gvwr          = r.get("GVWR", "N/A")
+            mfr           = r.get("Manufacturer", "N/A")
+            plant_city    = r.get("PlantCity", "")
+            plant_state   = r.get("PlantState", "")
+            plant_country = r.get("PlantCountry", "")
+            plant = ", ".join(filter(None, [plant_city, plant_state, plant_country])) or "N/A"
+            err_code = r.get("ErrorCode", "")
+            err_text = r.get("ErrorText", "")
+
+            engine_str = f"{engine_l}L" if engine_l else ""
+            if cylinders:
+                engine_str += f" {cylinders}-cylinder"
+            if not engine_str:
+                engine_str = "N/A"
+
+            lines.append(f"MAKE:           {nhtsa_make}")
+            lines.append(f"MODEL:          {nhtsa_model}")
+            lines.append(f"YEAR:           {nhtsa_year}")
+            if series:  lines.append(f"SERIES:         {series}")
+            if trim:    lines.append(f"TRIM:           {trim}")
+            lines.append(f"BODY CLASS:     {body}")
+            lines.append(f"DRIVE TYPE:     {drive}")
+            lines.append(f"FUEL TYPE:      {fuel}")
+            lines.append(f"ENGINE:         {engine_str}")
+            lines.append(f"TRANSMISSION:   {trans}")
+            lines.append(f"GVWR:           {gvwr}")
+            lines.append(f"MANUFACTURER:   {mfr}")
+            lines.append(f"ASSEMBLY PLANT: {plant}")
+            if err_code and err_code != "0":
+                lines.append(f"DECODE NOTE:    {err_text[:120]}")
+            lines.append("")
+        else:
+            lines.append("NHTSA API unreachable — manual decode below.")
+            lines.append("")
+    except Exception as e:
+        lines.append(f"NHTSA decode error: {str(e)}")
+        lines.append("")
+
+    # ── VIN Character Breakdown ───────────────────────────────────────────────
+    model_year_map = {
+        'A':'1980','B':'1981','C':'1982','D':'1983','E':'1984','F':'1985',
+        'G':'1986','H':'1987','J':'1988','K':'1989','L':'2020','M':'2021',
+        'N':'2022','P':'2023','R':'2024','S':'2025','T':'2026','V':'2027',
+        'W':'2028','X':'2029','Y':'2030','1':'2001','2':'2002','3':'2003',
+        '4':'2004','5':'2005','6':'2006','7':'2007','8':'2008','9':'2009',
+    }
+    # Fill in 2010-2019
+    for i, ch in enumerate(['A','B','C','D','E','F','G','H','J','K']):
+        if ch not in model_year_map:
+            model_year_map[ch] = str(2010 + i)
+    model_year_map['A'] = '1980 / 2010'
+    model_year_map['B'] = '1981 / 2011'
+    model_year_map['C'] = '1982 / 2012'
+    model_year_map['D'] = '1983 / 2013'
+    model_year_map['E'] = '1984 / 2014'
+    model_year_map['F'] = '1985 / 2015'
+    model_year_map['G'] = '1986 / 2016'
+    model_year_map['H'] = '1987 / 2017'
+    model_year_map['J'] = '1988 / 2018'
+    model_year_map['K'] = '1989 / 2019'
+
+    vin_year_str = model_year_map.get(vin[9], "Unknown")
+    # Use NHTSA year if we got it
+    if nhtsa_year and nhtsa_year not in ("N/A", "UNKNOWN"):
+        vin_year_str = nhtsa_year
+
+    lines.append("=" * 50)
+    lines.append("VIN STRUCTURAL BREAKDOWN")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append(f"  Pos 1-3   WMI (World Manufacturer Identifier): {vin[0:3]}")
+    lines.append(f"  Pos 4-8   VDS (Vehicle Descriptor Section):    {vin[3:8]}")
+    lines.append(f"  Pos 9     Check Digit:                          {vin[8]} {'✓' if check_ok else '✗'}")
+    lines.append(f"  Pos 10    Model Year Code:                      {vin[9]} = {vin_year_str}")
+    lines.append(f"  Pos 11    Assembly Plant Code:                  {vin[10]}")
+    lines.append(f"  Pos 12-17 Production Serial:                   {vin[11:17]}")
+    lines.append("")
+
+    # ── NHTSA Safety Recalls ──────────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("NHTSA SAFETY RECALLS (LIVE)")
+    lines.append("=" * 50)
+    lines.append("")
+
+    try:
+        recall_out, _, rc = run_cmd(
+            f"curl -s --max-time 15 'https://api.nhtsa.gov/recalls/recallsByVehicle?make={nhtsa_make}&model={nhtsa_model}&modelYear={vin_year_str}' 2>/dev/null",
+            timeout=20
+        )
+        if rc == 0 and recall_out:
+            recall_data = json.loads(recall_out)
+            recalls = recall_data.get("results", recall_data.get("Results", []))
+            if recalls:
+                lines.append(f"⚠ {len(recalls)} RECALL(S) FOUND")
+                lines.append("")
+                for rec in recalls[:8]:
+                    lines.append(f"  NHTSA #:   {rec.get('NHTSACampaignNumber', rec.get('Recall_Number', 'N/A'))}")
+                    lines.append(f"  Component: {rec.get('Component', 'N/A')}")
+                    summary = rec.get('Summary', rec.get('Consequence', ''))
+                    if summary:
+                        lines.append(f"  Summary:   {summary[:200]}")
+                    lines.append("")
+            else:
+                lines.append("✓ No recalls found for this make/model/year combination.")
+                lines.append("")
+        else:
+            lines.append("NHTSA recalls API unreachable — verify manually below.")
+            lines.append("")
+    except Exception as e:
+        lines.append(f"Recall lookup error: {str(e)}")
+        lines.append("")
+
+    lines.append(f"[Verify directly]")
+    lines.append(f"  https://www.nhtsa.gov/vehicle/{vin}/recalls")
+    lines.append("")
+
+    # ── Title & Registration Tracing ──────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("TITLE & REGISTRATION TRACING (DPPA)")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("Law firm use qualifies under DPPA 18 U.S.C. § 2721(b)(4) — litigation.")
+    lines.append("")
+
+    title_resources = [
+        ("NMVTIS — VinAudit (~$8)",       f"https://www.vinaudit.com/get-vehicle-history-report?vin={vin}"),
+        ("NMVTIS — VehicleHistory.gov",   "https://www.vehiclehistory.gov/"),
+        ("AutoCheck by Experian",          f"https://www.autocheck.com/vehiclehistory/?vin={vin}"),
+        ("CarFax (title brands)",          f"https://www.carfax.com/vehicle/{vin}"),
+        ("NICB VINCheck (stolen?)",        f"https://www.nicb.org/vincheck?vin={vin}"),
+        ("NM MVD Title Request",           "https://www.mvd.newmexico.gov/"),
+        ("NHTSA vPIC Full Decode",         f"https://vpic.nhtsa.dot.gov/decoder/Decoder?vin={vin}"),
+        ("TLO / PeopleMap (PLF tools)",    "https://www.tlo.com/"),
+        ("Tracers (PLF tools)",            "https://www.tracers.com/"),
+    ]
+    for name, url in title_resources:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Auction & Salvage Tracing ─────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("AUCTION & SALVAGE HISTORY")
+    lines.append("=" * 50)
+    lines.append("")
+
+    auction_resources = [
+        ("Copart Auction Search", f"https://www.copart.com/lot/search/#?q[]=%22{vin}%22"),
+        ("IAAI Auction Search",   f"https://www.iaai.com/Vehicles/Search?SearchType=4&SearchTerm={vin}"),
+        ("SalvageTitle.com",      "https://www.salvagetitle.com/"),
+        ("SalvageBid",            "https://www.salvagebid.com/"),
+        ("AutoBidMaster",         "https://www.autobidmaster.com/"),
+        ("BidCars (auction hist)","https://bidcars.com/"),
+    ]
+    for name, url in auction_resources:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── EDR / Crash Investigation Resources ──────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("EDR / CRASH INVESTIGATION RESOURCES")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("For EDR data retrieval (Bosch CDR system):")
+    lines.append("")
+
+    edr_resources = [
+        ("NHTSA EDR Regulations (49 CFR 563)", "https://www.nhtsa.gov/document/49-cfr-part-563"),
+        ("Bosch CDR Tool Info",                 "https://www.boschdiagnostics.com/cdr"),
+        ("NHTSA Recall Check by VIN",           f"https://www.nhtsa.gov/vehicle/{vin}/recalls"),
+        ("Driver Privacy Protection Act",        "https://www.justice.gov/d9/2023-01/dppa_guidance.pdf"),
+        ("NM IPRA Request Portal",              "https://www.nmag.gov/public-records-requests.aspx"),
+        ("NM MVD Title/Registration Request",   "https://www.mvd.newmexico.gov/"),
+    ]
+    for name, url in edr_resources:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Google Dorks ──────────────────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("GOOGLE DORKS")
+    lines.append("=" * 50)
+    lines.append("")
+
+    dorks = [
+        f'"{vin}"',
+        f'"{vin}" accident OR crash OR collision',
+        f'"{vin}" title OR registration OR sale',
+        f'"{vin}" auction',
+        f'"{vin}" stolen OR theft',
+        f'"{vin}" lawsuit OR litigation OR court',
+        f'"{vin}" site:copart.com',
+        f'"{vin}" site:iaai.com',
+    ]
+    for dork in dorks:
+        encoded = dork.replace(" ", "+").replace('"', '%22')
+        lines.append(f"  {dork}")
+        lines.append(f"  https://www.google.com/search?q={encoded}")
+        lines.append("")
+
+    # ── Investigative Next Steps ──────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("INVESTIGATIVE NEXT STEPS — TITLE TRACING")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append(f"01. Run VIN through TLO/PeopleMap/Tracers — fastest path to current owner.")
+    lines.append(f"02. Pull NMVTIS report via VinAudit (~$8) to confirm title state and brands.")
+    lines.append(f"03. If in NM: submit MVD title request citing DPPA §2721(b)(4) with VIN {vin}.")
+    lines.append(f"04. If crossed state lines: identify destination state from NMVTIS then")
+    lines.append(f"    submit title request to that state's DMV under DPPA.")
+    lines.append(f"05. If sold at auction: serve preservation letter/subpoena on auction house")
+    lines.append(f"    for buyer transaction records referencing VIN {vin}.")
+    lines.append(f"06. Once located: arrange certified CDR analyst download immediately.")
+    lines.append(f"    Document ignition cycle count before vehicle is started again.")
+    lines.append(f"07. Check Ford telematics (FordPass/Ford Connected Services) for GPS/trip data.")
+    lines.append("")
+
+    result = "\n".join(lines)
+    emit(job_id, "module_done", {"module": "vin_investigation", "result": result})
+    return result
+
+
+
 def module_image_metadata(target, job_id):
     emit(job_id, "module_start", {"module": "image_metadata"})
     lines = []
@@ -1878,25 +2171,26 @@ def module_public_records(target, job_id):
 # It runs inside module_username_search to avoid double execution.
 
 MODULE_MAP = {
-    "people":            module_people_search,
-    "property":          module_property,
-    "photo_forensics":   module_photo_forensics,
-    "geolocation":       module_geolocation,
-    "username_search":   module_username_search,
-    "public_records":    module_public_records,
-    "social_media":      module_social_media,
-    "business":          module_business,
-    "plate_lookup":      module_plate_lookup,
-    "image_metadata":    module_image_metadata,
-    "email_investigate": module_email_investigate,
-    "phone":             module_phone,
-    "whois":             module_whois,
-    "dns":               module_dns,
-    "nmap":              module_nmap,
-    "geoip":             module_geoip,
-    "shodan":            module_shodan,
-    "virustotal":        module_virustotal,
-    "dorks":             module_google_dorks,
+    "people":              module_people_search,
+    "property":            module_property,
+    "photo_forensics":     module_photo_forensics,
+    "geolocation":         module_geolocation,
+    "username_search":     module_username_search,
+    "public_records":      module_public_records,
+    "social_media":        module_social_media,
+    "business":            module_business,
+    "plate_lookup":        module_plate_lookup,
+    "vin_investigation":   module_vin_investigation,
+    "image_metadata":      module_image_metadata,
+    "email_investigate":   module_email_investigate,
+    "phone":               module_phone,
+    "whois":               module_whois,
+    "dns":                 module_dns,
+    "nmap":                module_nmap,
+    "geoip":               module_geoip,
+    "shodan":              module_shodan,
+    "virustotal":          module_virustotal,
+    "dorks":               module_google_dorks,
 }
 
 # Modules that only make sense for domain/IP targets
