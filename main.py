@@ -766,15 +766,15 @@ def module_vin_investigation(target, job_id):
     lines.append(f"CHECK DIGIT (pos 9): {actual_digit} — {'✓ VALID' if check_ok else f'✗ MISMATCH (expected {expected_digit}) — verify VIN accuracy'}")
     lines.append("")
 
-    # ── VIN Decode — NHTSA vPIC API (free, no key required) ──────────────────
+    # ── STEP 1: NHTSA vPIC Decode (free, no key) ─────────────────────────────
     lines.append("=" * 50)
     lines.append("NHTSA vPIC VEHICLE DECODE (LIVE)")
     lines.append("=" * 50)
     lines.append("")
 
-    nhtsa_make = "UNKNOWN"
-    nhtsa_model = "UNKNOWN"
-    nhtsa_year = "UNKNOWN"
+    nhtsa_make  = ""
+    nhtsa_model = ""
+    nhtsa_year  = ""
 
     try:
         nhtsa_out, _, rc = run_cmd(
@@ -782,12 +782,10 @@ def module_vin_investigation(target, job_id):
             timeout=20
         )
         if rc == 0 and nhtsa_out:
-            nhtsa_data = json.loads(nhtsa_out)
-            r = nhtsa_data.get("Results", [{}])[0]
-
-            nhtsa_make    = r.get("Make", "N/A")
-            nhtsa_model   = r.get("Model", "N/A")
-            nhtsa_year    = r.get("ModelYear", "N/A")
+            r = json.loads(nhtsa_out).get("Results", [{}])[0]
+            nhtsa_make    = r.get("Make", "")
+            nhtsa_model   = r.get("Model", "")
+            nhtsa_year    = r.get("ModelYear", "")
             series        = r.get("Series", "")
             trim          = r.get("Trim", "")
             body          = r.get("BodyClass", "N/A")
@@ -804,16 +802,12 @@ def module_vin_investigation(target, job_id):
             plant = ", ".join(filter(None, [plant_city, plant_state, plant_country])) or "N/A"
             err_code = r.get("ErrorCode", "")
             err_text = r.get("ErrorText", "")
+            engine_str = (f"{engine_l}L " if engine_l else "") + (f"{cylinders}-cylinder" if cylinders else "")
+            engine_str = engine_str.strip() or "N/A"
 
-            engine_str = f"{engine_l}L" if engine_l else ""
-            if cylinders:
-                engine_str += f" {cylinders}-cylinder"
-            if not engine_str:
-                engine_str = "N/A"
-
-            lines.append(f"MAKE:           {nhtsa_make}")
-            lines.append(f"MODEL:          {nhtsa_model}")
-            lines.append(f"YEAR:           {nhtsa_year}")
+            lines.append(f"MAKE:           {nhtsa_make or 'N/A'}")
+            lines.append(f"MODEL:          {nhtsa_model or 'N/A'}")
+            lines.append(f"YEAR:           {nhtsa_year or 'N/A'}")
             if series:  lines.append(f"SERIES:         {series}")
             if trim:    lines.append(f"TRIM:           {trim}")
             lines.append(f"BODY CLASS:     {body}")
@@ -828,7 +822,7 @@ def module_vin_investigation(target, job_id):
                 lines.append(f"DECODE NOTE:    {err_text[:120]}")
             lines.append("")
         else:
-            lines.append("NHTSA API unreachable — manual decode below.")
+            lines.append("NHTSA vPIC API unreachable.")
             lines.append("")
     except Exception as e:
         lines.append(f"NHTSA decode error: {str(e)}")
@@ -836,31 +830,14 @@ def module_vin_investigation(target, job_id):
 
     # ── VIN Character Breakdown ───────────────────────────────────────────────
     model_year_map = {
-        'A':'1980','B':'1981','C':'1982','D':'1983','E':'1984','F':'1985',
-        'G':'1986','H':'1987','J':'1988','K':'1989','L':'2020','M':'2021',
-        'N':'2022','P':'2023','R':'2024','S':'2025','T':'2026','V':'2027',
-        'W':'2028','X':'2029','Y':'2030','1':'2001','2':'2002','3':'2003',
-        '4':'2004','5':'2005','6':'2006','7':'2007','8':'2008','9':'2009',
+        'A':'1980/2010','B':'1981/2011','C':'1982/2012','D':'1983/2013',
+        'E':'1984/2014','F':'1985/2015','G':'1986/2016','H':'1987/2017',
+        'J':'1988/2018','K':'1989/2019','L':'2020','M':'2021','N':'2022',
+        'P':'2023','R':'2024','S':'2025','T':'2026','V':'2027','W':'2028',
+        'X':'2029','Y':'2030','1':'2001','2':'2002','3':'2003','4':'2004',
+        '5':'2005','6':'2006','7':'2007','8':'2008','9':'2009',
     }
-    # Fill in 2010-2019
-    for i, ch in enumerate(['A','B','C','D','E','F','G','H','J','K']):
-        if ch not in model_year_map:
-            model_year_map[ch] = str(2010 + i)
-    model_year_map['A'] = '1980 / 2010'
-    model_year_map['B'] = '1981 / 2011'
-    model_year_map['C'] = '1982 / 2012'
-    model_year_map['D'] = '1983 / 2013'
-    model_year_map['E'] = '1984 / 2014'
-    model_year_map['F'] = '1985 / 2015'
-    model_year_map['G'] = '1986 / 2016'
-    model_year_map['H'] = '1987 / 2017'
-    model_year_map['J'] = '1988 / 2018'
-    model_year_map['K'] = '1989 / 2019'
-
-    vin_year_str = model_year_map.get(vin[9], "Unknown")
-    # Use NHTSA year if we got it
-    if nhtsa_year and nhtsa_year not in ("N/A", "UNKNOWN"):
-        vin_year_str = nhtsa_year
+    vin_year_display = nhtsa_year if nhtsa_year else model_year_map.get(vin[9], "Unknown")
 
     lines.append("=" * 50)
     lines.append("VIN STRUCTURAL BREAKDOWN")
@@ -869,50 +846,312 @@ def module_vin_investigation(target, job_id):
     lines.append(f"  Pos 1-3   WMI (World Manufacturer Identifier): {vin[0:3]}")
     lines.append(f"  Pos 4-8   VDS (Vehicle Descriptor Section):    {vin[3:8]}")
     lines.append(f"  Pos 9     Check Digit:                          {vin[8]} {'✓' if check_ok else '✗'}")
-    lines.append(f"  Pos 10    Model Year Code:                      {vin[9]} = {vin_year_str}")
+    lines.append(f"  Pos 10    Model Year Code:                      {vin[9]} = {vin_year_display}")
     lines.append(f"  Pos 11    Assembly Plant Code:                  {vin[10]}")
     lines.append(f"  Pos 12-17 Production Serial:                   {vin[11:17]}")
     lines.append("")
 
-    # ── NHTSA Safety Recalls ──────────────────────────────────────────────────
+    # ── STEP 2: NHTSA Recall Check (live by VIN) ─────────────────────────────
     lines.append("=" * 50)
     lines.append("NHTSA SAFETY RECALLS (LIVE)")
     lines.append("=" * 50)
     lines.append("")
 
+    recall_count = 0
     try:
-        recall_out, _, rc = run_cmd(
-            f"curl -s --max-time 15 'https://api.nhtsa.gov/recalls/recallsByVehicle?make={nhtsa_make}&model={nhtsa_model}&modelYear={vin_year_str}' 2>/dev/null",
+        # Primary: VIN-specific recall endpoint
+        vin_recall_out, _, rc1 = run_cmd(
+            f"curl -s --max-time 15 'https://api.nhtsa.gov/recalls/recallsByVehicle?make={nhtsa_make}&model={nhtsa_model}&modelYear={nhtsa_year}' 2>/dev/null",
             timeout=20
         )
-        if rc == 0 and recall_out:
-            recall_data = json.loads(recall_out)
-            recalls = recall_data.get("results", recall_data.get("Results", []))
+        if rc1 == 0 and vin_recall_out:
+            rdata = json.loads(vin_recall_out)
+            recalls = rdata.get("results", rdata.get("Results", []))
+            recall_count = len(recalls)
             if recalls:
-                lines.append(f"⚠ {len(recalls)} RECALL(S) FOUND")
+                lines.append(f"⚠ {recall_count} RECALL(S) FOUND")
                 lines.append("")
-                for rec in recalls[:8]:
-                    lines.append(f"  NHTSA #:   {rec.get('NHTSACampaignNumber', rec.get('Recall_Number', 'N/A'))}")
-                    lines.append(f"  Component: {rec.get('Component', 'N/A')}")
-                    summary = rec.get('Summary', rec.get('Consequence', ''))
+                for rec in recalls[:10]:
+                    lines.append(f"  NHTSA #:    {rec.get('NHTSACampaignNumber', 'N/A')}")
+                    lines.append(f"  Component:  {rec.get('Component', 'N/A')}")
+                    lines.append(f"  Date:       {rec.get('ReportReceivedDate', 'N/A')}")
+                    summary = rec.get('Summary', '')
+                    consequence = rec.get('Consequence', '')
+                    remedy = rec.get('Remedy', '')
                     if summary:
-                        lines.append(f"  Summary:   {summary[:200]}")
+                        lines.append(f"  Summary:    {summary[:250]}")
+                    if consequence:
+                        lines.append(f"  Risk:       {consequence[:200]}")
+                    if remedy:
+                        lines.append(f"  Remedy:     {remedy[:200]}")
+                    lines.append("")
+                if recall_count > 10:
+                    lines.append(f"  ... and {recall_count - 10} more. See full list at NHTSA link below.")
                     lines.append("")
             else:
-                lines.append("✓ No recalls found for this make/model/year combination.")
+                lines.append("✓ No open recalls found for this make/model/year.")
                 lines.append("")
         else:
-            lines.append("NHTSA recalls API unreachable — verify manually below.")
+            lines.append("Recall API unreachable — verify at link below.")
             lines.append("")
     except Exception as e:
         lines.append(f"Recall lookup error: {str(e)}")
         lines.append("")
 
-    lines.append(f"[Verify directly]")
-    lines.append(f"  https://www.nhtsa.gov/vehicle/{vin}/recalls")
+    lines.append(f"  Full recall check: https://www.nhtsa.gov/vehicle/{vin}/recalls")
     lines.append("")
 
-    # ── Title & Registration Tracing ──────────────────────────────────────────
+    # ── STEP 3: NHTSA Consumer Complaints (live) ─────────────────────────────
+    lines.append("=" * 50)
+    lines.append("NHTSA CONSUMER COMPLAINTS (LIVE)")
+    lines.append("=" * 50)
+    lines.append("")
+
+    try:
+        comp_out, _, rc2 = run_cmd(
+            f"curl -s --max-time 15 'https://api.nhtsa.gov/complaints/complaintsByVehicle?make={nhtsa_make}&model={nhtsa_model}&modelYear={nhtsa_year}' 2>/dev/null",
+            timeout=20
+        )
+        if rc2 == 0 and comp_out:
+            cdata = json.loads(comp_out)
+            complaints = cdata.get("results", cdata.get("Results", []))
+            total_comp = len(complaints)
+
+            if complaints:
+                # Tally summary stats
+                crashes   = sum(1 for c in complaints if c.get('crash', False))
+                fires     = sum(1 for c in complaints if c.get('fire', False))
+                injuries  = sum(c.get('numberOfInjuries', 0) or 0 for c in complaints)
+                deaths    = sum(c.get('numberOfDeaths', 0) or 0 for c in complaints)
+
+                lines.append(f"TOTAL COMPLAINTS:  {total_comp}")
+                lines.append(f"CRASHES REPORTED:  {crashes}")
+                lines.append(f"FIRES REPORTED:    {fires}")
+                lines.append(f"INJURIES REPORTED: {injuries}")
+                lines.append(f"DEATHS REPORTED:   {deaths}")
+                lines.append("")
+
+                # Top complained-about components
+                from collections import Counter
+                comp_counter = Counter(
+                    c.get('components', c.get('component', 'UNKNOWN'))
+                    for c in complaints
+                )
+                top_comps = comp_counter.most_common(5)
+                if top_comps:
+                    lines.append("TOP COMPLAINT AREAS:")
+                    for comp_name, count in top_comps:
+                        lines.append(f"  • {comp_name}: {count} complaint(s)")
+                    lines.append("")
+
+                # Show the 3 most recent complaints with detail
+                lines.append("MOST RECENT COMPLAINTS:")
+                lines.append("")
+                recent = sorted(
+                    complaints,
+                    key=lambda x: x.get('dateOfIncident', x.get('incidentDate', '')),
+                    reverse=True
+                )[:3]
+                for c in recent:
+                    date    = c.get('dateOfIncident', c.get('incidentDate', 'N/A'))
+                    comp_nm = c.get('components', c.get('component', 'N/A'))
+                    desc    = c.get('summary', c.get('description', ''))
+                    crash   = c.get('crash', False)
+                    fire    = c.get('fire', False)
+                    inj     = c.get('numberOfInjuries', 0)
+                    lines.append(f"  Date:      {date}")
+                    lines.append(f"  Component: {comp_nm}")
+                    if crash:   lines.append(f"  ⚠ CRASH INVOLVED")
+                    if fire:    lines.append(f"  ⚠ FIRE INVOLVED")
+                    if inj:     lines.append(f"  Injuries:  {inj}")
+                    if desc:    lines.append(f"  Summary:   {desc[:300]}")
+                    lines.append("")
+            else:
+                lines.append("✓ No consumer complaints on record for this vehicle.")
+                lines.append("")
+        else:
+            lines.append("Complaints API unreachable.")
+            lines.append("")
+    except Exception as e:
+        lines.append(f"Complaints lookup error: {str(e)}")
+        lines.append("")
+
+    # ── STEP 4: NHTSA Safety Ratings (live) ──────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("NHTSA SAFETY RATINGS — NCAP CRASH TESTS (LIVE)")
+    lines.append("=" * 50)
+    lines.append("")
+
+    try:
+        # Get vehicle variants list first
+        variants_out, _, rc3 = run_cmd(
+            f"curl -s --max-time 15 'https://api.nhtsa.gov/SafetyRatings/modelyear/{nhtsa_year}/make/{nhtsa_make}/model/{nhtsa_model}?format=json' 2>/dev/null",
+            timeout=20
+        )
+        if rc3 == 0 and variants_out:
+            vdata = json.loads(variants_out)
+            variants = vdata.get("Results", [])
+            if variants:
+                # Pull ratings for first variant
+                vid = variants[0].get("VehicleId")
+                if vid:
+                    ratings_out, _, rc4 = run_cmd(
+                        f"curl -s --max-time 15 'https://api.nhtsa.gov/SafetyRatings/VehicleId/{vid}?format=json' 2>/dev/null",
+                        timeout=20
+                    )
+                    if rc4 == 0 and ratings_out:
+                        rdata2 = json.loads(ratings_out)
+                        rat = rdata2.get("Results", [{}])[0]
+                        overall       = rat.get("OverallRating", "N/A")
+                        frontal_dr    = rat.get("OverallFrontCrashRating", "N/A")
+                        side          = rat.get("OverallSideCrashRating", "N/A")
+                        rollover      = rat.get("RolloverRating", "N/A")
+                        rollover_risk = rat.get("RolloverPossibility", "N/A")
+                        description   = rat.get("VehicleDescription", "")
+
+                        def star(val):
+                            try:
+                                n = int(val)
+                                return "★" * n + "☆" * (5 - n) + f" ({n}/5)"
+                            except:
+                                return str(val)
+
+                        if description:
+                            lines.append(f"VEHICLE:          {description}")
+                        lines.append(f"OVERALL RATING:   {star(overall)}")
+                        lines.append(f"FRONTAL CRASH:    {star(frontal_dr)}")
+                        lines.append(f"SIDE CRASH:       {star(side)}")
+                        lines.append(f"ROLLOVER:         {star(rollover)}")
+                        if rollover_risk and rollover_risk != "N/A":
+                            lines.append(f"ROLLOVER RISK:    {rollover_risk}%")
+                        if len(variants) > 1:
+                            lines.append(f"NOTE: {len(variants)} variant(s) tested. Showing primary.")
+                        lines.append("")
+                    else:
+                        lines.append("Ratings data unavailable for this vehicle.")
+                        lines.append("")
+            else:
+                lines.append("No NCAP crash test data found for this vehicle.")
+                lines.append("(Not all vehicles are tested — older, specialty, or low-volume vehicles may not have ratings.)")
+                lines.append("")
+        else:
+            lines.append("Safety ratings API unreachable.")
+            lines.append("")
+    except Exception as e:
+        lines.append(f"Safety ratings error: {str(e)}")
+        lines.append("")
+
+    # ── STEP 5: NICB Stolen / Salvage Check (live) ───────────────────────────
+    lines.append("=" * 50)
+    lines.append("NICB STOLEN / SALVAGE CHECK (LIVE)")
+    lines.append("=" * 50)
+    lines.append("")
+
+    try:
+        nicb_out, _, rc5 = run_cmd(
+            f"curl -s --max-time 15 -X POST 'https://www.nicb.org/api/vincheck' "
+            f"-H 'Content-Type: application/json' "
+            f"-H 'Accept: application/json' "
+            f"-H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' "
+            f"-H 'Origin: https://www.nicb.org' "
+            f"-H 'Referer: https://www.nicb.org/vincheck' "
+            f"--data '{{\"vin\":\"{vin}\"}}' 2>/dev/null",
+            timeout=20
+        )
+        if rc5 == 0 and nicb_out and len(nicb_out) > 5:
+            try:
+                nicb_data = json.loads(nicb_out)
+                stolen  = nicb_data.get("stolen", nicb_data.get("isStolen", nicb_data.get("theft", None)))
+                salvage = nicb_data.get("salvage", nicb_data.get("isSalvage", nicb_data.get("totalLoss", None)))
+                msg     = nicb_data.get("message", nicb_data.get("result", nicb_data.get("status", "")))
+
+                if stolen is True or (isinstance(stolen, str) and stolen.lower() in ("yes","true","1")):
+                    lines.append("⚠ ⚠ ⚠  VEHICLE REPORTED STOLEN — NOT RECOVERED  ⚠ ⚠ ⚠")
+                elif stolen is False or (isinstance(stolen, str) and stolen.lower() in ("no","false","0")):
+                    lines.append("✓ Not reported as stolen in NICB database.")
+                else:
+                    lines.append(f"Stolen status: {stolen if stolen is not None else 'See NICB directly'}")
+
+                if salvage is True or (isinstance(salvage, str) and salvage.lower() in ("yes","true","1")):
+                    lines.append("⚠ VEHICLE HAS SALVAGE / TOTAL LOSS RECORD")
+                elif salvage is False or (isinstance(salvage, str) and salvage.lower() in ("no","false","0")):
+                    lines.append("✓ No salvage/total loss record in NICB database.")
+                else:
+                    lines.append(f"Salvage status: {salvage if salvage is not None else 'See NICB directly'}")
+
+                if msg:
+                    lines.append(f"NICB message: {str(msg)[:200]}")
+            except:
+                # Non-JSON response — show raw
+                clean_resp = nicb_out[:500].strip()
+                if any(word in clean_resp.lower() for word in ["stolen","theft","salvage","total loss"]):
+                    lines.append(f"NICB response: {clean_resp}")
+                else:
+                    lines.append("NICB returned non-standard response — verify directly.")
+        else:
+            lines.append("NICB API did not return data — verify directly at link below.")
+        lines.append("")
+        lines.append(f"  Verify: https://www.nicb.org/vincheck")
+        lines.append(f"  Note: NICB limits to 5 searches/24hrs per IP address.")
+        lines.append("")
+    except Exception as e:
+        lines.append(f"NICB check error: {str(e)}")
+        lines.append(f"  Verify directly: https://www.nicb.org/vincheck")
+        lines.append("")
+
+    # ── STEP 6: Auction Search (Copart + IAAI live queries) ──────────────────
+    lines.append("=" * 50)
+    lines.append("AUCTION HISTORY — LIVE SEARCH")
+    lines.append("=" * 50)
+    lines.append("")
+
+    # Copart API search
+    try:
+        copart_out, _, rc6 = run_cmd(
+            f"curl -s --max-time 15 "
+            f"-H 'Accept: application/json, text/plain, */*' "
+            f"-H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' "
+            f"'https://www.copart.com/public/data/lotSearch/search?query={vin}&page=0&size=5&sort=lotCreateDate%2Cdesc' "
+            f"2>/dev/null",
+            timeout=20
+        )
+        if rc6 == 0 and copart_out and "{" in copart_out:
+            try:
+                cdata = json.loads(copart_out)
+                # Try various response shapes Copart uses
+                lots = (cdata.get("data", {}).get("results", {}).get("content", [])
+                        or cdata.get("returnCode", {})
+                        or [])
+                if isinstance(lots, list) and lots:
+                    lines.append(f"COPART: {len(lots)} lot(s) found")
+                    lines.append("")
+                    for lot in lots[:3]:
+                        lines.append(f"  Lot #:     {lot.get('ln', lot.get('lotNumber', 'N/A'))}")
+                        lines.append(f"  Title:     {lot.get('ld', lot.get('lotDescription', 'N/A'))}")
+                        lines.append(f"  Sale Date: {lot.get('ld', lot.get('saleDate', 'N/A'))}")
+                        lines.append(f"  Location:  {lot.get('yn', lot.get('yardName', 'N/A'))}")
+                        lines.append(f"  Damage:    {lot.get('dd', lot.get('damageDescription', 'N/A'))}")
+                        lines.append("")
+                else:
+                    lines.append("COPART: No auction records found for this VIN.")
+                    lines.append("")
+            except:
+                lines.append("COPART: Response parsing error — check link below.")
+                lines.append("")
+        else:
+            lines.append("COPART: Unable to query — check link below.")
+            lines.append("")
+    except Exception as e:
+        lines.append(f"Copart search error: {str(e)}")
+        lines.append("")
+
+    lines.append(f"  Copart search:  https://www.copart.com/lot/search/#?q[]=%22{vin}%22")
+    lines.append(f"  IAAI search:    https://www.iaai.com/Vehicles/Search?SearchType=4&SearchTerm={vin}")
+    lines.append(f"  SalvageBid:     https://www.salvagebid.com/")
+    lines.append(f"  AutoBidMaster:  https://www.autobidmaster.com/")
+    lines.append("")
+
+    # ── STEP 7: Title & Registration Tracing (links + DPPA context) ──────────
     lines.append("=" * 50)
     lines.append("TITLE & REGISTRATION TRACING (DPPA)")
     lines.append("=" * 50)
@@ -921,41 +1160,22 @@ def module_vin_investigation(target, job_id):
     lines.append("")
 
     title_resources = [
-        ("NMVTIS — VinAudit (~$8)",       f"https://www.vinaudit.com/get-vehicle-history-report?vin={vin}"),
-        ("NMVTIS — VehicleHistory.gov",   "https://www.vehiclehistory.gov/"),
-        ("AutoCheck by Experian",          f"https://www.autocheck.com/vehiclehistory/?vin={vin}"),
-        ("CarFax (title brands)",          f"https://www.carfax.com/vehicle/{vin}"),
-        ("NICB VINCheck (stolen?)",        f"https://www.nicb.org/vincheck?vin={vin}"),
-        ("NM MVD Title Request",           "https://www.mvd.newmexico.gov/"),
-        ("NHTSA vPIC Full Decode",         f"https://vpic.nhtsa.dot.gov/decoder/Decoder?vin={vin}"),
-        ("TLO / PeopleMap (PLF tools)",    "https://www.tlo.com/"),
-        ("Tracers (PLF tools)",            "https://www.tracers.com/"),
+        ("NMVTIS — VinAudit (~$8, DPPA report)", f"https://www.vinaudit.com/get-vehicle-history-report?vin={vin}"),
+        ("NMVTIS — VehicleHistory.gov",           "https://www.vehiclehistory.gov/"),
+        ("AutoCheck by Experian",                  f"https://www.autocheck.com/vehiclehistory/?vin={vin}"),
+        ("CarFax (title brands, accident history)", f"https://www.carfax.com/vehicle/{vin}"),
+        ("NM MVD Title Request",                   "https://www.mvd.newmexico.gov/"),
+        ("NHTSA Full Decode",                      f"https://vpic.nhtsa.dot.gov/decoder/Decoder?vin={vin}"),
+        ("TLO (PLF tool — fastest owner lookup)",  "https://www.tlo.com/"),
+        ("PeopleMap (PLF tool)",                   "https://www.peoplemaps.com/"),
+        ("Tracers (PLF tool)",                     "https://www.tracers.com/"),
     ]
     for name, url in title_resources:
         lines.append(f"[{name}]")
         lines.append(f"  {url}")
         lines.append("")
 
-    # ── Auction & Salvage Tracing ─────────────────────────────────────────────
-    lines.append("=" * 50)
-    lines.append("AUCTION & SALVAGE HISTORY")
-    lines.append("=" * 50)
-    lines.append("")
-
-    auction_resources = [
-        ("Copart Auction Search", f"https://www.copart.com/lot/search/#?q[]=%22{vin}%22"),
-        ("IAAI Auction Search",   f"https://www.iaai.com/Vehicles/Search?SearchType=4&SearchTerm={vin}"),
-        ("SalvageTitle.com",      "https://www.salvagetitle.com/"),
-        ("SalvageBid",            "https://www.salvagebid.com/"),
-        ("AutoBidMaster",         "https://www.autobidmaster.com/"),
-        ("BidCars (auction hist)","https://bidcars.com/"),
-    ]
-    for name, url in auction_resources:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    # ── EDR / Crash Investigation Resources ──────────────────────────────────
+    # ── STEP 8: EDR / Crash Investigation Resources ───────────────────────────
     lines.append("=" * 50)
     lines.append("EDR / CRASH INVESTIGATION RESOURCES")
     lines.append("=" * 50)
@@ -964,19 +1184,19 @@ def module_vin_investigation(target, job_id):
     lines.append("")
 
     edr_resources = [
-        ("NHTSA EDR Regulations (49 CFR 563)", "https://www.nhtsa.gov/document/49-cfr-part-563"),
-        ("Bosch CDR Tool Info",                 "https://www.boschdiagnostics.com/cdr"),
-        ("NHTSA Recall Check by VIN",           f"https://www.nhtsa.gov/vehicle/{vin}/recalls"),
-        ("Driver Privacy Protection Act",        "https://www.justice.gov/d9/2023-01/dppa_guidance.pdf"),
-        ("NM IPRA Request Portal",              "https://www.nmag.gov/public-records-requests.aspx"),
-        ("NM MVD Title/Registration Request",   "https://www.mvd.newmexico.gov/"),
+        ("NHTSA EDR Regulations (49 CFR 563)",  "https://www.nhtsa.gov/document/49-cfr-part-563"),
+        ("Bosch CDR Tool Info",                  "https://www.boschdiagnostics.com/cdr"),
+        ("NHTSA Recall Check by VIN",            f"https://www.nhtsa.gov/vehicle/{vin}/recalls"),
+        ("Driver Privacy Protection Act (DPPA)", "https://www.justice.gov/d9/2023-01/dppa_guidance.pdf"),
+        ("NM IPRA Request Portal",               "https://www.nmag.gov/public-records-requests.aspx"),
+        ("NM MVD Title/Registration Request",    "https://www.mvd.newmexico.gov/"),
     ]
     for name, url in edr_resources:
         lines.append(f"[{name}]")
         lines.append(f"  {url}")
         lines.append("")
 
-    # ── Google Dorks ──────────────────────────────────────────────────────────
+    # ── STEP 9: Google Dorks ──────────────────────────────────────────────────
     lines.append("=" * 50)
     lines.append("GOOGLE DORKS")
     lines.append("=" * 50)
@@ -985,12 +1205,13 @@ def module_vin_investigation(target, job_id):
     dorks = [
         f'"{vin}"',
         f'"{vin}" accident OR crash OR collision',
-        f'"{vin}" title OR registration OR sale',
-        f'"{vin}" auction',
-        f'"{vin}" stolen OR theft',
+        f'"{vin}" title OR registration OR sold',
+        f'"{vin}" auction OR salvage',
+        f'"{vin}" stolen OR theft OR recovered',
         f'"{vin}" lawsuit OR litigation OR court',
         f'"{vin}" site:copart.com',
         f'"{vin}" site:iaai.com',
+        f'"{vin}" site:facebook.com',
     ]
     for dork in dorks:
         encoded = dork.replace(" ", "+").replace('"', '%22')
@@ -998,21 +1219,23 @@ def module_vin_investigation(target, job_id):
         lines.append(f"  https://www.google.com/search?q={encoded}")
         lines.append("")
 
-    # ── Investigative Next Steps ──────────────────────────────────────────────
+    # ── STEP 10: Investigative Next Steps ────────────────────────────────────
     lines.append("=" * 50)
-    lines.append("INVESTIGATIVE NEXT STEPS — TITLE TRACING")
+    lines.append("INVESTIGATIVE NEXT STEPS")
     lines.append("=" * 50)
     lines.append("")
-    lines.append(f"01. Run VIN through TLO/PeopleMap/Tracers — fastest path to current owner.")
-    lines.append(f"02. Pull NMVTIS report via VinAudit (~$8) to confirm title state and brands.")
-    lines.append(f"03. If in NM: submit MVD title request citing DPPA §2721(b)(4) with VIN {vin}.")
-    lines.append(f"04. If crossed state lines: identify destination state from NMVTIS then")
-    lines.append(f"    submit title request to that state's DMV under DPPA.")
+    lines.append(f"01. Run VIN in TLO/PeopleMap/Tracers — fastest path to current registered owner.")
+    lines.append(f"02. Pull NMVTIS report via VinAudit (~$8) to confirm title state and any brands.")
+    lines.append(f"03. If still in NM: submit MVD title request citing DPPA §2721(b)(4), VIN {vin}.")
+    lines.append(f"04. If vehicle crossed state lines: identify destination from NMVTIS, then")
+    lines.append(f"    submit title request to that state DMV under DPPA.")
     lines.append(f"05. If sold at auction: serve preservation letter/subpoena on auction house")
-    lines.append(f"    for buyer transaction records referencing VIN {vin}.")
-    lines.append(f"06. Once located: arrange certified CDR analyst download immediately.")
-    lines.append(f"    Document ignition cycle count before vehicle is started again.")
-    lines.append(f"07. Check Ford telematics (FordPass/Ford Connected Services) for GPS/trip data.")
+    lines.append(f"    demanding buyer records referencing VIN {vin}.")
+    lines.append(f"06. Once vehicle located: arrange certified CDR analyst download immediately.")
+    lines.append(f"    Document ignition cycle count BEFORE vehicle is started again.")
+    lines.append(f"07. Subpoena manufacturer telematics data (FordPass, Mercedes Me, OnStar, etc.)")
+    lines.append(f"    directly from manufacturer — GPS track, trip history, crash notification.")
+    lines.append(f"08. If any recalls or complaints returned above, note for expert witness prep.")
     lines.append("")
 
     result = "\n".join(lines)
