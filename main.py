@@ -913,16 +913,24 @@ def module_hit_and_run(target, job_id):
     NM_STATES = ["NM","TX","AZ","CO","CA","FL","NY","IL","OH","GA","NC","MI","PA","WA","OR"]
 
     if len(parts) >= 2 and parts[-1] in NM_STATES:
-        plate = parts[0].replace("-", "")
+        plate = parts[0].replace("-", "").replace(",", "").strip()
         state = parts[-1]
-    elif len(parts) == 1 and 3 <= len(target_clean) <= 8 and target_clean.replace("-","").isalnum():
-        plate = target_clean.replace("-", "")
+    elif len(parts) == 1 and 3 <= len(target_clean) <= 8 and target_clean.replace("-","").replace(",","").isalnum():
+        plate = target_clean.replace("-", "").replace(",", "").strip()
         state = "NM"
     else:
-        plate = target_clean.replace(" ", "").replace("-", "")
+        plate = target_clean.replace(" ", "").replace("-", "").replace(",", "").strip()
         state = "NM"
 
     is_vin = len(plate) == 17
+
+    lines = []
+    lines.append(f"TARGET:  {target}")
+    lines.append(f"PARSED:  {'VIN' if is_vin else 'Plate'}={plate}  State={state}")
+    lines.append("")
+    lines.append("⚠ NOTE: Free tools return make/model/theft data only.")
+    lines.append("  Owner name/address requires state MVD DPPA request.")
+    lines.append("")
 
     lines.append("=" * 50)
     lines.append("STEP 1 — IDENTIFY THE VEHICLE FROM PHOTO/VIDEO (FREE)")
@@ -1540,10 +1548,10 @@ def module_plate_lookup(target, job_id):
     parts = target_clean.split()
     states = ["NM","TX","AZ","CO","CA","FL","NY","IL","OH","GA","NC","MI","PA","WA","OR"]
     if len(parts) >= 2 and parts[-1] in states:
-        plate = parts[0].replace("-", "")
+        plate = parts[0].replace("-", "").replace(",", "").strip()
         state = parts[-1]
     else:
-        plate = target_clean.replace(" ", "").replace("-", "")
+        plate = target_clean.replace(" ", "").replace("-", "").replace(",", "").strip()
         state = "NM"
 
     lines = []
@@ -1569,14 +1577,22 @@ def module_plate_lookup(target, job_id):
         lines.append("")
 
     lines.append("=" * 50)
-    lines.append("NM MVD RECORDS REQUEST")
+    lines.append(f"{state} MVD RECORDS REQUEST")
     lines.append("=" * 50)
     lines.append("")
-    lines.append("Submit DPPA request to NM MVD for registered owner info.")
+    lines.append("Submit DPPA request to state MVD for registered owner info.")
     lines.append("")
-    lines.append("[NM MVD (DPPA request)]")
-    lines.append("  https://www.mvd.newmexico.gov/")
-    lines.append("  Phone: (888) 683-4636")
+    mvd_links = {
+        "NM": ("NM MVD", "https://www.mvd.newmexico.gov/", "(888) 683-4636"),
+        "AZ": ("AZ MVD", "https://www.azdot.gov/motor-vehicles", "(602) 712-7355"),
+        "TX": ("TX DMV", "https://www.txdmv.gov/", "(888) 368-4689"),
+        "CO": ("CO DMV", "https://dmv.colorado.gov/", "(303) 205-5600"),
+        "CA": ("CA DMV", "https://www.dmv.ca.gov/", "(800) 777-0133"),
+    }
+    mvd_name, mvd_url, mvd_phone = mvd_links.get(state, ("State MVD", "https://www.vehiclehistory.gov/", "Check state DMV website"))
+    lines.append(f"[{mvd_name} (DPPA request)]")
+    lines.append(f"  {mvd_url}")
+    lines.append(f"  Phone: {mvd_phone}")
     lines.append("")
 
     lines.append("=" * 50)
