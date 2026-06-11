@@ -8,13 +8,15 @@
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;}
 :root{
---bg:#060a0f;--panel:#0b1118;--border:#1a2a3a;
---accent:#00a896;--accent2:#ff6b35;--accent3:#39ff14;
---text:#c8d8e8;--dim:#4a6070;--danger:#ff3b3b;--warn:#ffb300;
+  --bg:#060a0f;--panel:#0b1118;--border:#1a2a3a;
+  --accent:#00a896;--accent2:#ff6b35;--accent3:#39ff14;
+  --text:#c8d8e8;--dim:#4a6070;--danger:#ff3b3b;--warn:#ffb300;
 }
 body{background:var(--bg);color:var(--text);font-family:'Rajdhani',sans-serif;font-size:15px;min-height:100vh;}
 body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,168,150,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,168,150,0.025) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
 .app{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+
+/* Header */
 header{border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:14px;background:rgba(6,10,15,0.98);flex-shrink:0;}
 .logo{font-family:'Share Tech Mono',monospace;font-size:16px;color:var(--accent);letter-spacing:2px;display:flex;align-items:center;gap:9px;}
 .logo-ring{width:26px;height:26px;border:2px solid var(--accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;animation:glow 3s ease-in-out infinite;}
@@ -23,24 +25,38 @@ header{border-bottom:1px solid var(--border);padding:10px 20px;display:flex;alig
 .dot-live{width:6px;height:6px;border-radius:50%;background:var(--accent3);display:inline-block;margin-right:5px;animation:blink 1.5s infinite;}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0.2}}
 #backendStatus{font-size:9px;}
+
+/* Layout */
 .body{display:flex;flex:1;overflow:hidden;}
+
+/* Sidebar */
 aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display:flex;flex-direction:column;gap:16px;overflow-y:auto;flex-shrink:0;}
 .slabel{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--accent);letter-spacing:3px;text-transform:uppercase;margin-bottom:9px;display:flex;align-items:center;gap:8px;}
 .slabel::after{content:'';flex:1;height:1px;background:var(--border);}
+
+/* Target type btns */
 .type-wrap{display:flex;flex-wrap:wrap;gap:5px;}
 .tbtn{padding:4px 9px;border:1px solid var(--border);border-radius:2px;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;cursor:pointer;background:var(--panel);color:var(--dim);transition:all .15s;}
 .tbtn.active,.tbtn:hover{border-color:var(--accent2);color:var(--accent2);background:rgba(255,107,53,0.08);}
+
+/* Module list */
 .mod-item{display:flex;align-items:center;gap:8px;padding:7px 8px;border:1px solid var(--border);border-radius:3px;cursor:pointer;margin-bottom:5px;transition:all .15s;background:var(--panel);}
 .mod-item.active{border-color:rgba(0,168,150,0.3);background:rgba(0,168,150,0.04);}
 .mod-dot{width:7px;height:7px;border-radius:50%;background:var(--dim);flex-shrink:0;transition:background .15s;}
 .mod-item.active .mod-dot{background:var(--accent3);}
 .mod-name{flex:1;font-size:12px;font-weight:600;color:var(--text);}
 .mod-tag{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);}
+
+/* Stats */
 .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
 .stat-box{padding:10px 8px;border:1px solid var(--border);border-radius:3px;background:var(--panel);text-align:center;}
 .stat-num{font-family:'Share Tech Mono',monospace;font-size:20px;color:var(--accent);line-height:1;}
 .stat-lbl{font-size:9px;color:var(--dim);letter-spacing:1px;margin-top:3px;text-transform:uppercase;}
+
+/* Center */
 .center{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+
+/* Search */
 .search-area{padding:14px 18px;border-bottom:1px solid var(--border);flex-shrink:0;}
 .search-row{display:flex;gap:8px;}
 .input-wrap{flex:1;position:relative;}
@@ -53,15 +69,21 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
 .run-btn:disabled{background:#0d1720;color:#2a3a4a;cursor:not-allowed;}
 .clr-btn{padding:11px 12px;background:transparent;border:1px solid var(--border);color:var(--dim);font-family:'Share Tech Mono',monospace;font-size:10px;cursor:pointer;border-radius:4px;transition:all .2s;}
 .clr-btn:hover{border-color:var(--danger);color:var(--danger);}
+
+/* Progress */
 .prog-area{padding:8px 18px 0;display:none;}
 .prog-area.show{display:block;}
 .prog-track{height:2px;background:var(--border);border-radius:2px;overflow:hidden;}
 .prog-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent3));border-radius:2px;transition:width .35s ease;width:0%;}
 .prog-lbl{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--dim);margin-top:4px;letter-spacing:1px;}
+
+/* Results */
 .results{flex:1;overflow-y:auto;padding:16px 18px;}
 .results::-webkit-scrollbar{width:4px;}
 .results::-webkit-scrollbar-track{background:var(--bg);}
 .results::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+
+/* Empty state */
 .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:14px;color:var(--dim);text-align:center;padding:40px 20px;}
 .empty-icon{font-size:48px;opacity:.2;}
 .empty-title{font-family:'Share Tech Mono',monospace;font-size:13px;letter-spacing:3px;}
@@ -73,6 +95,8 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
 #backendUrl:focus{border-color:var(--accent);}
 .cfg-btn{padding:8px 14px;background:transparent;border:1px solid var(--accent);color:var(--accent);font-family:'Share Tech Mono',monospace;font-size:10px;cursor:pointer;border-radius:3px;letter-spacing:1px;}
 .cfg-btn:hover{background:rgba(0,168,150,0.08);}
+
+/* Cards */
 .card{border:1px solid var(--border);border-left:3px solid var(--border);border-radius:4px;background:var(--panel);margin-bottom:10px;overflow:hidden;animation:fadeUp .3s ease;}
 @keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 .card.running{border-left-color:var(--warn);}
@@ -91,14 +115,20 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
 .card-body{padding:14px;border-top:1px solid var(--border);display:none;}
 .card-body.open{display:block;}
 .card-content{font-family:'Share Tech Mono',monospace;font-size:11px;color:#8ab0c8;line-height:1.75;white-space:pre-wrap;word-break:break-word;}
+
+/* Spinner */
 .spinner{display:inline-block;width:10px;height:10px;border:2px solid var(--border);border-top-color:var(--warn);border-radius:50%;animation:spin .7s linear infinite;}
 @keyframes spin{to{transform:rotate(360deg)}}
+
+/* Right panel */
 .right{width:185px;border-left:1px solid var(--border);padding:14px 12px;display:flex;flex-direction:column;gap:14px;flex-shrink:0;}
 .history-item{padding:6px 8px;border:1px solid var(--border);border-radius:3px;margin-bottom:4px;font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--dim);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:all .15s;}
 .history-item:hover{border-color:var(--accent);color:var(--accent);}
 .exp-btn{width:100%;padding:9px;background:transparent;border:1px solid var(--accent2);color:var(--accent2);font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:2px;cursor:pointer;border-radius:3px;transition:all .2s;}
 .exp-btn:hover{background:rgba(255,107,53,0.1);}
 .exp-btn:disabled{border-color:var(--border);color:var(--dim);cursor:not-allowed;}
+
+/* Scanline */
 .scanline{position:fixed;left:0;right:0;height:2px;background:linear-gradient(transparent,rgba(0,168,150,0.05),transparent);pointer-events:none;animation:scan 8s linear infinite;z-index:999;}
 @keyframes scan{0%{top:-2px}100%{top:100vh}}
 </style>
@@ -106,119 +136,129 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
 <body>
 <div id="lockscreen" style="position:fixed;inset:0;background:#060a0f;z-index:9999;display:flex;align-items:center;justify-content:center;background-image:linear-gradient(rgba(0,168,150,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,168,150,0.025) 1px,transparent 1px);background-size:40px 40px;">
 <div style="border:1px solid #1a2a3a;border-radius:6px;padding:36px 40px;background:#0b1118;display:flex;flex-direction:column;align-items:center;gap:18px;min-width:320px;max-width:360px;">
-<svg width="100" height="72" viewBox="0 0 100 72" style="animation:glow 3s infinite;filter:drop-shadow(0 0 16px #00a896)">
-<circle cx="50" cy="36" r="48" fill="none" stroke="#00a896" stroke-width="0.5" opacity="0.08"/>
-<circle cx="50" cy="36" r="42" fill="none" stroke="#00a896" stroke-width="0.6" opacity="0.12"/>
-<circle cx="50" cy="36" r="36" fill="none" stroke="#00a896" stroke-width="0.7" opacity="0.18"/>
-<circle cx="50" cy="36" r="30" fill="none" stroke="#00a896" stroke-width="0.8" opacity="0.25"/>
-<circle cx="50" cy="36" r="24" fill="none" stroke="#00a896" stroke-width="1" opacity="0.35"/>
-<ellipse cx="50" cy="36" rx="46" ry="32" fill="#060a0f"/>
-<path d="M4 36 Q50 4 96 36" fill="#060a0f" stroke="#00a896" stroke-width="1.8"/>
-<path d="M4 36 Q50 68 96 36" fill="#060a0f" stroke="#00a896" stroke-width="1.8"/>
-<ellipse cx="50" cy="36" rx="46" ry="32" fill="none" stroke="#00a896" stroke-width="1.8"/>
-<circle cx="50" cy="36" r="20" fill="#060a0f" stroke="#00a896" stroke-width="1.8"/>
-<circle cx="50" cy="36" r="17" fill="none" stroke="#00a896" stroke-width="0.6" opacity="0.4"/>
-<circle cx="50" cy="36" r="14" fill="none" stroke="#00a896" stroke-width="0.7" opacity="0.5"/>
-<circle cx="50" cy="36" r="11" fill="none" stroke="#00a896" stroke-width="0.8" opacity="0.6"/>
-<circle cx="50" cy="36" r="8" fill="#00a896" opacity="0.85"/>
-<circle cx="50" cy="36" r="5.5" fill="#060a0f"/>
-<circle cx="50" cy="36" r="3" fill="none" stroke="#00a896" stroke-width="1" opacity="0.8"/>
-<circle cx="54" cy="31" r="2.5" fill="#00a896" opacity="0.6"/>
-<circle cx="54" cy="31" r="1.2" fill="white" opacity="0.4"/>
-<circle cx="50" cy="36" r="1.5" fill="#00a896"/>
-</svg>
-<div style="font-family:Share Tech Mono,monospace;font-size:16px;color:#00a896;letter-spacing:3px;text-align:center;">FIVE T // OSINT</div>
-<div style="font-family:Share Tech Mono,monospace;font-size:10px;color:#4a6070;letter-spacing:2px;text-align:center;">AUTHORIZED ACCESS ONLY</div>
-<input id="pwUsername" type="text" placeholder="USERNAME" style="width:100%;background:#060a0f;border:1px solid #1a2a3a;border-radius:4px;padding:12px 14px;color:#c8d8e8;font-family:Share Tech Mono,monospace;font-size:14px;outline:none;text-align:center;letter-spacing:2px;margin-bottom:0;" onkeydown="if(event.key==='Enter')document.getElementById('pwInput').focus()"/>
-<input id="pwInput" type="password" placeholder="PASSWORD"
-style="width:100%;background:#060a0f;border:1px solid #1a2a3a;border-radius:4px;padding:12px 14px;color:#c8d8e8;font-family:Share Tech Mono,monospace;font-size:14px;outline:none;text-align:center;letter-spacing:4px;"
-onkeydown="if(event.key==='Enter')checkPw()"/>
-<button onclick="checkPw()" style="width:100%;padding:12px;background:#00a896;color:#060a0f;border:none;border-radius:4px;font-family:Share Tech Mono,monospace;font-size:13px;font-weight:bold;letter-spacing:2px;cursor:pointer;">AUTHENTICATE</button>
-<div id="pwErr" style="font-family:Share Tech Mono,monospace;font-size:11px;color:#ff3b3b;letter-spacing:1px;display:none;">&#9888; ACCESS DENIED — INVALID CODE</div>
+  <svg width="100" height="72" viewBox="0 0 100 72" style="animation:glow 3s infinite;filter:drop-shadow(0 0 16px #00a896)">
+    <circle cx="50" cy="36" r="48" fill="none" stroke="#00a896" stroke-width="0.5" opacity="0.08"/>
+    <circle cx="50" cy="36" r="42" fill="none" stroke="#00a896" stroke-width="0.6" opacity="0.12"/>
+    <circle cx="50" cy="36" r="36" fill="none" stroke="#00a896" stroke-width="0.7" opacity="0.18"/>
+    <circle cx="50" cy="36" r="30" fill="none" stroke="#00a896" stroke-width="0.8" opacity="0.25"/>
+    <circle cx="50" cy="36" r="24" fill="none" stroke="#00a896" stroke-width="1" opacity="0.35"/>
+    <ellipse cx="50" cy="36" rx="46" ry="32" fill="#060a0f"/>
+    <path d="M4 36 Q50 4 96 36" fill="#060a0f" stroke="#00a896" stroke-width="1.8"/>
+    <path d="M4 36 Q50 68 96 36" fill="#060a0f" stroke="#00a896" stroke-width="1.8"/>
+    <ellipse cx="50" cy="36" rx="46" ry="32" fill="none" stroke="#00a896" stroke-width="1.8"/>
+    <circle cx="50" cy="36" r="20" fill="#060a0f" stroke="#00a896" stroke-width="1.8"/>
+    <circle cx="50" cy="36" r="17" fill="none" stroke="#00a896" stroke-width="0.6" opacity="0.4"/>
+    <circle cx="50" cy="36" r="14" fill="none" stroke="#00a896" stroke-width="0.7" opacity="0.5"/>
+    <circle cx="50" cy="36" r="11" fill="none" stroke="#00a896" stroke-width="0.8" opacity="0.6"/>
+    <circle cx="50" cy="36" r="8" fill="#00a896" opacity="0.85"/>
+    <circle cx="50" cy="36" r="5.5" fill="#060a0f"/>
+    <circle cx="50" cy="36" r="3" fill="none" stroke="#00a896" stroke-width="1" opacity="0.8"/>
+    <circle cx="54" cy="31" r="2.5" fill="#00a896" opacity="0.6"/>
+    <circle cx="54" cy="31" r="1.2" fill="white" opacity="0.4"/>
+    <circle cx="50" cy="36" r="1.5" fill="#00a896"/>
+  </svg>
+  <div style="font-family:Share Tech Mono,monospace;font-size:16px;color:#00a896;letter-spacing:3px;text-align:center;">FIVE T // OSINT</div>
+  <div style="font-family:Share Tech Mono,monospace;font-size:10px;color:#4a6070;letter-spacing:2px;text-align:center;">AUTHORIZED ACCESS ONLY</div>
+  <input id="pwUsername" type="text" placeholder="USERNAME" style="width:100%;background:#060a0f;border:1px solid #1a2a3a;border-radius:4px;padding:12px 14px;color:#c8d8e8;font-family:Share Tech Mono,monospace;font-size:14px;outline:none;text-align:center;letter-spacing:2px;margin-bottom:0;" onkeydown="if(event.key==='Enter')document.getElementById('pwInput').focus()"/>
+  <input id="pwInput" type="password" placeholder="PASSWORD"
+    style="width:100%;background:#060a0f;border:1px solid #1a2a3a;border-radius:4px;padding:12px 14px;color:#c8d8e8;font-family:Share Tech Mono,monospace;font-size:14px;outline:none;text-align:center;letter-spacing:4px;"
+    onkeydown="if(event.key==='Enter')checkPw()"/>
+  <button onclick="checkPw()" style="width:100%;padding:12px;background:#00a896;color:#060a0f;border:none;border-radius:4px;font-family:Share Tech Mono,monospace;font-size:13px;font-weight:bold;letter-spacing:2px;cursor:pointer;">AUTHENTICATE</button>
+  <div id="pwErr" style="font-family:Share Tech Mono,monospace;font-size:11px;color:#ff3b3b;letter-spacing:1px;display:none;">&#9888; ACCESS DENIED — INVALID CODE</div>
 </div>
 </div>
 <div class="scanline"></div>
 <div class="app">
-<header>
-<div class="logo">
-<div class="logo-ring">◎</div>
-FIVE T // OSINT AGENT
-</div>
-<div class="hdr-right">
-<span id="userDisplay" style="font-size:10px;color:#00a896;letter-spacing:1px;"></span>
-<span><span class="dot-live"></span>LIVE</span>
-<span id="backendStatus" style="color:var(--warn)">⬤ BACKEND: NOT CONNECTED</span>
-<button onclick="showAuditLog()" id="auditBtn" style="display:none;padding:4px 10px;background:transparent;border:1px solid #00a896;color:#00a896;font-family:Share Tech Mono,monospace;font-size:9px;cursor:pointer;border-radius:2px;letter-spacing:1px;">AUDIT LOG</button>
-<button onclick="logout()" style="padding:4px 10px;background:transparent;border:1px solid #ff3b3b;color:#ff3b3b;font-family:Share Tech Mono,monospace;font-size:9px;cursor:pointer;border-radius:2px;letter-spacing:1px;">LOGOUT</button>
-<span id="clock"></span>
-</div>
-</header>
-<div class="body">
-<aside>
-<div>
-<div class="slabel">Target Type</div>
-<div class="type-wrap" id="typeWrap"></div>
-</div>
-<div>
-<div class="slabel">Modules</div>
-<div id="modList"></div>
-</div>
-<div style="margin-top:auto;">
-<div class="slabel">Stats</div>
-<div class="stat-grid">
-<div class="stat-box"><div class="stat-num" id="sQueries">0</div><div class="stat-lbl">Queries</div></div>
-<div class="stat-box"><div class="stat-num" id="sMods">0</div><div class="stat-lbl">Modules</div></div>
-<div class="stat-box"><div class="stat-num" id="sFindings">0</div><div class="stat-lbl">Findings</div></div>
-<div class="stat-box"><div class="stat-num" id="sTime">—</div><div class="stat-lbl">Last Run</div></div>
-</div>
-</div>
-</aside>
-<div class="center">
-<div class="search-area">
-<div class="search-row">
-<div class="input-wrap">
-<input id="searchInput" type="text" placeholder="Target: name, domain, IP, email, username, phone, VIN…"/>
-</div>
-<button class="run-btn" id="runBtn" onclick="runInvestigation()">▶ INVESTIGATE</button>
-<button class="clr-btn" onclick="clearAll()">CLR</button>
-</div>
-</div>
-<div class="prog-area" id="progArea">
-<div class="prog-track"><div class="prog-fill" id="progFill"></div></div>
-<div class="prog-lbl" id="progLbl">INITIALIZING…</div>
-</div>
-<div class="results" id="results">
-<div class="empty" id="emptyState">
-<div class="empty-icon">◎</div>
-<div class="empty-title">AWAITING TARGET</div>
-<div class="empty-sub">All modules run in parallel — People Search, Public Records, Property, Social Media, Phone, Email, Username, Plate, VIN Investigation, Business, Geolocation, WHOIS, DNS, Port Scan, Shodan, VirusTotal & Google Dorks.</div>
-<div class="backend-cfg" id="backendCfg">
-<div class="cfg-label">BACKEND URL</div>
-<div class="cfg-row">
-<input id="backendUrl" type="text" placeholder="https://sentinel-osint-ui.onrender.com"/>
-<button class="cfg-btn" onclick="testBackend()">TEST</button>
-</div>
-<div id="cfgMsg" style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);margin-top:8px;"></div>
-</div>
-</div>
-</div>
-</div>
-<div class="right">
-<div>
-<div class="slabel">History</div>
-<div id="historyList"><div style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);">No searches yet</div></div>
-</div>
-<div style="margin-top:auto;display:flex;flex-direction:column;gap:8px;">
-<button class="exp-btn" id="expBtn" onclick="exportReport()" disabled>⬇ EXPORT</button>
-<div style="font-family:Share Tech Mono,monospace;font-size:9px;color:var(--dim);text-align:center;line-height:1.7;margin-top:4px;">
-Parallel execution<br>
-19 OSINT modules<br>
-Real tool output<br>
-Export to .txt
-</div>
-</div>
-</div>
-</div>
+
+  <!-- Header -->
+  <header>
+    <div class="logo">
+      <div class="logo-ring">◎</div>
+      FIVE T // OSINT AGENT
+    </div>
+    <div class="hdr-right">
+      <span id="userDisplay" style="font-size:10px;color:#00a896;letter-spacing:1px;"></span>
+      <span><span class="dot-live"></span>LIVE</span>
+      <span id="backendStatus" style="color:var(--warn)">⬤ BACKEND: NOT CONNECTED</span>
+      <button onclick="showAuditLog()" id="auditBtn" style="display:none;padding:4px 10px;background:transparent;border:1px solid #00a896;color:#00a896;font-family:Share Tech Mono,monospace;font-size:9px;cursor:pointer;border-radius:2px;letter-spacing:1px;">AUDIT LOG</button>
+      <button onclick="logout()" style="padding:4px 10px;background:transparent;border:1px solid #ff3b3b;color:#ff3b3b;font-family:Share Tech Mono,monospace;font-size:9px;cursor:pointer;border-radius:2px;letter-spacing:1px;">LOGOUT</button>
+      <span id="clock"></span>
+    </div>
+  </header>
+
+  <div class="body">
+
+    <!-- Sidebar -->
+    <aside>
+      <div>
+        <div class="slabel">Target Type</div>
+        <div class="type-wrap" id="typeWrap"></div>
+      </div>
+      <div>
+        <div class="slabel">Modules</div>
+        <div id="modList"></div>
+      </div>
+      <div style="margin-top:auto;">
+        <div class="slabel">Stats</div>
+        <div class="stat-grid">
+          <div class="stat-box"><div class="stat-num" id="sQueries">0</div><div class="stat-lbl">Queries</div></div>
+          <div class="stat-box"><div class="stat-num" id="sMods">0</div><div class="stat-lbl">Modules</div></div>
+          <div class="stat-box"><div class="stat-num" id="sFindings">0</div><div class="stat-lbl">Findings</div></div>
+          <div class="stat-box"><div class="stat-num" id="sTime">—</div><div class="stat-lbl">Last Run</div></div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Center -->
+    <div class="center">
+      <div class="search-area">
+        <div class="search-row">
+          <div class="input-wrap">
+            <input id="searchInput" type="text" placeholder="Target: name, domain, IP, email, username, phone…"/>
+          </div>
+          <button class="run-btn" id="runBtn" onclick="runInvestigation()">▶ INVESTIGATE</button>
+          <button class="clr-btn" onclick="clearAll()">CLR</button>
+        </div>
+      </div>
+      <div class="prog-area" id="progArea">
+        <div class="prog-track"><div class="prog-fill" id="progFill"></div></div>
+        <div class="prog-lbl" id="progLbl">INITIALIZING…</div>
+      </div>
+      <div class="results" id="results">
+        <div class="empty" id="emptyState">
+          <div class="empty-icon">◎</div>
+          <div class="empty-title">AWAITING TARGET</div>
+          <div class="empty-sub">All modules run in parallel — People Search, Public Records, Property, Social Media, Phone, Email, Username, Plate, Business, Geolocation, WHOIS, DNS, Port Scan, Shodan, VirusTotal & Google Dorks.</div>
+          <div class="backend-cfg" id="backendCfg">
+            <div class="cfg-label">BACKEND URL (your Replit URL)</div>
+            <div class="cfg-row">
+              <input id="backendUrl" type="text" placeholder="https://YOUR-REPLIT-URL.replit.app"/>
+              <button class="cfg-btn" onclick="testBackend()">TEST</button>
+            </div>
+            <div id="cfgMsg" style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);margin-top:8px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right panel -->
+    <div class="right">
+      <div>
+        <div class="slabel">History</div>
+        <div id="historyList"><div style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);">No searches yet</div></div>
+      </div>
+      <div style="margin-top:auto;display:flex;flex-direction:column;gap:8px;">
+        <button class="exp-btn" id="expBtn" onclick="exportReport()" disabled>⬇ EXPORT</button>
+        <div style="font-family:Share Tech Mono,monospace;font-size:9px;color:var(--dim);text-align:center;line-height:1.7;margin-top:4px;">
+          Parallel execution<br>
+          13 OSINT modules<br>
+          Real tool output<br>
+          Export to .txt
+        </div>
+      </div>
+    </div>
+
+  </div>
 </div>
 
 <script>
@@ -232,38 +272,41 @@ let allResults = {};
 let history = JSON.parse(localStorage.getItem('fivet_history') || '[]');
 let stats = JSON.parse(localStorage.getItem('fivet_stats') || '{"queries":0,"findings":0}');
 
-const TARGET_TYPES = ['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','PLATE','VIN','LOCATION'];
+const TARGET_TYPES = ['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','PLATE','LOCATION'];
 
+// ── FIX: dorks no longer uses always:true — it behaves like all other modules
+// ── and only fires when the user has it checked. No more auto-firing on every run.
 const ALL_MODULES = [
-  // PERSON
-  { id:'people',           name:'People Search',        tag:'PEOP',  types:['PERSON'] },
-  { id:'public_records',   name:'Public Records',        tag:'PREC',  types:['PERSON'] },
-  { id:'property',         name:'Property Records',      tag:'PROP',  types:['PERSON','COMPANY'] },
-  { id:'social_media',     name:'Social Media Search',   tag:'SOCL',  types:['PERSON','USERNAME'] },
-  { id:'photo_forensics',  name:'Photo & Video Forensics',tag:'FOTO', types:['PERSON','USERNAME'] },
-  // USERNAME
-  { id:'username_search',  name:'Username Search',       tag:'USER',  types:['USERNAME'] },
-  // PHONE
-  { id:'phone',            name:'Phone Lookup',          tag:'PHONE', types:['PHONE'] },
-  // EMAIL
-  { id:'email_investigate',name:'Email Investigation',   tag:'EMAIL', types:['EMAIL'] },
-  // PLATE
-  { id:'plate_lookup',     name:'License Plate Lookup',  tag:'PLATE', types:['PLATE'] },
-  // ── VIN — NEW MODULE ───────────────────────────────────────────────────────
-  { id:'vin_investigation',name:'VIN Investigation',     tag:'VIN',   types:['VIN','PLATE'] },
-  // COMPANY
-  { id:'business',         name:'Business Search',       tag:'BIZ',   types:['COMPANY'] },
-  // LOCATION
-  { id:'geolocation',      name:'Geolocation Intel',     tag:'GEO',   types:['LOCATION','IP'] },
-  // DOMAIN/IP
-  { id:'whois',            name:'WHOIS Lookup',          tag:'WHOIS', types:['DOMAIN','IP'] },
-  { id:'dns',              name:'DNS Records',            tag:'DNS',   types:['DOMAIN'] },
-  { id:'nmap',             name:'Port Scan',              tag:'NMAP',  types:['DOMAIN','IP'] },
-  { id:'geoip',            name:'GeoIP Location',         tag:'GEOIP', types:['IP','DOMAIN'] },
-  { id:'shodan',           name:'Shodan',                 tag:'SHDN',  types:['IP','DOMAIN'] },
-  { id:'virustotal',       name:'VirusTotal',             tag:'VT',    types:['DOMAIN','IP','EMAIL'] },
-  // DORKS — opt-in only
-  { id:'dorks',            name:'Google Dorks',           tag:'DORK',  types:['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','PLATE','VIN','LOCATION'] },
+  // ── PERSON ────────────────────────────────────────────────────────────────
+  { id:'people',            name:'People Search',           tag:'PEOP',  types:['PERSON'] },
+  { id:'public_records',    name:'Public Records',          tag:'PREC',  types:['PERSON'] },
+  { id:'property',          name:'Property Records',        tag:'PROP',  types:['PERSON','COMPANY'] },
+  { id:'skip_trace',        name:'Skip Trace',              tag:'SKIP',  types:['PERSON'] },
+  { id:'social_media',      name:'Social Media Search',     tag:'SOCL',  types:['PERSON','USERNAME'] },
+  { id:'social_footprint',  name:'Social Footprint',        tag:'FOOT',  types:['PERSON'] },
+  { id:'photo_forensics',   name:'Photo & Video Forensics', tag:'FOTO',  types:['PERSON','USERNAME'] },
+  { id:'hit_and_run',       name:'Hit & Run / Vehicle',     tag:'H&R',   types:['PERSON','PLATE','LOCATION'] },
+  // ── USERNAME ──────────────────────────────────────────────────────────────
+  { id:'username_search',   name:'Username Search',         tag:'USER',  types:['USERNAME'] },
+  // ── PHONE ─────────────────────────────────────────────────────────────────
+  { id:'phone',             name:'Phone Lookup',            tag:'PHONE', types:['PHONE'] },
+  // ── EMAIL ─────────────────────────────────────────────────────────────────
+  { id:'email_investigate', name:'Email Investigation',     tag:'EMAIL', types:['EMAIL'] },
+  // ── PLATE ─────────────────────────────────────────────────────────────────
+  { id:'plate_lookup',      name:'License Plate Lookup',    tag:'PLATE', types:['PLATE'] },
+  // ── COMPANY ───────────────────────────────────────────────────────────────
+  { id:'business',          name:'Business Search',         tag:'BIZ',   types:['COMPANY'] },
+  // ── LOCATION ──────────────────────────────────────────────────────────────
+  { id:'geolocation',       name:'Geolocation Intel',       tag:'GEO',   types:['LOCATION','IP'] },
+  // ── DOMAIN/IP ─────────────────────────────────────────────────────────────
+  { id:'whois',             name:'WHOIS Lookup',            tag:'WHOIS', types:['DOMAIN','IP'] },
+  { id:'dns',               name:'DNS Records',             tag:'DNS',   types:['DOMAIN'] },
+  { id:'nmap',              name:'Port Scan',               tag:'NMAP',  types:['DOMAIN','IP'] },
+  { id:'geoip',             name:'GeoIP Location',          tag:'GEOIP', types:['IP','DOMAIN'] },
+  { id:'shodan',            name:'Shodan',                  tag:'SHDN',  types:['IP','DOMAIN'] },
+  { id:'virustotal',        name:'VirusTotal',              tag:'VT',    types:['DOMAIN','IP','EMAIL'] },
+  // ── GOOGLE DORKS — available for all types but NOT auto-selected ──────────
+  { id:'dorks',             name:'Google Dorks',            tag:'DORK',  types:['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','PLATE','LOCATION'] },
 ];
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -294,6 +337,7 @@ function setType(t, btn) {
   targetType = t;
   document.querySelectorAll('.tbtn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+  // Reset active modules to only those relevant to the new type
   activeModIds = new Set();
   renderModules();
 }
@@ -303,11 +347,13 @@ function renderModules() {
   list.innerHTML = '';
   ALL_MODULES.forEach(mod => {
     const relevant = mod.types && mod.types.includes(targetType);
+    // Auto-select relevant modules, but NOT dorks (user must opt in)
     if (relevant && mod.id !== 'dorks' && !activeModIds.has(mod.id)) {
       activeModIds.add(mod.id);
     }
-    activeModIds.delete('dorks');
-    if (!relevant) return;
+    // Always show dorks in the list but don't auto-check it
+    const show = relevant;
+    if (!show) return;
     const active = activeModIds.has(mod.id);
     const el = document.createElement('div');
     el.className = `mod-item${active?' active':''}`;
@@ -359,20 +405,25 @@ async function runInvestigation() {
   const query = document.getElementById('searchInput').value.trim();
   if (!query || running) return;
   if (!BACKEND) { showCfgMsg('Set your backend URL first!', 'err'); scrollToEmpty(); return; }
+
   running = true;
   allResults = {};
   document.getElementById('runBtn').disabled = true;
   document.getElementById('runBtn').textContent = '⏳ RUNNING';
   document.getElementById('expBtn').disabled = true;
+
   addHistory(query);
   stats.queries++;
   logAudit(currentUser?.username || 'unknown', 'SEARCH', `Target type: ${targetType}`, query);
   updateStats();
+
   const resultsEl = document.getElementById('results');
   resultsEl.innerHTML = '';
   const mods = [...activeModIds];
   const modCards = {};
+
   setProgress(true, 0, 'LAUNCHING MODULES…');
+
   mods.forEach(id => {
     const mod = ALL_MODULES.find(m => m.id === id);
     if (!mod) return;
@@ -380,11 +431,20 @@ async function runInvestigation() {
     resultsEl.appendChild(card);
     modCards[id] = card;
   });
+
   const t0 = Date.now();
+
   try {
-    const params = new URLSearchParams({ target: query, type: targetType, modules: mods.join(',') });
-    const res = await fetch(`${BACKEND}/api/investigate?${params}`, { method: 'GET' });
+    const params = new URLSearchParams({
+      target: query,
+      type: targetType,
+      modules: mods.join(',')
+    });
+    const res = await fetch(`${BACKEND}/api/investigate?${params}`, {
+      method: 'GET',
+    });
     const { job_id } = await res.json();
+
     let done = 0;
     await new Promise((resolve, reject) => {
       const es = new EventSource(`${BACKEND}/api/stream/${job_id}`);
@@ -414,12 +474,15 @@ async function runInvestigation() {
     errCard.textContent = `Error: ${e.message}`;
     resultsEl.insertBefore(errCard, resultsEl.firstChild);
   }
+
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   stats.lastTime = elapsed + 's';
   document.getElementById('sTime').textContent = elapsed + 's';
   localStorage.setItem('fivet_stats', JSON.stringify(stats));
+
   setProgress(true, 100, `✓ COMPLETE — ${mods.length} modules in ${elapsed}s`);
   setTimeout(() => setProgress(false), 3500);
+
   document.getElementById('runBtn').disabled = false;
   document.getElementById('runBtn').textContent = '▶ INVESTIGATE';
   document.getElementById('expBtn').disabled = false;
@@ -472,7 +535,8 @@ function toggleCard(id) {
 // ── Utilities ─────────────────────────────────────────────────────────────────
 function setProgress(show, pct, label) {
   const area = document.getElementById('progArea');
-  if (show) { area.classList.add('show'); } else { area.classList.remove('show'); }
+  if (show) { area.classList.add('show'); }
+  else { area.classList.remove('show'); }
   document.getElementById('progFill').style.width = pct + '%';
   document.getElementById('progLbl').textContent = label || '';
 }
@@ -484,11 +548,11 @@ function clearAll() {
     <div class="empty" id="emptyState">
       <div class="empty-icon">◎</div>
       <div class="empty-title">AWAITING TARGET</div>
-      <div class="empty-sub">All modules run in parallel — People Search, Public Records, Property, Social Media, Phone, Email, Username, Plate, VIN Investigation, Business, Geolocation, WHOIS, DNS, Port Scan, Shodan, VirusTotal & Google Dorks.</div>
+      <div class="empty-sub">All modules run in parallel — People Search, Public Records, Property, Social Media, Phone, Email, Username, Plate, Business, Geolocation, WHOIS, DNS, Port Scan, Shodan, VirusTotal & Google Dorks.</div>
       <div class="backend-cfg" id="backendCfg">
-        <div class="cfg-label">BACKEND URL</div>
+        <div class="cfg-label">BACKEND URL (your Replit URL)</div>
         <div class="cfg-row">
-          <input id="backendUrl" type="text" value="${BACKEND}" placeholder="https://sentinel-osint-ui.onrender.com"/>
+          <input id="backendUrl" type="text" value="${BACKEND}" placeholder="https://YOUR-REPLIT-URL.replit.app"/>
           <button class="cfg-btn" onclick="testBackend()">TEST</button>
         </div>
         <div id="cfgMsg" style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);margin-top:8px;"></div>
@@ -499,7 +563,9 @@ function clearAll() {
   renderModules();
 }
 
-function scrollToEmpty() { document.getElementById('results').scrollTop = 0; }
+function scrollToEmpty() {
+  document.getElementById('results').scrollTop = 0;
+}
 
 function addHistory(q) {
   history = [q, ...history.filter(x => x !== q)].slice(0, 10);
@@ -544,6 +610,11 @@ document.getElementById('searchInput').addEventListener('keydown', e => {
 
 <script>
 // ── Authentication ─────────────────────────────────────────────────────────────
+// Passwords are stored in Render environment variables — NOT in this file.
+// To add/change users, edit USER_* vars in your Render dashboard.
+// Format: USER_USERNAME=password:role:Full Name
+// Example: USER_RANGLADA=PLFAdmin2026!:admin:R Anglada
+
 let currentUser = null;
 let isAdmin = false;
 let auditLog = JSON.parse(localStorage.getItem('fivet_audit') || '[]');
@@ -553,6 +624,8 @@ async function checkPw() {
   const username = document.getElementById('pwUsername').value.trim().toLowerCase();
   const password = document.getElementById('pwInput').value;
   const now = new Date().toISOString();
+
+  // Client-side lockout (5 failed attempts = 30 min lock)
   if (failedLogins[username] && failedLogins[username].count >= 5) {
     const diff = (new Date() - new Date(failedLogins[username].lastAttempt)) / 1000 / 60;
     if (diff < 30) {
@@ -563,6 +636,7 @@ async function checkPw() {
       failedLogins[username] = { count: 0 };
     }
   }
+
   try {
     const res = await fetch(`${BACKEND}/api/auth/login`, {
       method: 'POST',
@@ -570,6 +644,7 @@ async function checkPw() {
       body: JSON.stringify({ username, password })
     });
     const data = await res.json();
+
     if (data.success) {
       authToken = data.token;
       currentUser = { username, role: data.role, name: data.name, token: data.token };
@@ -600,7 +675,14 @@ function showPwErr(msg) {
 }
 
 function logAudit(username, action, detail, target) {
-  const entry = { timestamp: new Date().toISOString(), username, action, detail: detail || '', target: target || '', ip: 'client-side' };
+  const entry = {
+    timestamp: new Date().toISOString(),
+    username,
+    action,
+    detail: detail || '',
+    target: target || '',
+    ip: 'client-side'
+  };
   auditLog.unshift(entry);
   if (auditLog.length > 1000) auditLog = auditLog.slice(0, 1000);
   localStorage.setItem('fivet_audit', JSON.stringify(auditLog));
@@ -624,7 +706,9 @@ async function logout() {
     }
   } catch(e) {}
   sessionStorage.removeItem('fivet_auth');
-  currentUser = null; isAdmin = false; authToken = null;
+  currentUser = null;
+  isAdmin = false;
+  authToken = null;
   location.reload();
 }
 
@@ -647,6 +731,7 @@ function showAuditLog() {
   win.document.write('</table></body></html>');
 }
 
+// Check if already authenticated this session
 window.addEventListener('load', async () => {
   const saved = sessionStorage.getItem('fivet_auth');
   if (saved) {
@@ -669,6 +754,7 @@ window.addEventListener('load', async () => {
         sessionStorage.removeItem('fivet_auth');
       }
     } catch(e) {
+      // Backend unreachable — allow cached session
       try {
         currentUser = JSON.parse(saved);
         isAdmin = currentUser.role === 'admin';
