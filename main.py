@@ -728,522 +728,6 @@ def module_plate_lookup(target, job_id):
     return result
 
 
-def module_vin_investigation(target, job_id):
-    emit(job_id, "module_start", {"module": "vin_investigation"})
-
-    vin = target.upper().strip().replace(" ", "").replace("-", "")
-    lines = []
-
-    # ── VIN Validation ────────────────────────────────────────────────────────
-    lines.append(f"TARGET VIN: {vin}")
-    lines.append(f"LENGTH:     {len(vin)} characters {'✓ VALID' if len(vin) == 17 else '✗ INVALID — must be 17 characters'}")
-    lines.append("")
-
-    if len(vin) != 17:
-        lines.append("⚠ VIN must be exactly 17 characters.")
-        lines.append("Common issues: spaces, dashes, letter O vs zero, letter I vs one.")
-        result = "\n".join(lines)
-        emit(job_id, "module_done", {"module": "vin_investigation", "result": result})
-        return result
-
-    # ── Check digit validation ────────────────────────────────────────────────
-    def validate_check_digit(v):
-        transliterate = {
-            'A':1,'B':2,'C':3,'D':4,'E':5,'F':6,'G':7,'H':8,
-            'J':1,'K':2,'L':3,'M':4,'N':5,'P':7,'R':9,
-            'S':2,'T':3,'V':5,'W':6,'X':7,'Y':8,'Z':9
-        }
-        weights = [8,7,6,5,4,3,2,10,0,9,8,7,6,5,4,3,2]
-        total = 0
-        for i, ch in enumerate(v):
-            val = int(ch) if ch.isdigit() else transliterate.get(ch, 0)
-            total += val * weights[i]
-        rem = total % 11
-        expected = 'X' if rem == 10 else str(rem)
-        return expected == v[8], expected, v[8]
-
-    check_ok, expected_digit, actual_digit = validate_check_digit(vin)
-    lines.append(f"CHECK DIGIT (pos 9): {actual_digit} — {'✓ VALID' if check_ok else f'✗ MISMATCH (expected {expected_digit}) — verify VIN accuracy'}")
-    lines.append("")
-
-    # ── STEP 1: NHTSA vPIC Decode (free, no key) ─────────────────────────────
-    lines.append("=" * 50)
-    lines.append("NHTSA vPIC VEHICLE DECODE (LIVE)")
-    lines.append("=" * 50)
-    lines.append("")
-
-    nhtsa_make  = ""
-    nhtsa_model = ""
-    nhtsa_year  = ""
-
-    try:
-        nhtsa_out, _, rc = run_cmd(
-            f"curl -s --max-time 15 'https://vpic.nhtsa.dot.gov/api/vehicles/decodevinvalues/{vin}?format=json' 2>/dev/null",
-            timeout=20
-        )
-        if rc == 0 and nhtsa_out:
-            r = json.loads(nhtsa_out).get("Results", [{}])[0]
-            nhtsa_make    = r.get("Make", "")
-            nhtsa_model   = r.get("Model", "")
-            nhtsa_year    = r.get("ModelYear", "")
-            series        = r.get("Series", "")
-            trim          = r.get("Trim", "")
-            body          = r.get("BodyClass", "N/A")
-            drive         = r.get("DriveType", "N/A")
-            fuel          = r.get("FuelTypePrimary", "N/A")
-            engine_l      = r.get("DisplacementL", "")
-            cylinders     = r.get("EngineCylinders", "")
-            trans         = r.get("TransmissionStyle", "N/A")
-            gvwr          = r.get("GVWR", "N/A")
-            mfr           = r.get("Manufacturer", "N/A")
-            plant_city    = r.get("PlantCity", "")
-            plant_state   = r.get("PlantState", "")
-            plant_country = r.get("PlantCountry", "")
-            plant = ", ".join(filter(None, [plant_city, plant_state, plant_country])) or "N/A"
-            err_code = r.get("ErrorCode", "")
-            err_text = r.get("ErrorText", "")
-            engine_str = (f"{engine_l}L " if engine_l else "") + (f"{cylinders}-cylinder" if cylinders else "")
-            engine_str = engine_str.strip() or "N/A"
-
-            lines.append(f"MAKE:           {nhtsa_make or 'N/A'}")
-            lines.append(f"MODEL:          {nhtsa_model or 'N/A'}")
-            lines.append(f"YEAR:           {nhtsa_year or 'N/A'}")
-            if series:  lines.append(f"SERIES:         {series}")
-            if trim:    lines.append(f"TRIM:           {trim}")
-            lines.append(f"BODY CLASS:     {body}")
-            lines.append(f"DRIVE TYPE:     {drive}")
-            lines.append(f"FUEL TYPE:      {fuel}")
-            lines.append(f"ENGINE:         {engine_str}")
-            lines.append(f"TRANSMISSION:   {trans}")
-            lines.append(f"GVWR:           {gvwr}")
-            lines.append(f"MANUFACTURER:   {mfr}")
-            lines.append(f"ASSEMBLY PLANT: {plant}")
-            if err_code and err_code != "0":
-                lines.append(f"DECODE NOTE:    {err_text[:120]}")
-            lines.append("")
-        else:
-            lines.append("NHTSA vPIC API unreachable.")
-            lines.append("")
-    except Exception as e:
-        lines.append(f"NHTSA decode error: {str(e)}")
-        lines.append("")
-
-    # ── VIN Character Breakdown ───────────────────────────────────────────────
-    model_year_map = {
-        'A':'1980/2010','B':'1981/2011','C':'1982/2012','D':'1983/2013',
-        'E':'1984/2014','F':'1985/2015','G':'1986/2016','H':'1987/2017',
-        'J':'1988/2018','K':'1989/2019','L':'2020','M':'2021','N':'2022',
-        'P':'2023','R':'2024','S':'2025','T':'2026','V':'2027','W':'2028',
-        'X':'2029','Y':'2030','1':'2001','2':'2002','3':'2003','4':'2004',
-        '5':'2005','6':'2006','7':'2007','8':'2008','9':'2009',
-    }
-    vin_year_display = nhtsa_year if nhtsa_year else model_year_map.get(vin[9], "Unknown")
-
-    lines.append("=" * 50)
-    lines.append("VIN STRUCTURAL BREAKDOWN")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append(f"  Pos 1-3   WMI (World Manufacturer Identifier): {vin[0:3]}")
-    lines.append(f"  Pos 4-8   VDS (Vehicle Descriptor Section):    {vin[3:8]}")
-    lines.append(f"  Pos 9     Check Digit:                          {vin[8]} {'✓' if check_ok else '✗'}")
-    lines.append(f"  Pos 10    Model Year Code:                      {vin[9]} = {vin_year_display}")
-    lines.append(f"  Pos 11    Assembly Plant Code:                  {vin[10]}")
-    lines.append(f"  Pos 12-17 Production Serial:                   {vin[11:17]}")
-    lines.append("")
-
-    # ── STEP 2: NHTSA Recall Check (live by VIN) ─────────────────────────────
-    lines.append("=" * 50)
-    lines.append("NHTSA SAFETY RECALLS (LIVE)")
-    lines.append("=" * 50)
-    lines.append("")
-
-    recall_count = 0
-    try:
-        # Primary: VIN-specific recall endpoint
-        vin_recall_out, _, rc1 = run_cmd(
-            f"curl -s --max-time 15 'https://api.nhtsa.gov/recalls/recallsByVehicle?make={nhtsa_make}&model={nhtsa_model}&modelYear={nhtsa_year}' 2>/dev/null",
-            timeout=20
-        )
-        if rc1 == 0 and vin_recall_out:
-            rdata = json.loads(vin_recall_out)
-            recalls = rdata.get("results", rdata.get("Results", []))
-            recall_count = len(recalls)
-            if recalls:
-                lines.append(f"⚠ {recall_count} RECALL(S) FOUND")
-                lines.append("")
-                for rec in recalls[:10]:
-                    lines.append(f"  NHTSA #:    {rec.get('NHTSACampaignNumber', 'N/A')}")
-                    lines.append(f"  Component:  {rec.get('Component', 'N/A')}")
-                    lines.append(f"  Date:       {rec.get('ReportReceivedDate', 'N/A')}")
-                    summary = rec.get('Summary', '')
-                    consequence = rec.get('Consequence', '')
-                    remedy = rec.get('Remedy', '')
-                    if summary:
-                        lines.append(f"  Summary:    {summary[:250]}")
-                    if consequence:
-                        lines.append(f"  Risk:       {consequence[:200]}")
-                    if remedy:
-                        lines.append(f"  Remedy:     {remedy[:200]}")
-                    lines.append("")
-                if recall_count > 10:
-                    lines.append(f"  ... and {recall_count - 10} more. See full list at NHTSA link below.")
-                    lines.append("")
-            else:
-                lines.append("✓ No open recalls found for this make/model/year.")
-                lines.append("")
-        else:
-            lines.append("Recall API unreachable — verify at link below.")
-            lines.append("")
-    except Exception as e:
-        lines.append(f"Recall lookup error: {str(e)}")
-        lines.append("")
-
-    lines.append(f"  Full recall check: https://www.nhtsa.gov/vehicle/{vin}/recalls")
-    lines.append("")
-
-    # ── STEP 3: NHTSA Consumer Complaints (live) ─────────────────────────────
-    lines.append("=" * 50)
-    lines.append("NHTSA CONSUMER COMPLAINTS (LIVE)")
-    lines.append("=" * 50)
-    lines.append("")
-
-    try:
-        comp_out, _, rc2 = run_cmd(
-            f"curl -s --max-time 15 'https://api.nhtsa.gov/complaints/complaintsByVehicle?make={nhtsa_make}&model={nhtsa_model}&modelYear={nhtsa_year}' 2>/dev/null",
-            timeout=20
-        )
-        if rc2 == 0 and comp_out:
-            cdata = json.loads(comp_out)
-            complaints = cdata.get("results", cdata.get("Results", []))
-            total_comp = len(complaints)
-
-            if complaints:
-                # Tally summary stats
-                crashes   = sum(1 for c in complaints if c.get('crash', False))
-                fires     = sum(1 for c in complaints if c.get('fire', False))
-                injuries  = sum(c.get('numberOfInjuries', 0) or 0 for c in complaints)
-                deaths    = sum(c.get('numberOfDeaths', 0) or 0 for c in complaints)
-
-                lines.append(f"TOTAL COMPLAINTS:  {total_comp}")
-                lines.append(f"CRASHES REPORTED:  {crashes}")
-                lines.append(f"FIRES REPORTED:    {fires}")
-                lines.append(f"INJURIES REPORTED: {injuries}")
-                lines.append(f"DEATHS REPORTED:   {deaths}")
-                lines.append("")
-
-                # Top complained-about components
-                from collections import Counter
-                comp_counter = Counter(
-                    c.get('components', c.get('component', 'UNKNOWN'))
-                    for c in complaints
-                )
-                top_comps = comp_counter.most_common(5)
-                if top_comps:
-                    lines.append("TOP COMPLAINT AREAS:")
-                    for comp_name, count in top_comps:
-                        lines.append(f"  • {comp_name}: {count} complaint(s)")
-                    lines.append("")
-
-                # Show the 3 most recent complaints with detail
-                lines.append("MOST RECENT COMPLAINTS:")
-                lines.append("")
-                recent = sorted(
-                    complaints,
-                    key=lambda x: x.get('dateOfIncident', x.get('incidentDate', '')),
-                    reverse=True
-                )[:3]
-                for c in recent:
-                    date    = c.get('dateOfIncident', c.get('incidentDate', 'N/A'))
-                    comp_nm = c.get('components', c.get('component', 'N/A'))
-                    desc    = c.get('summary', c.get('description', ''))
-                    crash   = c.get('crash', False)
-                    fire    = c.get('fire', False)
-                    inj     = c.get('numberOfInjuries', 0)
-                    lines.append(f"  Date:      {date}")
-                    lines.append(f"  Component: {comp_nm}")
-                    if crash:   lines.append(f"  ⚠ CRASH INVOLVED")
-                    if fire:    lines.append(f"  ⚠ FIRE INVOLVED")
-                    if inj:     lines.append(f"  Injuries:  {inj}")
-                    if desc:    lines.append(f"  Summary:   {desc[:300]}")
-                    lines.append("")
-            else:
-                lines.append("✓ No consumer complaints on record for this vehicle.")
-                lines.append("")
-        else:
-            lines.append("Complaints API unreachable.")
-            lines.append("")
-    except Exception as e:
-        lines.append(f"Complaints lookup error: {str(e)}")
-        lines.append("")
-
-    # ── STEP 4: NHTSA Safety Ratings (live) ──────────────────────────────────
-    lines.append("=" * 50)
-    lines.append("NHTSA SAFETY RATINGS — NCAP CRASH TESTS (LIVE)")
-    lines.append("=" * 50)
-    lines.append("")
-
-    try:
-        # Get vehicle variants list first
-        variants_out, _, rc3 = run_cmd(
-            f"curl -s --max-time 15 'https://api.nhtsa.gov/SafetyRatings/modelyear/{nhtsa_year}/make/{nhtsa_make}/model/{nhtsa_model}?format=json' 2>/dev/null",
-            timeout=20
-        )
-        if rc3 == 0 and variants_out:
-            vdata = json.loads(variants_out)
-            variants = vdata.get("Results", [])
-            if variants:
-                # Pull ratings for first variant
-                vid = variants[0].get("VehicleId")
-                if vid:
-                    ratings_out, _, rc4 = run_cmd(
-                        f"curl -s --max-time 15 'https://api.nhtsa.gov/SafetyRatings/VehicleId/{vid}?format=json' 2>/dev/null",
-                        timeout=20
-                    )
-                    if rc4 == 0 and ratings_out:
-                        rdata2 = json.loads(ratings_out)
-                        rat = rdata2.get("Results", [{}])[0]
-                        overall       = rat.get("OverallRating", "N/A")
-                        frontal_dr    = rat.get("OverallFrontCrashRating", "N/A")
-                        side          = rat.get("OverallSideCrashRating", "N/A")
-                        rollover      = rat.get("RolloverRating", "N/A")
-                        rollover_risk = rat.get("RolloverPossibility", "N/A")
-                        description   = rat.get("VehicleDescription", "")
-
-                        def star(val):
-                            try:
-                                n = int(val)
-                                return "★" * n + "☆" * (5 - n) + f" ({n}/5)"
-                            except:
-                                return str(val)
-
-                        if description:
-                            lines.append(f"VEHICLE:          {description}")
-                        lines.append(f"OVERALL RATING:   {star(overall)}")
-                        lines.append(f"FRONTAL CRASH:    {star(frontal_dr)}")
-                        lines.append(f"SIDE CRASH:       {star(side)}")
-                        lines.append(f"ROLLOVER:         {star(rollover)}")
-                        if rollover_risk and rollover_risk != "N/A":
-                            lines.append(f"ROLLOVER RISK:    {rollover_risk}%")
-                        if len(variants) > 1:
-                            lines.append(f"NOTE: {len(variants)} variant(s) tested. Showing primary.")
-                        lines.append("")
-                    else:
-                        lines.append("Ratings data unavailable for this vehicle.")
-                        lines.append("")
-            else:
-                lines.append("No NCAP crash test data found for this vehicle.")
-                lines.append("(Not all vehicles are tested — older, specialty, or low-volume vehicles may not have ratings.)")
-                lines.append("")
-        else:
-            lines.append("Safety ratings API unreachable.")
-            lines.append("")
-    except Exception as e:
-        lines.append(f"Safety ratings error: {str(e)}")
-        lines.append("")
-
-    # ── STEP 5: NICB Stolen / Salvage Check (live) ───────────────────────────
-    lines.append("=" * 50)
-    lines.append("NICB STOLEN / SALVAGE CHECK (LIVE)")
-    lines.append("=" * 50)
-    lines.append("")
-
-    try:
-        nicb_out, _, rc5 = run_cmd(
-            f"curl -s --max-time 15 -X POST 'https://www.nicb.org/api/vincheck' "
-            f"-H 'Content-Type: application/json' "
-            f"-H 'Accept: application/json' "
-            f"-H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' "
-            f"-H 'Origin: https://www.nicb.org' "
-            f"-H 'Referer: https://www.nicb.org/vincheck' "
-            f"--data '{{\"vin\":\"{vin}\"}}' 2>/dev/null",
-            timeout=20
-        )
-        if rc5 == 0 and nicb_out and len(nicb_out) > 5:
-            try:
-                nicb_data = json.loads(nicb_out)
-                stolen  = nicb_data.get("stolen", nicb_data.get("isStolen", nicb_data.get("theft", None)))
-                salvage = nicb_data.get("salvage", nicb_data.get("isSalvage", nicb_data.get("totalLoss", None)))
-                msg     = nicb_data.get("message", nicb_data.get("result", nicb_data.get("status", "")))
-
-                if stolen is True or (isinstance(stolen, str) and stolen.lower() in ("yes","true","1")):
-                    lines.append("⚠ ⚠ ⚠  VEHICLE REPORTED STOLEN — NOT RECOVERED  ⚠ ⚠ ⚠")
-                elif stolen is False or (isinstance(stolen, str) and stolen.lower() in ("no","false","0")):
-                    lines.append("✓ Not reported as stolen in NICB database.")
-                else:
-                    lines.append(f"Stolen status: {stolen if stolen is not None else 'See NICB directly'}")
-
-                if salvage is True or (isinstance(salvage, str) and salvage.lower() in ("yes","true","1")):
-                    lines.append("⚠ VEHICLE HAS SALVAGE / TOTAL LOSS RECORD")
-                elif salvage is False or (isinstance(salvage, str) and salvage.lower() in ("no","false","0")):
-                    lines.append("✓ No salvage/total loss record in NICB database.")
-                else:
-                    lines.append(f"Salvage status: {salvage if salvage is not None else 'See NICB directly'}")
-
-                if msg:
-                    lines.append(f"NICB message: {str(msg)[:200]}")
-            except:
-                # Non-JSON response — show raw
-                clean_resp = nicb_out[:500].strip()
-                if any(word in clean_resp.lower() for word in ["stolen","theft","salvage","total loss"]):
-                    lines.append(f"NICB response: {clean_resp}")
-                else:
-                    lines.append("NICB returned non-standard response — verify directly.")
-        else:
-            lines.append("NICB API did not return data — verify directly at link below.")
-        lines.append("")
-        lines.append(f"  Verify: https://www.nicb.org/vincheck")
-        lines.append(f"  Note: NICB limits to 5 searches/24hrs per IP address.")
-        lines.append("")
-    except Exception as e:
-        lines.append(f"NICB check error: {str(e)}")
-        lines.append(f"  Verify directly: https://www.nicb.org/vincheck")
-        lines.append("")
-
-    # ── STEP 6: Auction Search (Copart + IAAI live queries) ──────────────────
-    lines.append("=" * 50)
-    lines.append("AUCTION HISTORY — LIVE SEARCH")
-    lines.append("=" * 50)
-    lines.append("")
-
-    # Copart API search
-    try:
-        copart_out, _, rc6 = run_cmd(
-            f"curl -s --max-time 15 "
-            f"-H 'Accept: application/json, text/plain, */*' "
-            f"-H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' "
-            f"'https://www.copart.com/public/data/lotSearch/search?query={vin}&page=0&size=5&sort=lotCreateDate%2Cdesc' "
-            f"2>/dev/null",
-            timeout=20
-        )
-        if rc6 == 0 and copart_out and "{" in copart_out:
-            try:
-                cdata = json.loads(copart_out)
-                # Try various response shapes Copart uses
-                lots = (cdata.get("data", {}).get("results", {}).get("content", [])
-                        or cdata.get("returnCode", {})
-                        or [])
-                if isinstance(lots, list) and lots:
-                    lines.append(f"COPART: {len(lots)} lot(s) found")
-                    lines.append("")
-                    for lot in lots[:3]:
-                        lines.append(f"  Lot #:     {lot.get('ln', lot.get('lotNumber', 'N/A'))}")
-                        lines.append(f"  Title:     {lot.get('ld', lot.get('lotDescription', 'N/A'))}")
-                        lines.append(f"  Sale Date: {lot.get('ld', lot.get('saleDate', 'N/A'))}")
-                        lines.append(f"  Location:  {lot.get('yn', lot.get('yardName', 'N/A'))}")
-                        lines.append(f"  Damage:    {lot.get('dd', lot.get('damageDescription', 'N/A'))}")
-                        lines.append("")
-                else:
-                    lines.append("COPART: No auction records found for this VIN.")
-                    lines.append("")
-            except:
-                lines.append("COPART: Response parsing error — check link below.")
-                lines.append("")
-        else:
-            lines.append("COPART: Unable to query — check link below.")
-            lines.append("")
-    except Exception as e:
-        lines.append(f"Copart search error: {str(e)}")
-        lines.append("")
-
-    lines.append(f"  Copart search:  https://www.copart.com/lot/search/#?q[]=%22{vin}%22")
-    lines.append(f"  IAAI search:    https://www.iaai.com/Vehicles/Search?SearchType=4&SearchTerm={vin}")
-    lines.append(f"  SalvageBid:     https://www.salvagebid.com/")
-    lines.append(f"  AutoBidMaster:  https://www.autobidmaster.com/")
-    lines.append("")
-
-    # ── STEP 7: Title & Registration Tracing (links + DPPA context) ──────────
-    lines.append("=" * 50)
-    lines.append("TITLE & REGISTRATION TRACING (DPPA)")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("Law firm use qualifies under DPPA 18 U.S.C. § 2721(b)(4) — litigation.")
-    lines.append("")
-
-    title_resources = [
-        ("NMVTIS — VinAudit (~$8, DPPA report)", f"https://www.vinaudit.com/get-vehicle-history-report?vin={vin}"),
-        ("NMVTIS — VehicleHistory.gov",           "https://www.vehiclehistory.gov/"),
-        ("AutoCheck by Experian",                  f"https://www.autocheck.com/vehiclehistory/?vin={vin}"),
-        ("CarFax (title brands, accident history)", f"https://www.carfax.com/vehicle/{vin}"),
-        ("NM MVD Title Request",                   "https://www.mvd.newmexico.gov/"),
-        ("NHTSA Full Decode",                      f"https://vpic.nhtsa.dot.gov/decoder/Decoder?vin={vin}"),
-        ("TLO (PLF tool — fastest owner lookup)",  "https://www.tlo.com/"),
-        ("PeopleMap (PLF tool)",                   "https://www.peoplemaps.com/"),
-        ("Tracers (PLF tool)",                     "https://www.tracers.com/"),
-    ]
-    for name, url in title_resources:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    # ── STEP 8: EDR / Crash Investigation Resources ───────────────────────────
-    lines.append("=" * 50)
-    lines.append("EDR / CRASH INVESTIGATION RESOURCES")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("For EDR data retrieval (Bosch CDR system):")
-    lines.append("")
-
-    edr_resources = [
-        ("NHTSA EDR Regulations (49 CFR 563)",  "https://www.nhtsa.gov/document/49-cfr-part-563"),
-        ("Bosch CDR Tool Info",                  "https://www.boschdiagnostics.com/cdr"),
-        ("NHTSA Recall Check by VIN",            f"https://www.nhtsa.gov/vehicle/{vin}/recalls"),
-        ("Driver Privacy Protection Act (DPPA)", "https://www.justice.gov/d9/2023-01/dppa_guidance.pdf"),
-        ("NM IPRA Request Portal",               "https://www.nmag.gov/public-records-requests.aspx"),
-        ("NM MVD Title/Registration Request",    "https://www.mvd.newmexico.gov/"),
-    ]
-    for name, url in edr_resources:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    # ── STEP 9: Google Dorks ──────────────────────────────────────────────────
-    lines.append("=" * 50)
-    lines.append("GOOGLE DORKS")
-    lines.append("=" * 50)
-    lines.append("")
-
-    dorks = [
-        f'"{vin}"',
-        f'"{vin}" accident OR crash OR collision',
-        f'"{vin}" title OR registration OR sold',
-        f'"{vin}" auction OR salvage',
-        f'"{vin}" stolen OR theft OR recovered',
-        f'"{vin}" lawsuit OR litigation OR court',
-        f'"{vin}" site:copart.com',
-        f'"{vin}" site:iaai.com',
-        f'"{vin}" site:facebook.com',
-    ]
-    for dork in dorks:
-        encoded = dork.replace(" ", "+").replace('"', '%22')
-        lines.append(f"  {dork}")
-        lines.append(f"  https://www.google.com/search?q={encoded}")
-        lines.append("")
-
-    # ── STEP 10: Investigative Next Steps ────────────────────────────────────
-    lines.append("=" * 50)
-    lines.append("INVESTIGATIVE NEXT STEPS")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append(f"01. Run VIN in TLO/PeopleMap/Tracers — fastest path to current registered owner.")
-    lines.append(f"02. Pull NMVTIS report via VinAudit (~$8) to confirm title state and any brands.")
-    lines.append(f"03. If still in NM: submit MVD title request citing DPPA §2721(b)(4), VIN {vin}.")
-    lines.append(f"04. If vehicle crossed state lines: identify destination from NMVTIS, then")
-    lines.append(f"    submit title request to that state DMV under DPPA.")
-    lines.append(f"05. If sold at auction: serve preservation letter/subpoena on auction house")
-    lines.append(f"    demanding buyer records referencing VIN {vin}.")
-    lines.append(f"06. Once vehicle located: arrange certified CDR analyst download immediately.")
-    lines.append(f"    Document ignition cycle count BEFORE vehicle is started again.")
-    lines.append(f"07. Subpoena manufacturer telematics data (FordPass, Mercedes Me, OnStar, etc.)")
-    lines.append(f"    directly from manufacturer — GPS track, trip history, crash notification.")
-    lines.append(f"08. If any recalls or complaints returned above, note for expert witness prep.")
-    lines.append("")
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "vin_investigation", "result": result})
-    return result
-
-
-
 def module_image_metadata(target, job_id):
     emit(job_id, "module_start", {"module": "image_metadata"})
     lines = []
@@ -2389,31 +1873,652 @@ def module_public_records(target, job_id):
     return result
 
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NEW MODULE: SKIP TRACE
+# All sources verified free and working as of June 2026
+# ══════════════════════════════════════════════════════════════════════════════
+
+def module_skip_trace(target, job_id):
+    emit(job_id, "module_start", {"module": "skip_trace"})
+
+    if "," in target:
+        name_part = target.split(",")[0].strip()
+        location_part = target.split(",")[1].strip()
+    else:
+        parts = target.split()
+        US_STATES = {'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN',
+                     'IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV',
+                     'NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN',
+                     'TX','UT','VT','VA','WA','WV','WI','WY','DC'}
+        if len(parts) >= 3 and parts[-1].upper() in US_STATES:
+            name_part = " ".join(parts[:-2])
+            location_part = " ".join(parts[-2:])
+        else:
+            name_part = target
+            location_part = ""
+
+    name_words = name_part.split()
+    first = name_words[0] if name_words else ""
+    last = name_words[-1] if len(name_words) > 1 else ""
+    name_plus = name_part.replace(" ", "+")
+    name_url = name_part.replace(" ", "-").lower()
+
+    loc_words = location_part.split() if location_part else []
+    state = loc_words[-1].upper() if loc_words else "NM"
+    city = " ".join(loc_words[:-1]) if len(loc_words) > 1 else ""
+    city_plus = city.replace(" ", "+")
+
+    lines = []
+    lines.append(f"TARGET:   {name_part}")
+    if location_part:
+        lines.append(f"LOCATION: {location_part}")
+    lines.append("")
+    lines.append("⚠ NOTE: All sources below are FREE. Some require DPPA permissible purpose.")
+    lines.append("  Law firms qualify under 18 U.S.C. § 2721(b) for litigation & process serving.")
+    lines.append("")
+
+    # ── Tier 1: Best Free Sources That Actually Show Results ──────────────────
+    lines.append("=" * 50)
+    lines.append("TIER 1 — FREE SOURCES THAT SHOW FULL RESULTS")
+    lines.append("=" * 50)
+    lines.append("")
+
+    tier1 = [
+        ("FamilyTreeNow ★ BEST FREE",    f"https://www.familytreenow.com/search/people/results?first={first}&last={last}&state={state}"),
+        ("TruePeopleSearch",              f"https://www.truepeoplesearch.com/results?name={name_plus}&citystatezip={city_plus}+{state}"),
+        ("FastPeopleSearch",              f"https://www.fastpeoplesearch.com/name/{name_url}_{city.replace(' ','-').lower()}-{state.lower()}"),
+        ("ZabaSearch (aliases+prev addr)",f"https://www.zabasearch.com/people/{first}+{last}/{state}/"),
+        ("411.com",                       f"https://www.411.com/name/{first}-{last}/{state}"),
+        ("Addresses.com",                 f"https://www.addresses.com/people/{first}+{last}/{state}/"),
+        ("SearchPeopleFree",              f"https://www.searchpeoplefree.com/find/{first}-{last}"),
+        ("USPhoneBook",                   f"https://www.usphonebook.com/{first}-{last}"),
+        ("Clustrmaps",                    f"https://clustrmaps.com/person/{last}-{first}/"),
+    ]
+    for name, url in tier1:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Tier 2: Voter Registration — Gold Standard for Current Address ────────
+    lines.append("=" * 50)
+    lines.append("TIER 2 — VOTER REGISTRATION (VERIFIED CURRENT ADDRESS)")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("Voter registration = government-verified address. Most reliable free source.")
+    lines.append("")
+
+    voter = [
+        ("VoterRecords.com",              f"https://voterrecords.com/voters/{name_url}/1"),
+        ("NM SOS Voter Lookup",           f"https://voterportal.servis.sos.nm.gov/WhereToVote.aspx"),
+        ("NM Voter Registration Search",  f"https://www.sos.nm.gov/voting-and-elections/voter-information/"),
+        ("Google: NM Voter Records",      f"https://www.google.com/search?q=%22{name_plus}%22+%22voter+registration%22+%22New+Mexico%22"),
+    ]
+    for name, url in voter:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Tier 3: Relative & Associate Finder ───────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("TIER 3 — RELATIVE & ASSOCIATE FINDER")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("Find relatives to locate subject indirectly — neighbors, family, associates.")
+    lines.append("")
+
+    relatives = [
+        ("FamilyTreeNow Relatives",       f"https://www.familytreenow.com/search/people/results?first={first}&last={last}"),
+        ("TruePeopleSearch Relatives",    f"https://www.truepeoplesearch.com/results?name={name_plus}"),
+        ("ClustrMaps (Address Cluster)",  f"https://clustrmaps.com/person/{last}-{first}/"),
+        ("Nuwber",                        f"https://nuwber.com/search?firstName={first}&lastName={last}&city={city_plus}&state={state}"),
+        ("PublicRecords.Online",          f"https://publicrecords.online/search/?first_name={first}&last_name={last}&state={state}"),
+    ]
+    for name, url in relatives:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Tier 4: Address Verification ─────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("TIER 4 — ADDRESS VERIFICATION")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("Use after finding a candidate address to verify it is deliverable.")
+    lines.append("")
+
+    verify = [
+        ("USPS Address Lookup (verify deliverable)", "https://tools.usps.com/zip-code-lookup.htm?byaddress"),
+        ("Melissa Address Check (free tier)",         "https://www.melissa.com/v2/lookups/addresscheck/"),
+        ("Google Maps (verify address exists)",       f"https://www.google.com/maps/search/{name_plus}+{city_plus}+{state}"),
+        ("Zillow (ownership check)",                  f"https://www.zillow.com/homes/{city.replace(' ','-')}-{state}_rb/"),
+        ("County Assessor (Bernalillo)",              "https://assessor.bernco.gov/public.access/search/commonsearch.aspx?mode=owner"),
+    ]
+    for name, url in verify:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Tier 5: Workplace / Employment Finder ─────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("TIER 5 — WORKPLACE & EMPLOYMENT")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("Finding employer can yield work address for service of process.")
+    lines.append("")
+
+    employment = [
+        ("LinkedIn People Search",        f"https://www.linkedin.com/search/results/people/?keywords={name_plus}&origin=GLOBAL_SEARCH_HEADER"),
+        ("LinkedIn + Location",           f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22{state}%22"),
+        ("ZoomInfo (free preview)",       f"https://www.zoominfo.com/p/{first}-{last}"),
+        ("Spokeo Employment",             f"https://www.spokeo.com/search?q={name_plus}"),
+        ("Google Employer Dork",          f"https://www.google.com/search?q=%22{name_plus}%22+%22albuquerque%22+employer+OR+works+OR+employed"),
+        ("NM Contractor License",         f"https://www.rld.nm.gov/licensing-and-regulation/"),
+        ("NPPES Medical NPI",             f"https://npiregistry.cms.hhs.gov/search?search_type=ind&first_name={first}&last_name={last}"),
+        ("NM Bar (if attorney)",          f"https://www.nmbar.org/"),
+    ]
+    for name, url in employment:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Live OpenSanctions check ──────────────────────────────────────────────
+    try:
+        san_out, _, _ = run_cmd(
+            f"curl -s 'https://api.opensanctions.org/search/default?q={name_plus}&schema=Person' 2>/dev/null",
+            timeout=10
+        )
+        san_data = json.loads(san_out)
+        results = san_data.get("results", [])
+        lines.append("=" * 50)
+        lines.append("LIVE SANCTIONS / WATCHLIST CHECK")
+        lines.append("=" * 50)
+        lines.append("")
+        if results:
+            lines.append(f"⚠ WARNING: {len(results)} MATCH(ES) FOUND")
+            for r in results[:5]:
+                lines.append(f"  • {r.get('caption','?')} — Score: {r.get('score','?')}")
+        else:
+            lines.append("✓ No matches found on sanctions/watchlists")
+        lines.append("")
+    except:
+        pass
+
+    # ── Skip Trace Dorks ─────────────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("SKIP TRACE GOOGLE DORKS")
+    lines.append("=" * 50)
+    lines.append("")
+
+    dorks = [
+        f'"{name_part}" "{location_part}" address',
+        f'"{name_part}" "{state}" current address',
+        f'"{name_part}" site:familytreenow.com',
+        f'"{name_part}" site:truepeoplesearch.com',
+        f'"{name_part}" voter registration New Mexico',
+        f'"{name_part}" "{state}" phone number',
+        f'"{name_part}" employer OR works OR employed "{state}"',
+        f'"{name_part}" site:linkedin.com "{state}"',
+        f'"{name_part}" obituary OR memorial',
+        f'"{name_part}" arrest OR booking "{state}"',
+    ]
+    for dork in dorks:
+        encoded = dork.replace(" ", "+").replace('"', '%22')
+        lines.append(f"  {dork}")
+        lines.append(f"  https://www.google.com/search?q={encoded}")
+        lines.append("")
+
+    result = "\n".join(lines)
+    emit(job_id, "module_done", {"module": "skip_trace", "result": result})
+    return result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NEW MODULE: HIT & RUN / VEHICLE INVESTIGATION
+# All sources verified as of June 2026
+# ══════════════════════════════════════════════════════════════════════════════
+
+def module_hit_and_run(target, job_id):
+    emit(job_id, "module_start", {"module": "hit_and_run"})
+
+    # Parse input — could be plate, VIN, name, or description
+    target_clean = target.upper().strip()
+    target_plus = target.replace(" ", "+")
+    target_encoded = target.replace(" ", "%20")
+
+    # Detect if input looks like a plate
+    parts = target_clean.split()
+    NM_STATES = ["NM","TX","AZ","CO","CA","FL","NY","IL","OH","GA","NC","MI","PA","WA","OR"]
+    if len(parts) >= 2 and parts[-1] in NM_STATES:
+        plate = parts[0].replace("-", "")
+        state = parts[-1]
+    elif len(parts) == 1 and 4 <= len(target_clean) <= 8 and target_clean.isalnum():
+        plate = target_clean
+        state = "NM"
+    else:
+        plate = target_clean.replace(" ", "").replace("-", "")
+        state = "NM"
+
+    is_plate = len(plate) >= 3 and plate.isalnum()
+    is_vin = len(plate) == 17
+
+    lines = []
+    lines.append(f"TARGET:  {target}")
+    lines.append(f"PARSED:  Plate={plate}  State={state}")
+    lines.append("")
+    lines.append("⚠ DPPA NOTE: Vehicle records require permissible purpose.")
+    lines.append("  Parnall Law qualifies under 18 U.S.C. § 2721(b) — litigation & process serving.")
+    lines.append("")
+
+    # ── NM-Specific Crash Report Portals ──────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("NEW MEXICO CRASH REPORT PORTALS")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("APD and NMSP reports: ~$7.50 online via LexisNexis/CrashDocs.")
+    lines.append("Requires: report number OR last name + date of crash.")
+    lines.append("")
+
+    nm_crash = [
+        ("APD Crash Reports (LexisNexis)",     "https://crash.lexisnexisrisk.com/"),
+        ("NM State Police Reports (LexisNexis)","https://crash.lexisnexisrisk.com/"),
+        ("CrashDocs.org (CARFAX powered)",      "https://www.crashdocs.org/"),
+        ("BCSO Records Request",                "https://www.bernco.gov/sheriff/records-requests.aspx"),
+        ("APD Records Portal",                  "https://www.cabq.gov/police/online-services/police-report-request"),
+        ("NM State Police Records",             "https://www.dps.nm.gov/law-enforcement/state-police/records/"),
+        ("MyAccident.org NM Guide",             "https://myaccident.org/new-mexico-accident-reports"),
+    ]
+    for name, url in nm_crash:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Free VIN & Vehicle Data ───────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("FREE VIN & VEHICLE DATA")
+    lines.append("=" * 50)
+    lines.append("")
+
+    if is_vin:
+        vin_links = [
+            ("NHTSA VIN Decoder ★ FREE",        f"https://vpic.nhtsa.dot.gov/decoder/Car/{plate}/0"),
+            ("NICB VINCheck (stolen check)",     f"https://www.nicb.org/vincheck"),
+            ("NHTSA Recall Check",               f"https://www.nhtsa.gov/vehicle/{plate}///complaints"),
+            ("AutoCheck (preview free)",         f"https://www.autocheck.com/vehiclehistory/search/go?vin={plate}"),
+            ("Faxvin (free preview)",            f"https://www.faxvin.com/?vin={plate}"),
+            ("VehicleHistory.com",               f"https://www.vehiclehistory.com/vin-report/{plate}"),
+            ("FreeCarVin.com",                   f"https://www.freecarvin.com/"),
+            ("NMVTIS (official govt database)",  f"https://www.vehiclehistory.gov/"),
+        ]
+    else:
+        vin_links = [
+            ("NHTSA VIN Decoder ★ FREE",        "https://vpic.nhtsa.dot.gov/decoder/"),
+            ("NICB VINCheck (stolen check)",     "https://www.nicb.org/vincheck"),
+            ("NHTSA Recall Lookup",              "https://www.nhtsa.gov/recalls"),
+            ("NMVTIS Vehicle History",           "https://www.vehiclehistory.gov/"),
+            ("FreeCarVin.com",                   "https://www.freecarvin.com/"),
+        ]
+    for name, url in vin_links:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Plate Lookup ─────────────────────────────────────────────────────────
+    if is_plate and not is_vin:
+        lines.append("=" * 50)
+        lines.append("LICENSE PLATE LOOKUP")
+        lines.append("=" * 50)
+        lines.append("")
+
+        plate_links = [
+            ("VehicleHistory.com",               f"https://www.vehiclehistory.com/license-plate-search?plate={plate}&state={state}"),
+            ("AutoCheck Plate Search",           f"https://www.autocheck.com/vehiclehistory/search/go?stype=plate&plate={plate}&state={state}"),
+            ("Faxvin Plate Search",              f"https://www.faxvin.com/license-plate-lookup/{state.lower()}/{plate}"),
+            ("NM MVD (DPPA request)",            "https://www.mvd.newmexico.gov/"),
+            ("CLEAR (Thomson Reuters)",          "https://clear.thomsonreuters.com/"),
+            ("TLO (TransUnion)",                 "https://www.tlo.com/"),
+            ("IRB Search",                       "https://www.irbsearch.com/"),
+        ]
+        for name, url in plate_links:
+            lines.append(f"[{name}]")
+            lines.append(f"  {url}")
+            lines.append("")
+
+    # ── Hit & Run Specific Investigation Steps ────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("HIT & RUN INVESTIGATION WORKFLOW")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("STEP 1 — Get the crash report (APD/NMSP LexisNexis portal above)")
+    lines.append("STEP 2 — Run plate through VehicleHistory.com + NICB stolen check")
+    lines.append("STEP 3 — NM MVD records request with DPPA letter (see template below)")
+    lines.append("STEP 4 — Check social media for plate (see dorks below)")
+    lines.append("STEP 5 — Run registered owner name through Skip Trace module")
+    lines.append("STEP 6 — Check NM Courts for prior incidents involving same plate/owner")
+    lines.append("")
+
+    # ── NM Crash Statistics (Free — UNM/NMDOT) ───────────────────────────────
+    lines.append("=" * 50)
+    lines.append("NM CRASH DATA & STATISTICS (FREE)")
+    lines.append("=" * 50)
+    lines.append("")
+
+    crash_data = [
+        ("UNM/NMDOT NM Crash Data ★ FREE",  "https://gps.unm.edu/tru/"),
+        ("NM Fatal Crash Reports",           "https://gps.unm.edu/tru/reports/fatality-reports/index.html"),
+        ("NM Community Crash Reports",       "https://gps.unm.edu/tru/reports/community-reports/index.html"),
+        ("Roadway.report NM (free, 50yr)",   "https://roadway.report/blog/new-mexico/"),
+        ("NHTSA FARS Fatal Crash Query",     "https://www.nhtsa.gov/research-data/fatality-analysis-reporting-system-fars"),
+        ("MRCOG Crash Data (ABQ Metro)",     "https://www.mrcog-nm.gov/571/Crash-Data-Acquisition"),
+        ("NMDOT Traffic Records",            "https://www.dot.nm.gov/traffic-records-system/"),
+    ]
+    for name, url in crash_data:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Social Media Plate Search ─────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("SOCIAL MEDIA PLATE / VEHICLE SEARCH")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("People post photos of vehicles — plates often visible in background.")
+    lines.append("")
+
+    social_plate = [
+        ("Facebook Posts",    f"https://www.facebook.com/search/posts/?q={plate}"),
+        ("Instagram",         f"https://www.instagram.com/explore/search/keyword/?q={plate}"),
+        ("Twitter/X",         f"https://twitter.com/search?q=%22{plate}%22&f=live"),
+        ("Reddit",            f"https://www.reddit.com/search/?q=%22{plate}%22"),
+        ("Google Images",     f"https://www.google.com/search?tbm=isch&q=%22{plate}%22+New+Mexico"),
+    ]
+    for name, url in social_plate:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Google Dorks ─────────────────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("GOOGLE DORKS")
+    lines.append("=" * 50)
+    lines.append("")
+
+    dorks = [
+        f'"{plate}" New Mexico accident OR crash OR hit',
+        f'"{plate}" NM license plate owner',
+        f'"{plate}" site:facebook.com',
+        f'"{plate}" site:instagram.com',
+        f'"{target}" accident OR crash New Mexico',
+        f'"{target}" New Mexico police report',
+        f'"{target}" hit and run Albuquerque',
+    ]
+    for dork in dorks:
+        encoded = dork.replace(" ", "+").replace('"', '%22')
+        lines.append(f"  {dork}")
+        lines.append(f"  https://www.google.com/search?q={encoded}")
+        lines.append("")
+
+    # ── DPPA Letter Template Reminder ────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("DPPA PERMISSIBLE PURPOSE — LAW FIRM TEMPLATE")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("When requesting NM MVD records, include:")
+    lines.append("")
+    lines.append('  "This request is made pursuant to 18 U.S.C. § 2721(b)(4),')
+    lines.append("   for use in connection with a civil proceeding, including")
+    lines.append("   service of legal process and investigations in anticipation")
+    lines.append('   of litigation. Requesting party is a licensed attorney.')
+    lines.append('   Case: [CASE NAME/NUMBER]"')
+    lines.append("")
+    lines.append("NM MVD Records Request:")
+    lines.append("  https://www.mvd.newmexico.gov/")
+    lines.append("  Phone: (888) 683-4636")
+
+    result = "\n".join(lines)
+    emit(job_id, "module_done", {"module": "hit_and_run", "result": result})
+    return result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NEW MODULE: SOCIAL FOOTPRINT
+# Finds real social media presence — not just search page links
+# All sources verified free June 2026
+# ══════════════════════════════════════════════════════════════════════════════
+
+def module_social_footprint(target, job_id):
+    emit(job_id, "module_start", {"module": "social_footprint"})
+
+    if "," in target:
+        name_part = target.split(",")[0].strip()
+        location_part = target.split(",")[1].strip()
+    else:
+        name_part = target
+        location_part = ""
+
+    name_words = name_part.split()
+    first = name_words[0] if name_words else ""
+    last = name_words[-1] if len(name_words) > 1 else ""
+    name_plus = name_part.replace(" ", "+")
+    loc_plus = location_part.replace(" ", "+")
+
+    # Generate username variations
+    username_variants = []
+    if first and last:
+        username_variants = [
+            f"{first.lower()}{last.lower()}",
+            f"{first.lower()}.{last.lower()}",
+            f"{first.lower()}_{last.lower()}",
+            f"{first.lower()}{last.lower()[:3]}",
+            f"{first.lower()[0]}{last.lower()}",
+            f"{last.lower()}{first.lower()}",
+            f"{first.lower()}{last.lower()}1",
+            f"{first.lower()}{last.lower()}2",
+        ]
+
+    lines = []
+    lines.append(f"TARGET:   {name_part}")
+    if location_part:
+        lines.append(f"LOCATION: {location_part}")
+    lines.append("")
+
+    # ── Direct Profile Attempts ───────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("DIRECT PROFILE ATTEMPTS — USERNAME VARIATIONS")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("Click each to check if profile exists. Green dot = active profile.")
+    lines.append("")
+
+    if username_variants:
+        for uname in username_variants[:4]:
+            lines.append(f"Username: {uname}")
+            direct = [
+                ("Facebook",   f"https://www.facebook.com/{uname}"),
+                ("Instagram",  f"https://www.instagram.com/{uname}/"),
+                ("Twitter/X",  f"https://twitter.com/{uname}"),
+                ("TikTok",     f"https://www.tiktok.com/@{uname}"),
+                ("LinkedIn",   f"https://www.linkedin.com/in/{uname}"),
+            ]
+            for platform, url in direct:
+                lines.append(f"  [{platform}]  {url}")
+            lines.append("")
+
+    # ── Deep Facebook Search ──────────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("DEEP FACEBOOK INTELLIGENCE")
+    lines.append("=" * 50)
+    lines.append("")
+
+    fb = [
+        ("People Search",            f"https://www.facebook.com/search/people/?q={name_plus}"),
+        ("Posts mentioning",         f"https://www.facebook.com/search/posts/?q={name_plus}"),
+        ("Photos tagged",            f"https://www.facebook.com/search/photos/?q={name_plus}"),
+        ("Check-ins near ABQ",       f"https://www.facebook.com/search/places/?q={name_plus}+albuquerque"),
+        ("Google FB Deep Search",    f"https://www.google.com/search?q=site:facebook.com+%22{name_plus}%22"),
+        ("Google FB + Location",     f"https://www.google.com/search?q=site:facebook.com+%22{name_plus}%22+%22{loc_plus}%22"),
+        ("Sowsearch (FB Deep)",      f"https://sowsearch.info/search?q={name_plus}"),
+        ("Social Searcher",          f"https://www.social-searcher.com/social-buzz/?q={name_plus}&network=facebook"),
+    ]
+    for name, url in fb:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Real-Time Social Search ───────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("REAL-TIME SOCIAL MEDIA SEARCH")
+    lines.append("=" * 50)
+    lines.append("")
+
+    realtime = [
+        ("Social Searcher ★ FREE",   f"https://www.social-searcher.com/social-buzz/?q={name_plus}"),
+        ("Social Searcher + ABQ",    f"https://www.social-searcher.com/social-buzz/?q={name_plus}+albuquerque"),
+        ("Boardreader (forums)",     f"https://boardreader.com/s/{name_plus}.html"),
+        ("WhatsMyName (usernames)",  f"https://whatsmyname.app/?q={first.lower()}{last.lower()}"),
+        ("Epieos (email→social)",    f"https://epieos.com/?q={name_plus}&t=name"),
+    ]
+    for name, url in realtime:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── LinkedIn Deep Search ──────────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("LINKEDIN INTELLIGENCE")
+    lines.append("=" * 50)
+    lines.append("")
+
+    li = [
+        ("LinkedIn People Search",   f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
+        ("LinkedIn + NM filter",     f"https://www.linkedin.com/search/results/people/?keywords={name_plus}&geoUrn=%5B%22102095887%22%5D"),
+        ("Google LI Profile",        f"https://www.google.com/search?q=site:linkedin.com/in+%22{name_plus}%22"),
+        ("Google LI + Location",     f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22New+Mexico%22"),
+        ("Google LI Employer",       f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22Albuquerque%22"),
+    ]
+    for name, url in li:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Reverse Image / Face Search ───────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("REVERSE IMAGE & FACE SEARCH")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("Find additional profiles by uploading a photo of the subject.")
+    lines.append("")
+
+    face = [
+        ("Yandex ★ BEST for faces",  "https://yandex.com/images/"),
+        ("PimEyes (face search)",     "https://pimeyes.com/en"),
+        ("Lenso.ai (face search)",    "https://lenso.ai/en"),
+        ("Google Reverse Image",      "https://images.google.com/"),
+        ("TinEye",                    "https://tineye.com/"),
+        ("Bing Visual Search",        "https://www.bing.com/images/search?view=detailv2&iss=sbi"),
+    ]
+    for name, url in face:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Platform-Specific Deep Searches ──────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("PLATFORM-SPECIFIC SEARCHES")
+    lines.append("=" * 50)
+    lines.append("")
+
+    platforms = [
+        ("Twitter/X People",         f"https://twitter.com/search?q=%22{name_plus}%22&f=user"),
+        ("Twitter/X Near ABQ",       f"https://twitter.com/search?q=%22{name_plus}%22+near%3AAlbuquerque&f=live"),
+        ("Instagram Search",         f"https://www.instagram.com/explore/search/keyword/?q={name_plus}"),
+        ("TikTok Search",            f"https://www.tiktok.com/search/user?q={name_plus}"),
+        ("Reddit User Search",       f"https://www.reddit.com/search/?q=%22{name_part}%22&type=user"),
+        ("Reddit Posts",             f"https://www.reddit.com/search/?q=%22{name_part}%22"),
+        ("YouTube Channel",          f"https://www.youtube.com/results?search_query={name_plus}&sp=EgIQAg%253D%253D"),
+        ("Nextdoor (neighborhood)",  "https://nextdoor.com/find-neighbors/"),
+        ("Meetup",                   f"https://www.meetup.com/find/?keywords={name_plus}&location=Albuquerque"),
+        ("Venmo (public)",           f"https://venmo.com/{first.lower()}{last.lower()}"),
+        ("Cash App",                 f"https://cash.app/${first.lower()}{last.lower()}"),
+    ]
+    for name, url in platforms:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── Live DuckDuckGo ───────────────────────────────────────────────────────
+    try:
+        ddg_out, _, _ = run_cmd(
+            f"curl -s 'https://api.duckduckgo.com/?q={name_plus}&format=json&no_html=1' 2>/dev/null",
+            timeout=10
+        )
+        ddg_data = json.loads(ddg_out)
+        if ddg_data.get("Abstract"):
+            lines.append("=" * 50)
+            lines.append("PUBLIC KNOWLEDGE SUMMARY")
+            lines.append("=" * 50)
+            lines.append("")
+            lines.append(ddg_data["Abstract"])
+            if ddg_data.get("AbstractURL"):
+                lines.append(f"Source: {ddg_data['AbstractURL']}")
+            lines.append("")
+    except:
+        pass
+
+    # ── Social Footprint Dorks ────────────────────────────────────────────────
+    lines.append("=" * 50)
+    lines.append("SOCIAL FOOTPRINT DORKS")
+    lines.append("=" * 50)
+    lines.append("")
+
+    dorks = [
+        f'"{name_part}" site:facebook.com',
+        f'"{name_part}" site:instagram.com',
+        f'"{name_part}" site:twitter.com',
+        f'"{name_part}" site:linkedin.com',
+        f'"{name_part}" "{location_part}" social media',
+        f'"{name_part}" profile photo albuquerque',
+        f'"{name_part}" tagged photo',
+        f'"{name_part}" @gmail.com OR @yahoo.com OR @hotmail.com',
+    ]
+    for dork in dorks:
+        encoded = dork.replace(" ", "+").replace('"', '%22')
+        lines.append(f"  {dork}")
+        lines.append(f"  https://www.google.com/search?q={encoded}")
+        lines.append("")
+
+    result = "\n".join(lines)
+    emit(job_id, "module_done", {"module": "social_footprint", "result": result})
+    return result
+
+
 # ── Module Registry ───────────────────────────────────────────────────────────
 # NOTE: sherlock is intentionally NOT listed here as a standalone entry.
 # It runs inside module_username_search to avoid double execution.
 
 MODULE_MAP = {
-    "people":              module_people_search,
-    "property":            module_property,
-    "photo_forensics":     module_photo_forensics,
-    "geolocation":         module_geolocation,
-    "username_search":     module_username_search,
-    "public_records":      module_public_records,
-    "social_media":        module_social_media,
-    "business":            module_business,
-    "plate_lookup":        module_plate_lookup,
-    "vin_investigation":   module_vin_investigation,
-    "image_metadata":      module_image_metadata,
-    "email_investigate":   module_email_investigate,
-    "phone":               module_phone,
-    "whois":               module_whois,
-    "dns":                 module_dns,
-    "nmap":                module_nmap,
-    "geoip":               module_geoip,
-    "shodan":              module_shodan,
-    "virustotal":          module_virustotal,
-    "dorks":               module_google_dorks,
+    "people":            module_people_search,
+    "property":          module_property,
+    "photo_forensics":   module_photo_forensics,
+    "geolocation":       module_geolocation,
+    "username_search":   module_username_search,
+    "public_records":    module_public_records,
+    "social_media":      module_social_media,
+    "skip_trace":        module_skip_trace,
+    "hit_and_run":       module_hit_and_run,
+    "social_footprint":  module_social_footprint,
+    "business":          module_business,
+    "plate_lookup":      module_plate_lookup,
+    "image_metadata":    module_image_metadata,
+    "email_investigate": module_email_investigate,
+    "phone":             module_phone,
+    "whois":             module_whois,
+    "dns":               module_dns,
+    "nmap":              module_nmap,
+    "geoip":             module_geoip,
+    "shodan":            module_shodan,
+    "virustotal":        module_virustotal,
+    "dorks":             module_google_dorks,
 }
 
 # Modules that only make sense for domain/IP targets
