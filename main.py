@@ -144,6 +144,8 @@ def module_people_search(target, job_id):
         ("FASTPEOPLESEARCH",              f"https://www.fastpeoplesearch.com/name/{name_url}"),
         ("THATSTHEM ★ 100% FREE",         f"https://thatsthem.com/name/{first}-{last}"),
         ("IDCRAWL (social+records)",      f"https://www.idcrawl.com/name/{first}-{last}"),
+        ("PEEKYOU (social+arrests)",      f"https://www.peekyou.com/{first}_{last}"),
+        ("SORTEDBYNAME.COM",              f"https://www.sortedbyname.com/search?q={name_plus}"),
         ("ZABASEARCH",                    f"https://www.zabasearch.com/people/{first}+{last}/{state}/"),
         ("411.COM",                       f"https://www.411.com/name/{first}-{last}/{state}"),
         ("USPHONEBOOK",                   f"https://www.usphonebook.com/{first}-{last}"),
@@ -261,6 +263,7 @@ def module_public_records(target, job_id):
     lines.append("")
 
     free_people = [
+        ("JudyRecords ★ 740M Court Cases FREE", f"https://www.judyrecords.com/search?q={name_plus}"),
         ("FamilyTreeNow ★ BEST FREE",    f"https://www.familytreenow.com/search/people/results?first={first}&last={last}"),
         ("TruePeopleSearch",              f"https://www.truepeoplesearch.com/results?name={name_plus}"),
         ("FastPeopleSearch",              f"https://www.fastpeoplesearch.com/name/{name_part.replace(' ','-').lower()}"),
@@ -283,17 +286,20 @@ def module_public_records(target, job_id):
     lines.append("")
 
     criminal = [
-        ("NM Courts (CourtLook)",          "https://caselookup.nmcourts.gov/caselookup/app"),
-        ("PACER Federal Courts",           "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
-        ("CourtListener (Free Federal)",   f"https://www.courtlistener.com/?q={name_plus}&type=p"),
-        ("VINE Offender Search NM",        "https://vinelink.vineapps.com/search/NM/Person"),
-        ("NM Corrections Inmate",          "https://www.cd.nm.gov/divisions/oid/offender-search/"),
-        ("ArrestFacts",                    f"https://arrestfacts.com/search?name={name_plus}"),
-        ("BustedMugshots",                 f"https://bustedmugshots.com/search?name={name_plus}"),
-        ("MugshotSearch",                  f"https://www.mugshots.com/search?q={name_plus}"),
-        ("OpenSanctions Watchlist",        f"https://www.opensanctions.org/search/?q={name_plus}"),
-        ("Sex Offender Registry NM",       "https://www.nmsexoffender.dps.nm.gov/"),
-        ("Sex Offender Registry National", f"https://www.nsopw.gov/Search/Results?firstName={first}&lastName={last}"),
+        ("JudyRecords ★ 740M US Cases FREE",   f"https://www.judyrecords.com/search?q={name_plus}"),
+        ("Trellis.law (State Courts Free)",     f"https://trellis.law/person/{first}-{last}"),
+        ("NM Courts (CourtLook)",               "https://caselookup.nmcourts.gov/caselookup/app"),
+        ("PACER Federal Courts",                "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
+        ("CourtListener (Free Federal)",        f"https://www.courtlistener.com/?q={name_plus}&type=p"),
+        ("VINE Offender Search NM",             "https://vinelink.vineapps.com/search/NM/Person"),
+        ("NM Corrections Inmate",               "https://www.cd.nm.gov/divisions/oid/offender-search/"),
+        ("JailBase (Arrest Bookings) ★ FREE",   f"https://www.jailbase.com/search/?name_searched={name_plus}"),
+        ("ArrestFacts",                         f"https://arrestfacts.com/search?name={name_plus}"),
+        ("BustedMugshots",                      f"https://bustedmugshots.com/search?name={name_plus}"),
+        ("MugshotSearch",                       f"https://www.mugshots.com/search?q={name_plus}"),
+        ("OpenSanctions Watchlist",             f"https://www.opensanctions.org/search/?q={name_plus}"),
+        ("Sex Offender Registry NM",            "https://www.nmsexoffender.dps.nm.gov/"),
+        ("Sex Offender Registry National",      f"https://www.nsopw.gov/Search/Results?firstName={first}&lastName={last}"),
     ]
     for name, url in criminal:
         lines.append(f"[{name}]")
@@ -525,6 +531,9 @@ def module_skip_trace(target, job_id):
     lines.append("")
     lines.append("Voter registration = most reliable free address source.")
     lines.append("")
+    lines.append("TIP: FEC political donations = free government database with name + address + employer.")
+    lines.append(f"  https://www.fec.gov/data/receipts/individual-contributions/?contributor_name={name_plus}")
+    lines.append("")
 
     # State-specific voter portals — all 50 states + DC
     voter_portals = {
@@ -640,13 +649,15 @@ def module_skip_trace(target, job_id):
     lines.append("")
 
     employment = [
-        ("LinkedIn People Search",        f"https://www.linkedin.com/search/results/people/?keywords={name_plus}&origin=GLOBAL_SEARCH_HEADER"),
-        ("Google LinkedIn + State",       f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22{state}%22"),
-        ("Google Employer Dork",          f"https://www.google.com/search?q=%22{name_plus}%22+employer+OR+works+OR+%22employed+at%22"),
-        ("NM Contractor License",         "https://www.rld.nm.gov/licensing-and-regulation/"),
-        ("NPPES Medical NPI",             f"https://npiregistry.cms.hhs.gov/search?search_type=ind&first_name={first}&last_name={last}"),
-        ("NM Bar (if attorney)",          "https://www.nmbar.org/"),
-        ("NM SOS Business Search",        f"https://portal.sos.state.nm.us/BFS/online/CorporationFormation/SearchBusinesses?SearchCriteria={name_plus}"),
+        ("LinkedIn People Search",         f"https://www.linkedin.com/search/results/people/?keywords={name_plus}&origin=GLOBAL_SEARCH_HEADER"),
+        ("Google LinkedIn + State",        f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22{state}%22"),
+        ("Google Employer Dork",           f"https://www.google.com/search?q=%22{name_plus}%22+employer+OR+works+OR+%22employed+at%22"),
+        ("FEC Political Donations ★",      f"https://www.fec.gov/data/receipts/individual-contributions/?contributor_name={name_plus}"),
+        ("OpenSecrets Donor Search ★",     f"https://www.opensecrets.org/donor-lookup/results?name={name_plus}"),
+        ("NM Contractor License",          "https://www.rld.nm.gov/licensing-and-regulation/"),
+        ("NPPES Medical NPI",              f"https://npiregistry.cms.hhs.gov/search?search_type=ind&first_name={first}&last_name={last}"),
+        ("NM Bar (if attorney)",           "https://www.nmbar.org/"),
+        ("NM SOS Business Search",         f"https://portal.sos.state.nm.us/BFS/online/CorporationFormation/SearchBusinesses?SearchCriteria={name_plus}"),
     ]
     for name, url in employment:
         lines.append(f"[{name}]")
@@ -890,12 +901,14 @@ def module_social_footprint(target, job_id):
     lines.append("=" * 50)
     lines.append("")
     realtime = [
-        ("Social Searcher ★ FREE",   f"https://www.social-searcher.com/social-buzz/?q={name_plus}"),
-        ("Sowsearch (FB Deep)",      f"https://sowsearch.info/search?q={name_plus}"),
-        ("Boardreader (forums)",     f"https://boardreader.com/s/{name_plus}.html"),
-        ("WhatsMyName (usernames)",  f"https://whatsmyname.app/?q={first.lower()}{last.lower()}"),
-        ("IDCrawl (social+records)", f"https://www.idcrawl.com/name/{first.lower()}-{last.lower()}"),
-        ("Epieos (email→social)",    f"https://epieos.com/?q={name_plus}&t=name"),
+        ("Social Searcher ★ FREE",        f"https://www.social-searcher.com/social-buzz/?q={name_plus}"),
+        ("Social Catfish (reverse ID)",   f"https://socialcatfish.com/search/?q={name_plus}"),
+        ("PeekYou (social+arrests)",      f"https://www.peekyou.com/{first.lower()}_{last.lower()}"),
+        ("Sowsearch (FB Deep)",           f"https://sowsearch.info/search?q={name_plus}"),
+        ("Boardreader (forums)",          f"https://boardreader.com/s/{name_plus}.html"),
+        ("WhatsMyName (usernames)",       f"https://whatsmyname.app/?q={first.lower()}{last.lower()}"),
+        ("IDCrawl (social+records)",      f"https://www.idcrawl.com/name/{first.lower()}-{last.lower()}"),
+        ("Epieos (email→social)",         f"https://epieos.com/?q={name_plus}&t=name"),
     ]
     for name, url in realtime:
         lines.append(f"[{name}]")
@@ -1447,12 +1460,15 @@ def module_phone(target, job_id):
     lines.append("=" * 50)
     lines.append("")
     sites = [
-        ("TRUEPEOPLESEARCH ★ FREE", f"https://www.truepeoplesearch.com/results?phoneno={clean}"),
-        ("THATSTHEM ★ FREE",        f"https://thatsthem.com/phone/{clean}"),
-        ("FASTPEOPLESEARCH",         f"https://www.fastpeoplesearch.com/phone/{clean}"),
-        ("USPHONEBOOK",              f"https://www.usphonebook.com/{clean}"),
-        ("411.COM",                  f"https://www.411.com/phone/{clean}"),
-        ("CLUSTRMAPS",               f"https://clustrmaps.com/person/"),
+        ("NUMLOOKUP ★ FREE — owner name, carrier",  f"https://www.numlookup.com/?number={clean}"),
+        ("ZLOOKUP ★ FREE — owner name",             f"https://www.zlookup.com/"),
+        ("TRUEPEOPLESEARCH ★ FREE",                  f"https://www.truepeoplesearch.com/results?phoneno={clean}"),
+        ("THATSTHEM ★ FREE",                         f"https://thatsthem.com/phone/{clean}"),
+        ("FASTPEOPLESEARCH",                          f"https://www.fastpeoplesearch.com/phone/{clean}"),
+        ("FONEFINDER (carrier lookup)",              f"https://fonefinder.net/findphone.php?areacode={clean[:3]}&exchange={clean[3:6]}&thenumber={clean[6:]}"),
+        ("USPHONEBOOK",                              f"https://www.usphonebook.com/{clean}"),
+        ("411.COM",                                  f"https://www.411.com/phone/{clean}"),
+        ("TRUECALLER (community ID)",                f"https://www.truecaller.com/search/us/{clean}"),
     ]
     for name, url in sites:
         lines.append(f"[{name}]")
@@ -2199,4 +2215,3 @@ def index():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port, debug=False)
-
