@@ -25,9 +25,8 @@ CORS(app)
 
 @app.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    # Do not add CORS headers here — Flask-CORS handles it above
+    # Adding them here causes duplicate headers which breaks login
     return response
 
 @app.before_request
