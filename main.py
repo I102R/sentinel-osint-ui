@@ -1459,9 +1459,13 @@ def module_phone(target, job_id):
     lines.append("FREE REVERSE LOOKUP SITES")
     lines.append("=" * 50)
     lines.append("")
+    lines.append("⚠ NOTE: SpyDialer calls the number silently to retrieve voicemail.")
+    lines.append("  Target may see a missed call. Use intentionally.")
+    lines.append("")
     sites = [
-        ("NUMLOOKUP ★ FREE — owner name, carrier",  f"https://www.numlookup.com/?number={clean}"),
-        ("ZLOOKUP ★ FREE — owner name",             f"https://www.zlookup.com/"),
+        ("SPYDIALER ★ FREE — name via voicemail",   f"https://www.spydialer.com/default.aspx?phone={clean}"),
+        ("NUMLOOKUP ★ FREE — owner name, carrier",   f"https://www.numlookup.com/?number={clean}"),
+        ("ANYWHO (free directory)",                 f"https://www.anywho.com/reverse-lookup/{clean}"),
         ("TRUEPEOPLESEARCH ★ FREE",                  f"https://www.truepeoplesearch.com/results?phoneno={clean}"),
         ("THATSTHEM ★ FREE",                         f"https://thatsthem.com/phone/{clean}"),
         ("FASTPEOPLESEARCH",                          f"https://www.fastpeoplesearch.com/phone/{clean}"),
