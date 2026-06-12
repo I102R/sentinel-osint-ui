@@ -200,7 +200,7 @@ def module_people_search(target, job_id):
     lines.append("")
 
     dorks = [
-        f'"{name_part}" "{location_part}"',
+        f'"{name_part}" "{location_part}"' if location_part else f'"{name_part}" New Mexico',
         f'"{name_part}" address phone',
         f'"{name_part}" site:familytreenow.com',
         f'"{name_part}" site:truepeoplesearch.com',
@@ -526,12 +526,72 @@ def module_skip_trace(target, job_id):
     lines.append("Voter registration = most reliable free address source.")
     lines.append("")
 
+    # State-specific voter portals — all 50 states + DC
+    voter_portals = {
+        "AL": ("AL Voter Status",        "https://myinfo.alabamavotes.gov/VoterView/RegistrantSearch.do"),
+        "AK": ("AK Voter Search",        "https://myvoterinformation.alaska.gov/"),
+        "AZ": ("AZ Voter Registration",  "https://my.arizona.vote/VoterView/RegistrantSearch.do"),
+        "AR": ("AR Voter Status",        "https://www.voterview.ar-nova.org/VoterView/RegistrantSearch.do"),
+        "CA": ("CA Voter Status",        "https://voterstatus.sos.ca.gov/"),
+        "CO": ("CO Voter Portal",        "https://www.sos.state.co.us/voter/pages/pub/olvr/findVoterReg.xhtml"),
+        "CT": ("CT Voter Lookup",        "https://portaldir.ct.gov/sots/LookUpRegistration.aspx"),
+        "DE": ("DE Voter Search",        "https://ivote.vote.org/voterinfo"),
+        "DC": ("DC Voter Search",        "https://www.dcboe.org/Voters/Register-To-Vote/Check-Voter-Registration-Status"),
+        "FL": ("FL Voter Lookup",        "https://registration.elections.myflorida.com/CheckVoterStatus"),
+        "GA": ("GA Voter Status",        "https://mvp.sos.ga.gov/s/"),
+        "HI": ("HI Voter Search",        "https://olvr.hawaii.gov/"),
+        "ID": ("ID Voter Lookup",        "https://elections.sos.idaho.gov/ElectionLink/RobotsHome.aspx"),
+        "IL": ("IL Voter Lookup",        "https://www.elections.il.gov/votinginformation/RegistrationLookup.aspx"),
+        "IN": ("IN Voter Search",        "https://indianavoters.in.gov/"),
+        "IA": ("IA Voter Registration",  "https://sos.iowa.gov/elections/voterreg/reglookup.aspx"),
+        "KS": ("KS Voter Status",        "https://myvoteinfo.voteks.org/VoterView/RegistrantSearch.do"),
+        "KY": ("KY Voter Search",        "https://vrsws.sos.ky.gov/VIC/"),
+        "LA": ("LA Voter Search",        "https://voterportal.sos.la.gov/"),
+        "ME": ("ME Voter Lookup",        "https://www.maine.gov/sos/cec/elec/voter-info/voterregcheck.html"),
+        "MD": ("MD Voter Search",        "https://voterservices.elections.maryland.gov/VoterSearch"),
+        "MA": ("MA Voter Lookup",        "https://www.sec.state.ma.us/ovr/"),
+        "MI": ("MI Voter Info",          "https://mvic.sos.state.mi.us/"),
+        "MN": ("MN Voter Status",        "https://mnvotes.sos.state.mn.us/VoterStatus.aspx"),
+        "MS": ("MS Voter Lookup",        "https://www.sos.ms.gov/elections-voting/voter-registration-information"),
+        "MO": ("MO Voter Search",        "https://voteroutreach.sos.mo.gov/VoterSearch/Search"),
+        "MT": ("MT Voter Lookup",        "https://app.mt.gov/voterinfo/"),
+        "NE": ("NE Voter Status",        "https://www.votercheck.necvr.ne.gov/"),
+        "NV": ("NV Voter Status",        "https://www.nvsos.gov/voters/register-to-vote"),
+        "NH": ("NH Voter Search",        "https://app.sos.nh.gov/Public/AbsenteeBallot.aspx"),
+        "NJ": ("NJ Voter Status",        "https://voter.svrs.nj.gov/registration-check"),
+        "NM": ("NM Voter Portal",        "https://voterportal.servis.sos.nm.gov/WhereToVote.aspx"),
+        "NY": ("NY Voter Status",        "https://voterlookup.elections.ny.gov/"),
+        "NC": ("NC Voter Lookup",        "https://vt.ncsbe.gov/RegLkup/"),
+        "ND": ("ND Voter Portal",        "https://vip.sos.nd.gov/PortalList.aspx"),
+        "OH": ("OH Voter Search",        "https://voterlookup.ohiosos.gov/voterlookup.aspx"),
+        "OK": ("OK Voter Search",        "https://www.ok.gov/elections/Voter_Info/Voter_Search/index.html"),
+        "OR": ("OR Voter Status",        "https://sos.oregon.gov/voting/pages/myvote.aspx"),
+        "PA": ("PA Voter Status",        "https://www.pavoterservices.pa.gov/pages/voterregistrationstatus.aspx"),
+        "RI": ("RI Voter Lookup",        "https://vote.sos.ri.gov/"),
+        "SC": ("SC Voter Status",        "https://www.scvotes.gov/vote/voterregistrationstatus"),
+        "SD": ("SD Voter Lookup",        "https://vip.sdsos.gov/viplogin.aspx"),
+        "TN": ("TN Voter Lookup",        "https://tnmap.tn.gov/voterlookup/"),
+        "TX": ("TX Voter Search",        "https://teamrv-mvp.sos.texas.gov/MVP/mvp.do"),
+        "UT": ("UT Voter Status",        "https://votesearch.utah.gov/voter-search/search/search-by-name/voter-info"),
+        "VT": ("VT Voter Lookup",        "https://mvp.sec.state.vt.us/"),
+        "VA": ("VA Voter Lookup",        "https://vote.elections.virginia.gov/VoterInformation"),
+        "WA": ("WA Voter Status",        "https://voter.votewa.gov/WhereToVote.aspx"),
+        "WV": ("WV Voter Search",        "https://ovr.sos.wv.gov/Register/Landing"),
+        "WI": ("WI Voter Lookup",        "https://myvote.wi.gov/en-us/"),
+        "WY": ("WY Voter Search",        "https://sos.wyo.gov/elections/"),
+    }
+
+    # Show state-specific portal if known, otherwise generic
+    state_portal = voter_portals.get(state.upper() if state else "NM")
     voter = [
-        ("VoterRecords.com",              f"https://voterrecords.com/voters/{name_url}/1"),
-        ("NM SOS Voter Portal",           "https://voterportal.servis.sos.nm.gov/WhereToVote.aspx"),
-        ("NM Voter Information",          "https://www.sos.nm.gov/voting-and-elections/voter-information/"),
-        ("Google NM Voter Records",       f"https://www.google.com/search?q=%22{name_plus}%22+%22voter+registration%22+%22New+Mexico%22"),
+        ("VoterRecords.com ★ ALL STATES",  f"https://voterrecords.com/voters/{name_url}/1"),
     ]
+    if state_portal:
+        voter.append((f"{state_portal[0]} ★ STATE PORTAL", state_portal[1]))
+    else:
+        voter.append(("NVRA State Voter Portal Finder", "https://www.usa.gov/voter-registration-card"))
+    voter.append(("Google Voter Registration Search", f"https://www.google.com/search?q=%22{name_plus}%22+%22voter+registration%22+%22{location_part}%22"))
+
     for name, url in voter:
         lines.append(f"[{name}]")
         lines.append(f"  {url}")
@@ -620,14 +680,14 @@ def module_skip_trace(target, job_id):
     lines.append("")
 
     dorks = [
-        f'"{name_part}" "{location_part}" address',
-        f'"{name_part}" "{state}" current address',
+        f'"{name_part}" "{location_part}" address' if location_part else f'"{name_part}" address New Mexico',
+        f'"{name_part}" "{state}" current address' if state else f'"{name_part}" current address New Mexico',
         f'"{name_part}" voter registration "New Mexico"',
-        f'"{name_part}" "{state}" phone number',
-        f'"{name_part}" employer OR works OR employed "{state}"',
-        f'"{name_part}" site:linkedin.com "{state}"',
+        f'"{name_part}" "{state}" phone number' if state else f'"{name_part}" phone number',
+        f'"{name_part}" employer OR works OR employed "{state}"' if state else f'"{name_part}" employer OR works OR employed',
+        f'"{name_part}" site:linkedin.com "{state}"' if state else f'"{name_part}" site:linkedin.com',
         f'"{name_part}" obituary OR memorial',
-        f'"{name_part}" arrest OR booking "{state}"',
+        f'"{name_part}" arrest OR booking "{state}"' if state else f'"{name_part}" arrest OR booking',
     ]
     for dork in dorks:
         encoded = dork.replace(" ", "+").replace('"', '%22')
@@ -2139,3 +2199,4 @@ def index():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port, debug=False)
+
