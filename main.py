@@ -1,2221 +1,723 @@
-"""
-FIVE T OSINT Agent - Backend Server
-Runs on Render.com (Python 3.10+)
-All modules audited June 2026 — paywall tools removed, free tools verified.
-"""
-
-from flask import Flask, request, jsonify, Response
-from flask_cors import CORS
-import subprocess, threading, json, os, time, queue, socket, re
-from datetime import datetime
-
-app = Flask(__name__)
-app.config['PROPAGATE_EXCEPTIONS'] = True
-
-from werkzeug.middleware.proxy_fix import ProxyFix
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
-
-try:
-    from werkzeug.serving import WSGIRequestHandler
-    WSGIRequestHandler.server_version = "FIVE-T"
-except:
-    pass
-
-CORS(app)
-
-@app.after_request
-def after_request(response):
-    # Do not add CORS headers here — Flask-CORS handles it above
-    # Adding them here causes duplicate headers which breaks login
-    return response
-
-@app.before_request
-def handle_options():
-    from flask import request as req
-    if req.method == 'OPTIONS':
-        from flask import make_response
-        response = make_response()
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-        response.headers.add('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-        return response
-
-jobs = {}
-
-def new_job(job_id):
-    jobs[job_id] = {
-        "status": "running",
-        "started": datetime.utcnow().isoformat(),
-        "results": {},
-        "events": queue.Queue(),
-    }
-
-def emit(job_id, event_type, data):
-    if job_id in jobs:
-        jobs[job_id]["events"].put({"type": event_type, "data": data})
-
-def run_cmd(cmd, timeout=60):
-    try:
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-        return r.stdout.strip(), r.stderr.strip(), r.returncode
-    except subprocess.TimeoutExpired:
-        return "", "Timed out", 1
-    except Exception as e:
-        return "", str(e), 1
-
-def tool_available(name):
-    out, _, rc = run_cmd(f"which {name}")
-    return rc == 0
-
-# ── Name Parser Helper ────────────────────────────────────────────────────────
-def parse_name_location(target):
-    US_STATES = {
-        'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN',
-        'IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV',
-        'NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN',
-        'TX','UT','VT','VA','WA','WV','WI','WY','DC'
-    }
-    if "," in target:
-        name_part = target.split(",")[0].strip()
-        location_part = target.split(",")[1].strip()
-    else:
-        parts = target.split()
-        if len(parts) >= 3 and parts[-1].upper() in US_STATES:
-            if len(parts) >= 4:
-                name_part = " ".join(parts[:-2])
-                location_part = " ".join(parts[-2:])
-            else:
-                name_part = " ".join(parts[:-1])
-                location_part = parts[-1]
-        elif len(parts) <= 2:
-            name_part = target
-            location_part = ""
-        elif len(parts) == 3:
-            if len(parts[1].replace('.','')) <= 2:
-                name_part = target
-                location_part = ""
-            else:
-                name_part = target
-                location_part = ""
-        else:
-            if len(parts[1].replace('.','')) <= 2:
-                name_part = " ".join(parts[:3])
-                location_part = " ".join(parts[3:])
-            else:
-                name_part = " ".join(parts[:2])
-                location_part = " ".join(parts[2:])
-
-    name_words = name_part.split()
-    first = name_words[0] if name_words else ""
-    last = name_words[-1] if len(name_words) > 1 else ""
-    loc_words = location_part.split() if location_part else []
-    state = loc_words[-1].upper() if loc_words else ""
-    city = " ".join(loc_words[:-1]) if len(loc_words) > 1 else loc_words[0] if loc_words else ""
-    return name_part, location_part, first, last, state, city
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: PEOPLE SEARCH
-# All sources verified free June 2026
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_people_search(target, job_id):
-    emit(job_id, "module_start", {"module": "people"})
-    name_part, location_part, first, last, state, city = parse_name_location(target)
-
-    name_plus = name_part.replace(" ", "+")
-    loc_plus = location_part.replace(" ", "+")
-    name_url = name_part.replace(" ", "-").lower()
-    city_url = city.replace(" ", "-").lower()
-
-    lines = []
-    lines.append(f"TARGET:   {name_part}")
-    if location_part:
-        lines.append(f"LOCATION: {location_part}")
-    lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("FREE PEOPLE FINDER SITES — VERIFIED NO PAYWALL")
-    lines.append("=" * 50)
-    lines.append("")
-
-    sites = [
-        ("FAMILYTREENOW ★ BEST FREE",    f"https://www.familytreenow.com/search/people/results?first={first}&last={last}&state={state}"),
-        ("TRUEPEOPLESEARCH",              f"https://www.truepeoplesearch.com/results?name={name_plus}&citystatezip={loc_plus}"),
-        ("FASTPEOPLESEARCH",              f"https://www.fastpeoplesearch.com/name/{name_url}"),
-        ("THATSTHEM ★ 100% FREE",         f"https://thatsthem.com/name/{first}-{last}"),
-        ("IDCRAWL (social+records)",      f"https://www.idcrawl.com/name/{first}-{last}"),
-        ("PEEKYOU (social+arrests)",      f"https://www.peekyou.com/{first}_{last}"),
-        ("SORTEDBYNAME.COM",              f"https://www.sortedbyname.com/search?q={name_plus}"),
-        ("ZABASEARCH",                    f"https://www.zabasearch.com/people/{first}+{last}/{state}/"),
-        ("411.COM",                       f"https://www.411.com/name/{first}-{last}/{state}"),
-        ("USPHONEBOOK",                   f"https://www.usphonebook.com/{first}-{last}"),
-        ("CLUSTRMAPS",                    f"https://clustrmaps.com/person/{last}-{first}/"),
-        ("SEARCHPEOPLEFREE",              f"https://www.searchpeoplefree.com/find/{first}-{last}"),
-        ("NUWBER",                        f"https://nuwber.com/search?firstName={first}&lastName={last}&city={city.replace(' ','+')}&state={state}"),
-        ("VOTERRECORDS.COM",              f"https://voterrecords.com/voters/{name_url}/1"),
-        ("PUBLICRECORDS.ONLINE",          f"https://publicrecords.online/search/?first_name={first}&last_name={last}&state={state}"),
-    ]
-    for name, url in sites:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("SOCIAL MEDIA")
-    lines.append("=" * 50)
-    lines.append("")
-
-    social = [
-        ("LinkedIn",  f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
-        ("Facebook",  f"https://www.facebook.com/search/people/?q={name_plus}"),
-        ("Twitter/X", f"https://twitter.com/search?q=%22{name_plus}%22&f=user"),
-        ("Instagram", f"https://www.instagram.com/explore/search/keyword/?q={name_plus}"),
-        ("TikTok",    f"https://www.tiktok.com/search?q={name_plus}"),
-        ("YouTube",   f"https://www.youtube.com/results?search_query={name_plus}"),
-        ("Reddit",    f"https://www.reddit.com/search/?q=%22{name_part}%22&type=user"),
-    ]
-    for platform, url in social:
-        lines.append(f"[{platform}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("COURT & PUBLIC RECORDS")
-    lines.append("=" * 50)
-    lines.append("")
-
-    courts = [
-        ("NM Courts (CourtLook)",   "https://caselookup.nmcourts.gov/caselookup/app"),
-        ("PACER Federal Courts",    "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
-        ("CourtListener (Free)",    f"https://www.courtlistener.com/?q={name_plus}&type=p"),
-        ("OpenSanctions Watchlist", f"https://www.opensanctions.org/search/?q={name_plus}"),
-        ("VINE Offender Search NM", "https://vinelink.vineapps.com/search/NM/Person"),
-    ]
-    for name, url in courts:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("GOOGLE DORKS")
-    lines.append("=" * 50)
-    lines.append("")
-
-    dorks = [
-        f'"{name_part}" "{location_part}"' if location_part else f'"{name_part}" New Mexico',
-        f'"{name_part}" address phone',
-        f'"{name_part}" site:familytreenow.com',
-        f'"{name_part}" site:truepeoplesearch.com',
-        f'"{name_part}" site:linkedin.com',
-        f'"{name_part}" arrest OR mugshot',
-        f'"{name_part}" court OR lawsuit OR case',
-        f'"{name_part}" obituary',
-        f'"{name_part}" email OR contact',
-    ]
-    for dork in dorks:
-        encoded = dork.replace(" ", "+").replace('"', '%22')
-        lines.append(f"  {dork}")
-        lines.append(f"  https://www.google.com/search?q={encoded}")
-        lines.append("")
-
-    try:
-        san_out, _, _ = run_cmd(
-            f"curl -s 'https://api.opensanctions.org/search/default?q={name_plus}&schema=Person' 2>/dev/null",
-            timeout=10
-        )
-        san_data = json.loads(san_out)
-        results = san_data.get("results", [])
-        lines.append("=" * 50)
-        lines.append("LIVE SANCTIONS / WATCHLIST CHECK")
-        lines.append("=" * 50)
-        lines.append("")
-        if results:
-            lines.append(f"⚠ WARNING: {len(results)} MATCH(ES) FOUND")
-            for r in results[:5]:
-                lines.append(f"  • {r.get('caption','?')} — Score: {r.get('score','?')}")
-        else:
-            lines.append("✓ No matches found on sanctions/watchlists")
-        lines.append("")
-    except:
-        pass
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "people", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: PUBLIC RECORDS
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_public_records(target, job_id):
-    emit(job_id, "module_start", {"module": "public_records"})
-    name_part, location_part, first, last, state, city = parse_name_location(target)
-    name_plus = name_part.replace(" ", "+")
-
-    lines = []
-    lines.append(f"TARGET: {name_part}")
-    lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("FREE PEOPLE & ADDRESS RECORDS")
-    lines.append("=" * 50)
-    lines.append("")
-
-    free_people = [
-        ("JudyRecords ★ 740M Court Cases FREE", f"https://www.judyrecords.com/search?q={name_plus}"),
-        ("FamilyTreeNow ★ BEST FREE",    f"https://www.familytreenow.com/search/people/results?first={first}&last={last}"),
-        ("TruePeopleSearch",              f"https://www.truepeoplesearch.com/results?name={name_plus}"),
-        ("FastPeopleSearch",              f"https://www.fastpeoplesearch.com/name/{name_part.replace(' ','-').lower()}"),
-        ("ThatsThem ★ 100% FREE",         f"https://thatsthem.com/name/{first}-{last}"),
-        ("IDCrawl",                       f"https://www.idcrawl.com/name/{first}-{last}"),
-        ("ClustrMaps",                    f"https://clustrmaps.com/person/{last}-{first}/"),
-        ("SearchPeopleFree",              f"https://www.searchpeoplefree.com/find/{first}-{last}"),
-        ("Nuwber",                        f"https://nuwber.com/search?firstName={first}&lastName={last}"),
-        ("PublicRecords.Online",          f"https://publicrecords.online/search/?first_name={first}&last_name={last}"),
-        ("PublicRecordsNow",              "https://www.publicrecordsnow.com/"),
-    ]
-    for name, url in free_people:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("ARREST & CRIMINAL RECORDS")
-    lines.append("=" * 50)
-    lines.append("")
-
-    criminal = [
-        ("JudyRecords ★ 740M US Cases FREE",   f"https://www.judyrecords.com/search?q={name_plus}"),
-        ("Trellis.law (State Courts Free)",     f"https://trellis.law/person/{first}-{last}"),
-        ("NM Courts (CourtLook)",               "https://caselookup.nmcourts.gov/caselookup/app"),
-        ("PACER Federal Courts",                "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
-        ("CourtListener (Free Federal)",        f"https://www.courtlistener.com/?q={name_plus}&type=p"),
-        ("VINE Offender Search NM",             "https://vinelink.vineapps.com/search/NM/Person"),
-        ("NM Corrections Inmate",               "https://www.cd.nm.gov/divisions/oid/offender-search/"),
-        ("JailBase (Arrest Bookings) ★ FREE",   f"https://www.jailbase.com/search/?name_searched={name_plus}"),
-        ("ArrestFacts",                         f"https://arrestfacts.com/search?name={name_plus}"),
-        ("BustedMugshots",                      f"https://bustedmugshots.com/search?name={name_plus}"),
-        ("MugshotSearch",                       f"https://www.mugshots.com/search?q={name_plus}"),
-        ("OpenSanctions Watchlist",             f"https://www.opensanctions.org/search/?q={name_plus}"),
-        ("Sex Offender Registry NM",            "https://www.nmsexoffender.dps.nm.gov/"),
-        ("Sex Offender Registry National",      f"https://www.nsopw.gov/Search/Results?firstName={first}&lastName={last}"),
-    ]
-    for name, url in criminal:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("VITAL RECORDS & GENEALOGY")
-    lines.append("=" * 50)
-    lines.append("")
-
-    vital = [
-        ("FamilySearch (Free)",      f"https://www.familysearch.org/search/record/results?q.givenName={first}&q.surname={last}"),
-        ("Ancestry (limited free)",  f"https://www.ancestry.com/search/?name={first}_{last}"),
-        ("FindAGrave",               f"https://www.findagrave.com/memorial/search?firstname={first}&lastname={last}"),
-        ("BillionGraves",            f"https://billiongraves.com/search/results/#firstname={first}&lastname={last}"),
-        ("Legacy.com Obituaries",    f"https://www.legacy.com/obituaries/search?keyword={name_plus}"),
-        ("NamUs Missing Persons",    "https://www.namus.gov/MissingPersons/Search#/results"),
-    ]
-    for name, url in vital:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("PROFESSIONAL LICENSES")
-    lines.append("=" * 50)
-    lines.append("")
-
-    licenses = [
-        ("NM License Lookup",        "https://www.rld.nm.gov/licensing-and-regulation/"),
-        ("NM Medical Board",         "https://www.nmmb.state.nm.us/"),
-        ("NM Bar Association",       "https://www.nmbar.org/"),
-        ("NPPES (Medical NPI)",      f"https://npiregistry.cms.hhs.gov/search?search_type=ind&first_name={first}&last_name={last}"),
-        ("BLS License Lookup",       "https://www.careeronestop.org/Toolkit/Credentials/find-licenses.aspx"),
-    ]
-    for name, url in licenses:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    try:
-        out, _, _ = run_cmd(
-            f"curl -s 'https://www.courtlistener.com/api/rest/v3/people/?name_last={last}&name_first={first}&format=json' 2>/dev/null",
-            timeout=10
-        )
-        data = json.loads(out)
-        count = data.get("count", 0)
-        if count > 0:
-            lines.append("=" * 50)
-            lines.append(f"COURTLISTENER — {count} FEDERAL RECORD(S) FOUND")
-            lines.append("=" * 50)
-            lines.append("")
-            for r in data.get("results", [])[:3]:
-                lines.append(f"  Name: {r.get('name_full','N/A')}")
-                lines.append(f"  URL:  https://www.courtlistener.com{r.get('absolute_url','')}")
-                lines.append("")
-    except:
-        pass
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "public_records", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: PROPERTY RECORDS
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_property(target, job_id):
-    emit(job_id, "module_start", {"module": "property"})
-    name_part, location_part, first, last, state, city = parse_name_location(target)
-    name_plus = name_part.replace(" ", "+")
-
-    lines = []
-    lines.append(f"TARGET: {name_part}")
-    if location_part:
-        lines.append(f"LOCATION: {location_part}")
-    lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("NEW MEXICO PROPERTY RECORDS — ALL 33 COUNTIES")
-    lines.append("=" * 50)
-    lines.append("")
-
-    nm_counties = [
-        ("Bernalillo County Assessor",   "https://assessor.bernco.gov/public.access/search/commonsearch.aspx?mode=owner"),
-        ("Sandoval County Assessor",     "https://www.sandovalcountynm.gov/assessor/property-search/"),
-        ("Santa Fe County Assessor",     "https://www.santafecountynm.gov/assessor"),
-        ("Dona Ana County Assessor",     "https://assessor.donaanacounty.org/"),
-        ("Valencia County Assessor",     "https://www.co.valencia.nm.us/assessor"),
-        ("Chavez (Roswell) Assessor",    "https://www.chaves.nm.us/departments/assessor"),
-        ("Lea County Assessor",          "https://www.leacountynm.gov/departments/assessor"),
-        ("Otero County Assessor",        "https://www.oterocountynm.gov/county-offices/assessor"),
-        ("San Juan County Assessor",     "https://www.sjcounty.net/departments/assessor"),
-        ("McKinley County Assessor",     "https://www.co.mckinley.nm.us/assessor"),
-        ("Eddy County Assessor",         "https://www.co.eddy.nm.us/137/Assessor"),
-        ("Curry County Assessor",        "https://www.currycounty.org/assessor"),
-        ("Roosevelt County Assessor",    "https://www.rooseveltcounty.com/assessor"),
-        ("Sierra County Assessor",       "https://sierracountynm.gov/assessor/"),
-        ("Grant County Assessor",        "https://www.grantcountynm.gov/assessor"),
-        ("Luna County Assessor",         "https://www.lunacountynm.us/assessor"),
-        ("Hidalgo County Assessor",      "https://www.hidalgocountynm.gov/assessor"),
-        ("Socorro County Assessor",      "https://www.socorrocounty.org/assessor"),
-        ("Catron County Assessor",       "https://www.catroncountynm.gov/assessor"),
-        ("Lincoln County Assessor",      "https://www.lincolncountynm.net/assessor"),
-        ("Torrance County Assessor",     "https://www.torrancecountynm.org/assessor"),
-        ("Guadalupe County Assessor",    "https://www.guadalupecountynm.gov/assessor"),
-        ("De Baca County Assessor",      "https://www.debacancounty.org/assessor"),
-        ("Quay County Assessor",         "https://www.quaycounty-nm.gov/assessor"),
-        ("Union County Assessor",        "https://www.unioncountynm.org/assessor"),
-        ("Colfax County Assessor",       "https://www.colfaxcounty.nm.gov/assessor"),
-        ("Mora County Assessor",         "https://www.mora.nm.us/assessor"),
-        ("Taos County Assessor",         "https://www.taoscounty.org/assessor"),
-        ("Rio Arriba County Assessor",   "https://www.rio-arriba.org/assessor"),
-        ("San Miguel County Assessor",   "https://www.co.san-miguel.nm.us/assessor"),
-        ("Harding County Assessor",      "https://www.hardingcountynm.gov/assessor"),
-        ("Cibola County Assessor",       "https://www.cibolacounty.org/assessor"),
-        ("Los Alamos County Assessor",   "https://www.losalamosnm.us/assessor"),
-        ("NETR — All NM Counties",       "https://publicrecords.netronline.com/state/NM"),
-    ]
-    for name, url in nm_counties:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("NATIONAL PROPERTY DATABASES — FREE")
-    lines.append("=" * 50)
-    lines.append("")
-
-    national = [
-        ("PropWire (Free Owner Search)",  f"https://propwire.com/search?q={name_plus}"),
-        ("County Office",                 f"https://www.countyoffice.org/property-records-search/?q={name_plus}"),
-        ("FamilyTreeNow (Address Hist)",  f"https://www.familytreenow.com/search/people/results?first={first}&last={last}"),
-        ("NETR Online (All 50 States)",   "https://publicrecords.netronline.com/"),
-        ("Realtor.com",                   f"https://www.realtor.com/realestateandhomes-search/{location_part.replace(' ','-') or 'new-mexico'}/"),
-    ]
-    for name, url in national:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("TAX & LIENS — FREE")
-    lines.append("=" * 50)
-    lines.append("")
-
-    tax = [
-        ("NM Taxation & Revenue",     "https://tap.state.nm.us/tap/_/"),
-        ("Federal Tax Liens (PACER)", "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
-        ("UCC Filings NM",            "https://portal.sos.state.nm.us/BFS/online/UCCFilings/SearchUCC"),
-        ("Bankruptcy Search",         "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
-    ]
-    for name, url in tax:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("GOOGLE DORKS FOR PROPERTY")
-    lines.append("=" * 50)
-    lines.append("")
-
-    dorks = [
-        f'"{name_part}" property owner New Mexico',
-        f'"{name_part}" real estate deed',
-        f'"{name_part}" assessor parcel',
-        f'"{name_part}" foreclosure lien',
-    ]
-    for dork in dorks:
-        encoded = dork.replace(" ", "+").replace('"', '%22')
-        lines.append(f"  {dork}")
-        lines.append(f"  https://www.google.com/search?q={encoded}")
-        lines.append("")
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "property", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: SKIP TRACE
-# All sources verified free June 2026 — paywall tools removed
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_skip_trace(target, job_id):
-    emit(job_id, "module_start", {"module": "skip_trace"})
-    name_part, location_part, first, last, state, city = parse_name_location(target)
-    name_plus = name_part.replace(" ", "+")
-    name_url = name_part.replace(" ", "-").lower()
-    city_plus = city.replace(" ", "+")
-
-    lines = []
-    lines.append(f"TARGET:   {name_part}")
-    if location_part:
-        lines.append(f"LOCATION: {location_part}")
-    lines.append("")
-    lines.append("⚠ DPPA: Law firms qualify under 18 U.S.C. § 2721(b) for litigation & process serving.")
-    lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("TIER 1 — FREE SOURCES THAT SHOW FULL RESULTS")
-    lines.append("=" * 50)
-    lines.append("")
-
-    tier1 = [
-        ("FamilyTreeNow ★ BEST FREE",     f"https://www.familytreenow.com/search/people/results?first={first}&last={last}&state={state}"),
-        ("TruePeopleSearch",               f"https://www.truepeoplesearch.com/results?name={name_plus}&citystatezip={city_plus}+{state}"),
-        ("FastPeopleSearch",               f"https://www.fastpeoplesearch.com/name/{name_url}"),
-        ("ThatsThem ★ 100% FREE",          f"https://thatsthem.com/name/{first}-{last}"),
-        ("IDCrawl (social+records)",       f"https://www.idcrawl.com/name/{first}-{last}"),
-        ("ZabaSearch (aliases+history)",   f"https://www.zabasearch.com/people/{first}+{last}/{state}/"),
-        ("411.com",                        f"https://www.411.com/name/{first}-{last}/{state}"),
-        ("USPhoneBook",                    f"https://www.usphonebook.com/{first}-{last}"),
-        ("Clustrmaps",                     f"https://clustrmaps.com/person/{last}-{first}/"),
-        ("SearchPeopleFree",               f"https://www.searchpeoplefree.com/find/{first}-{last}"),
-        ("Nuwber",                         f"https://nuwber.com/search?firstName={first}&lastName={last}&city={city_plus}&state={state}"),
-        ("PublicRecords.Online",           f"https://publicrecords.online/search/?first_name={first}&last_name={last}&state={state}"),
-    ]
-    for name, url in tier1:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("TIER 2 — VOTER REGISTRATION (GOVERNMENT-VERIFIED ADDRESS)")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("Voter registration = most reliable free address source.")
-    lines.append("")
-    lines.append("TIP: FEC political donations = free government database with name + address + employer.")
-    lines.append(f"  https://www.fec.gov/data/receipts/individual-contributions/?contributor_name={name_plus}")
-    lines.append("")
-
-    # State-specific voter portals — all 50 states + DC
-    voter_portals = {
-        "AL": ("AL Voter Status",        "https://myinfo.alabamavotes.gov/VoterView/RegistrantSearch.do"),
-        "AK": ("AK Voter Search",        "https://myvoterinformation.alaska.gov/"),
-        "AZ": ("AZ Voter Registration",  "https://my.arizona.vote/VoterView/RegistrantSearch.do"),
-        "AR": ("AR Voter Status",        "https://www.voterview.ar-nova.org/VoterView/RegistrantSearch.do"),
-        "CA": ("CA Voter Status",        "https://voterstatus.sos.ca.gov/"),
-        "CO": ("CO Voter Portal",        "https://www.sos.state.co.us/voter/pages/pub/olvr/findVoterReg.xhtml"),
-        "CT": ("CT Voter Lookup",        "https://portaldir.ct.gov/sots/LookUpRegistration.aspx"),
-        "DE": ("DE Voter Search",        "https://ivote.vote.org/voterinfo"),
-        "DC": ("DC Voter Search",        "https://www.dcboe.org/Voters/Register-To-Vote/Check-Voter-Registration-Status"),
-        "FL": ("FL Voter Lookup",        "https://registration.elections.myflorida.com/CheckVoterStatus"),
-        "GA": ("GA Voter Status",        "https://mvp.sos.ga.gov/s/"),
-        "HI": ("HI Voter Search",        "https://olvr.hawaii.gov/"),
-        "ID": ("ID Voter Lookup",        "https://elections.sos.idaho.gov/ElectionLink/RobotsHome.aspx"),
-        "IL": ("IL Voter Lookup",        "https://www.elections.il.gov/votinginformation/RegistrationLookup.aspx"),
-        "IN": ("IN Voter Search",        "https://indianavoters.in.gov/"),
-        "IA": ("IA Voter Registration",  "https://sos.iowa.gov/elections/voterreg/reglookup.aspx"),
-        "KS": ("KS Voter Status",        "https://myvoteinfo.voteks.org/VoterView/RegistrantSearch.do"),
-        "KY": ("KY Voter Search",        "https://vrsws.sos.ky.gov/VIC/"),
-        "LA": ("LA Voter Search",        "https://voterportal.sos.la.gov/"),
-        "ME": ("ME Voter Lookup",        "https://www.maine.gov/sos/cec/elec/voter-info/voterregcheck.html"),
-        "MD": ("MD Voter Search",        "https://voterservices.elections.maryland.gov/VoterSearch"),
-        "MA": ("MA Voter Lookup",        "https://www.sec.state.ma.us/ovr/"),
-        "MI": ("MI Voter Info",          "https://mvic.sos.state.mi.us/"),
-        "MN": ("MN Voter Status",        "https://mnvotes.sos.state.mn.us/VoterStatus.aspx"),
-        "MS": ("MS Voter Lookup",        "https://www.sos.ms.gov/elections-voting/voter-registration-information"),
-        "MO": ("MO Voter Search",        "https://voteroutreach.sos.mo.gov/VoterSearch/Search"),
-        "MT": ("MT Voter Lookup",        "https://app.mt.gov/voterinfo/"),
-        "NE": ("NE Voter Status",        "https://www.votercheck.necvr.ne.gov/"),
-        "NV": ("NV Voter Status",        "https://www.nvsos.gov/voters/register-to-vote"),
-        "NH": ("NH Voter Search",        "https://app.sos.nh.gov/Public/AbsenteeBallot.aspx"),
-        "NJ": ("NJ Voter Status",        "https://voter.svrs.nj.gov/registration-check"),
-        "NM": ("NM Voter Portal",        "https://voterportal.servis.sos.nm.gov/WhereToVote.aspx"),
-        "NY": ("NY Voter Status",        "https://voterlookup.elections.ny.gov/"),
-        "NC": ("NC Voter Lookup",        "https://vt.ncsbe.gov/RegLkup/"),
-        "ND": ("ND Voter Portal",        "https://vip.sos.nd.gov/PortalList.aspx"),
-        "OH": ("OH Voter Search",        "https://voterlookup.ohiosos.gov/voterlookup.aspx"),
-        "OK": ("OK Voter Search",        "https://www.ok.gov/elections/Voter_Info/Voter_Search/index.html"),
-        "OR": ("OR Voter Status",        "https://sos.oregon.gov/voting/pages/myvote.aspx"),
-        "PA": ("PA Voter Status",        "https://www.pavoterservices.pa.gov/pages/voterregistrationstatus.aspx"),
-        "RI": ("RI Voter Lookup",        "https://vote.sos.ri.gov/"),
-        "SC": ("SC Voter Status",        "https://www.scvotes.gov/vote/voterregistrationstatus"),
-        "SD": ("SD Voter Lookup",        "https://vip.sdsos.gov/viplogin.aspx"),
-        "TN": ("TN Voter Lookup",        "https://tnmap.tn.gov/voterlookup/"),
-        "TX": ("TX Voter Search",        "https://teamrv-mvp.sos.texas.gov/MVP/mvp.do"),
-        "UT": ("UT Voter Status",        "https://votesearch.utah.gov/voter-search/search/search-by-name/voter-info"),
-        "VT": ("VT Voter Lookup",        "https://mvp.sec.state.vt.us/"),
-        "VA": ("VA Voter Lookup",        "https://vote.elections.virginia.gov/VoterInformation"),
-        "WA": ("WA Voter Status",        "https://voter.votewa.gov/WhereToVote.aspx"),
-        "WV": ("WV Voter Search",        "https://ovr.sos.wv.gov/Register/Landing"),
-        "WI": ("WI Voter Lookup",        "https://myvote.wi.gov/en-us/"),
-        "WY": ("WY Voter Search",        "https://sos.wyo.gov/elections/"),
-    }
-
-    # Show state-specific portal if known, otherwise generic
-    state_portal = voter_portals.get(state.upper() if state else "NM")
-    voter = [
-        ("VoterRecords.com ★ ALL STATES",  f"https://voterrecords.com/voters/{name_url}/1"),
-    ]
-    if state_portal:
-        voter.append((f"{state_portal[0]} ★ STATE PORTAL", state_portal[1]))
-    else:
-        voter.append(("NVRA State Voter Portal Finder", "https://www.usa.gov/voter-registration-card"))
-    voter.append(("Google Voter Registration Search", f"https://www.google.com/search?q=%22{name_plus}%22+%22voter+registration%22+%22{location_part}%22"))
-
-    for name, url in voter:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("TIER 3 — RELATIVES & ASSOCIATES")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("Find relatives to locate subject indirectly.")
-    lines.append("")
-
-    relatives = [
-        ("FamilyTreeNow Relatives",       f"https://www.familytreenow.com/search/people/results?first={first}&last={last}"),
-        ("TruePeopleSearch Relatives",    f"https://www.truepeoplesearch.com/results?name={name_plus}"),
-        ("ClustrMaps (Address Cluster)",  f"https://clustrmaps.com/person/{last}-{first}/"),
-        ("ThatsThem Associates",          f"https://thatsthem.com/name/{first}-{last}"),
-        ("IDCrawl Social Connections",    f"https://www.idcrawl.com/name/{first}-{last}"),
-    ]
-    for name, url in relatives:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("TIER 4 — ADDRESS VERIFICATION (FREE)")
-    lines.append("=" * 50)
-    lines.append("")
-
-    verify = [
-        ("USPS Address Lookup",           "https://tools.usps.com/zip-code-lookup.htm?byaddress"),
-        ("Melissa Address Check",         "https://www.melissa.com/v2/lookups/addresscheck/"),
-        ("Google Maps Verify",            f"https://www.google.com/maps/search/{name_plus}+{city_plus}+{state}"),
-        ("Bernalillo County Assessor",    "https://assessor.bernco.gov/public.access/search/commonsearch.aspx?mode=owner"),
-    ]
-    for name, url in verify:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("TIER 5 — WORKPLACE & EMPLOYMENT (FREE)")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("Employer address = alternative service of process location.")
-    lines.append("")
-
-    employment = [
-        ("LinkedIn People Search",         f"https://www.linkedin.com/search/results/people/?keywords={name_plus}&origin=GLOBAL_SEARCH_HEADER"),
-        ("Google LinkedIn + State",        f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22{state}%22"),
-        ("Google Employer Dork",           f"https://www.google.com/search?q=%22{name_plus}%22+employer+OR+works+OR+%22employed+at%22"),
-        ("FEC Political Donations ★",      f"https://www.fec.gov/data/receipts/individual-contributions/?contributor_name={name_plus}"),
-        ("OpenSecrets Donor Search ★",     f"https://www.opensecrets.org/donor-lookup/results?name={name_plus}"),
-        ("NM Contractor License",          "https://www.rld.nm.gov/licensing-and-regulation/"),
-        ("NPPES Medical NPI",              f"https://npiregistry.cms.hhs.gov/search?search_type=ind&first_name={first}&last_name={last}"),
-        ("NM Bar (if attorney)",           "https://www.nmbar.org/"),
-        ("NM SOS Business Search",         f"https://portal.sos.state.nm.us/BFS/online/CorporationFormation/SearchBusinesses?SearchCriteria={name_plus}"),
-    ]
-    for name, url in employment:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    try:
-        san_out, _, _ = run_cmd(
-            f"curl -s 'https://api.opensanctions.org/search/default?q={name_plus}&schema=Person' 2>/dev/null",
-            timeout=10
-        )
-        san_data = json.loads(san_out)
-        results = san_data.get("results", [])
-        lines.append("=" * 50)
-        lines.append("LIVE SANCTIONS / WATCHLIST CHECK")
-        lines.append("=" * 50)
-        lines.append("")
-        if results:
-            lines.append(f"⚠ WARNING: {len(results)} MATCH(ES) FOUND")
-            for r in results[:5]:
-                lines.append(f"  • {r.get('caption','?')} — Score: {r.get('score','?')}")
-        else:
-            lines.append("✓ No matches found on sanctions/watchlists")
-        lines.append("")
-    except:
-        pass
-
-    lines.append("=" * 50)
-    lines.append("SKIP TRACE GOOGLE DORKS")
-    lines.append("=" * 50)
-    lines.append("")
-
-    dorks = [
-        f'"{name_part}" "{location_part}" address' if location_part else f'"{name_part}" address New Mexico',
-        f'"{name_part}" "{state}" current address' if state else f'"{name_part}" current address New Mexico',
-        f'"{name_part}" voter registration "New Mexico"',
-        f'"{name_part}" "{state}" phone number' if state else f'"{name_part}" phone number',
-        f'"{name_part}" employer OR works OR employed "{state}"' if state else f'"{name_part}" employer OR works OR employed',
-        f'"{name_part}" site:linkedin.com "{state}"' if state else f'"{name_part}" site:linkedin.com',
-        f'"{name_part}" obituary OR memorial',
-        f'"{name_part}" arrest OR booking "{state}"' if state else f'"{name_part}" arrest OR booking',
-    ]
-    for dork in dorks:
-        encoded = dork.replace(" ", "+").replace('"', '%22')
-        lines.append(f"  {dork}")
-        lines.append(f"  https://www.google.com/search?q={encoded}")
-        lines.append("")
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "skip_trace", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: SOCIAL MEDIA SEARCH
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_social_media(target, job_id):
-    emit(job_id, "module_start", {"module": "social_media"})
-
-    if "," in target:
-        name_quoted = target.split(",")[0].strip()
-    else:
-        name_quoted = target.strip()
-    name_plus = name_quoted.replace(" ", "+")
-    parts = name_quoted.split()
-    first = parts[0] if parts else target
-    last = parts[-1] if len(parts) > 1 else ""
-
-    lines = []
-    lines.append(f"TARGET: {name_quoted}")
-    lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("FACEBOOK INTELLIGENCE")
-    lines.append("=" * 50)
-    lines.append("")
-    fb = [
-        ("People Search",    f"https://www.facebook.com/search/people/?q={name_plus}"),
-        ("Posts mentioning", f"https://www.facebook.com/search/posts/?q={name_plus}"),
-        ("Photos tagged",    f"https://www.facebook.com/search/photos/?q={name_plus}"),
-        ("Check-ins",        f"https://www.facebook.com/search/places/?q={name_plus}"),
-        ("Groups",           f"https://www.facebook.com/search/groups/?q={name_plus}"),
-        ("Events",           f"https://www.facebook.com/search/events/?q={name_plus}"),
-        ("Marketplace",      f"https://www.facebook.com/marketplace/search/?query={name_plus}"),
-        ("Sowsearch (Deep)", f"https://sowsearch.info/search?q={name_plus}"),
-        ("Google FB Search", f"https://www.google.com/search?q=site:facebook.com+%22{name_plus}%22"),
-    ]
-    for label, url in fb:
-        lines.append(f"[{label}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("INSTAGRAM INTELLIGENCE")
-    lines.append("=" * 50)
-    lines.append("")
-    ig = [
-        ("Profile Search",   f"https://www.instagram.com/explore/search/keyword/?q={name_plus}"),
-        ("Hashtag Search",   f"https://www.instagram.com/explore/tags/{name_plus.replace('+','')}/"),
-        ("Google IG Search", f"https://www.google.com/search?q=site:instagram.com+%22{name_plus}%22"),
-    ]
-    for label, url in ig:
-        lines.append(f"[{label}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("TWITTER/X INTELLIGENCE")
-    lines.append("=" * 50)
-    lines.append("")
-    tw = [
-        ("People Search",  f"https://twitter.com/search?q=%22{name_plus}%22&f=user"),
-        ("Recent Posts",   f"https://twitter.com/search?q=%22{name_plus}%22&f=live"),
-        ("Top Posts",      f"https://twitter.com/search?q=%22{name_plus}%22&f=top"),
-        ("Near ABQ",       f"https://twitter.com/search?q=%22{name_plus}%22+near%3A%22Albuquerque%22"),
-    ]
-    for label, url in tw:
-        lines.append(f"[{label}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("LINKEDIN INTELLIGENCE")
-    lines.append("=" * 50)
-    lines.append("")
-    li = [
-        ("People Search",    f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
-        ("Posts Search",     f"https://www.linkedin.com/search/results/content/?keywords={name_plus}"),
-        ("Google LI Search", f"https://www.google.com/search?q=site:linkedin.com/in+%22{name_plus}%22"),
-    ]
-    for label, url in li:
-        lines.append(f"[{label}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("TIKTOK / YOUTUBE / REDDIT")
-    lines.append("=" * 50)
-    lines.append("")
-    other = [
-        ("TikTok User",    f"https://www.tiktok.com/search/user?q={name_plus}"),
-        ("YouTube Channel",f"https://www.youtube.com/results?search_query={name_plus}&sp=EgIQAg%253D%253D"),
-        ("Reddit User",    f"https://www.reddit.com/search/?q=%22{name_quoted}%22&type=user"),
-        ("Reddit Posts",   f"https://www.reddit.com/search/?q=%22{name_quoted}%22"),
-    ]
-    for label, url in other:
-        lines.append(f"[{label}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("OTHER PLATFORMS")
-    lines.append("=" * 50)
-    lines.append("")
-    misc = [
-        ("Snapchat",    f"https://www.snapchat.com/add/{first.lower()}{last.lower()}"),
-        ("Pinterest",   f"https://www.pinterest.com/search/people/?q={name_plus}"),
-        ("Nextdoor",    "https://nextdoor.com/find-neighbors/"),
-        ("Meetup",      f"https://www.meetup.com/find/?keywords={name_plus}"),
-        ("Venmo",       f"https://venmo.com/{first.lower()}{last.lower()}"),
-        ("Cash App",    f"https://cash.app/${first.lower()}{last.lower()}"),
-    ]
-    for label, url in misc:
-        lines.append(f"[{label}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    try:
-        ddg_out, _, _ = run_cmd(
-            f"curl -s 'https://api.duckduckgo.com/?q={name_plus}+social+media&format=json&no_html=1' 2>/dev/null",
-            timeout=10
-        )
-        ddg_data = json.loads(ddg_out)
-        if ddg_data.get("Abstract"):
-            lines.append("=" * 50)
-            lines.append("PUBLIC PROFILE SUMMARY")
-            lines.append("=" * 50)
-            lines.append("")
-            lines.append(ddg_data["Abstract"])
-            if ddg_data.get("AbstractURL"):
-                lines.append(f"Source: {ddg_data['AbstractURL']}")
-            lines.append("")
-    except:
-        pass
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "social_media", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: SOCIAL FOOTPRINT
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_social_footprint(target, job_id):
-    emit(job_id, "module_start", {"module": "social_footprint"})
-    name_part, location_part, first, last, state, city = parse_name_location(target)
-    name_plus = name_part.replace(" ", "+")
-    loc_plus = location_part.replace(" ", "+")
-
-    username_variants = []
-    if first and last:
-        username_variants = [
-            f"{first.lower()}{last.lower()}",
-            f"{first.lower()}.{last.lower()}",
-            f"{first.lower()}_{last.lower()}",
-            f"{first.lower()}{last.lower()[:3]}",
-            f"{first.lower()[0]}{last.lower()}",
-        ]
-
-    lines = []
-    lines.append(f"TARGET:   {name_part}")
-    if location_part:
-        lines.append(f"LOCATION: {location_part}")
-    lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("DIRECT PROFILE ATTEMPTS — USERNAME VARIATIONS")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("Click each to check if profile exists.")
-    lines.append("")
-
-    if username_variants:
-        for uname in username_variants[:4]:
-            lines.append(f"Username: {uname}")
-            direct = [
-                ("Facebook",   f"https://www.facebook.com/{uname}"),
-                ("Instagram",  f"https://www.instagram.com/{uname}/"),
-                ("Twitter/X",  f"https://twitter.com/{uname}"),
-                ("TikTok",     f"https://www.tiktok.com/@{uname}"),
-                ("LinkedIn",   f"https://www.linkedin.com/in/{uname}"),
-            ]
-            for platform, url in direct:
-                lines.append(f"  [{platform}]  {url}")
-            lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("REAL-TIME SOCIAL SEARCH — FREE TOOLS")
-    lines.append("=" * 50)
-    lines.append("")
-    realtime = [
-        ("Social Searcher ★ FREE",        f"https://www.social-searcher.com/social-buzz/?q={name_plus}"),
-        ("Social Catfish (reverse ID)",   f"https://socialcatfish.com/search/?q={name_plus}"),
-        ("PeekYou (social+arrests)",      f"https://www.peekyou.com/{first.lower()}_{last.lower()}"),
-        ("Sowsearch (FB Deep)",           f"https://sowsearch.info/search?q={name_plus}"),
-        ("Boardreader (forums)",          f"https://boardreader.com/s/{name_plus}.html"),
-        ("WhatsMyName (usernames)",       f"https://whatsmyname.app/?q={first.lower()}{last.lower()}"),
-        ("IDCrawl (social+records)",      f"https://www.idcrawl.com/name/{first.lower()}-{last.lower()}"),
-        ("Epieos (email→social)",         f"https://epieos.com/?q={name_plus}&t=name"),
-    ]
-    for name, url in realtime:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("LINKEDIN DEEP SEARCH")
-    lines.append("=" * 50)
-    lines.append("")
-    li = [
-        ("LinkedIn People Search",   f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
-        ("LinkedIn + NM filter",     f"https://www.linkedin.com/search/results/people/?keywords={name_plus}&geoUrn=%5B%22102095887%22%5D"),
-        ("Google LI Profile",        f"https://www.google.com/search?q=site:linkedin.com/in+%22{name_plus}%22"),
-        ("Google LI + Location",     f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22New+Mexico%22"),
-    ]
-    for name, url in li:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("REVERSE IMAGE & FACE SEARCH — FREE")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("Upload subject photo to find additional profiles.")
-    lines.append("")
-    face = [
-        ("Yandex ★ BEST for faces",  "https://yandex.com/images/"),
-        ("PimEyes (face search)",     "https://pimeyes.com/en"),
-        ("Lenso.ai (face search)",    "https://lenso.ai/en"),
-        ("Google Reverse Image",      "https://images.google.com/"),
-        ("TinEye",                    "https://tineye.com/"),
-        ("Bing Visual Search",        "https://www.bing.com/images/search?view=detailv2&iss=sbi"),
-    ]
-    for name, url in face:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("SOCIAL FOOTPRINT DORKS")
-    lines.append("=" * 50)
-    lines.append("")
-    dorks = [
-        f'"{name_part}" site:facebook.com',
-        f'"{name_part}" site:instagram.com',
-        f'"{name_part}" site:twitter.com',
-        f'"{name_part}" site:linkedin.com',
-        f'"{name_part}" "{location_part}" social media',
-        f'"{name_part}" @gmail.com OR @yahoo.com OR @hotmail.com',
-    ]
-    for dork in dorks:
-        encoded = dork.replace(" ", "+").replace('"', '%22')
-        lines.append(f"  {dork}")
-        lines.append(f"  https://www.google.com/search?q={encoded}")
-        lines.append("")
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "social_footprint", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: HIT & RUN / VEHICLE INVESTIGATION
-# PLATE and LOCATION types only — not PERSON
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_hit_and_run(target, job_id):
-    emit(job_id, "module_start", {"module": "hit_and_run"})
-
-    target_clean = target.upper().strip()
-    parts = target_clean.split()
-    NM_STATES = ["NM","TX","AZ","CO","CA","FL","NY","IL","OH","GA","NC","MI","PA","WA","OR"]
-
-    if len(parts) >= 2 and parts[-1] in NM_STATES:
-        plate = parts[0].replace("-", "").replace(",", "").strip()
-        state = parts[-1]
-    elif len(parts) == 1 and 3 <= len(target_clean) <= 8 and target_clean.replace("-","").replace(",","").isalnum():
-        plate = target_clean.replace("-", "").replace(",", "").strip()
-        state = "NM"
-    else:
-        plate = target_clean.replace(" ", "").replace("-", "").replace(",", "").strip()
-        state = "NM"
-
-    is_vin = len(plate) == 17
-
-    lines = []
-    lines.append(f"TARGET:  {target}")
-    lines.append(f"PARSED:  {'VIN' if is_vin else 'Plate'}={plate}  State={state}")
-    lines.append("")
-    lines.append("⚠ NOTE: Free tools return make/model/theft data only.")
-    lines.append("  Owner name/address requires state MVD DPPA request.")
-    lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("STEP 1 — IDENTIFY THE VEHICLE FROM PHOTO/VIDEO (FREE)")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("If you have a photo or partial image of the vehicle:")
-    lines.append("")
-    image_tools = [
-        ("Carnet.ai — ID make/model from photo ★",   "https://carnet.ai/"),
-        ("Remini — clean blurry/dark images",         "https://app.remini.ai/"),
-        ("LetsEnhance — upscale low-res image",       "https://letsenhance.io/"),
-        ("Google Reverse Image Search",               "https://images.google.com/"),
-        ("Yandex Reverse Image (better for vehicles)","https://yandex.com/images/"),
-        ("TinEye — find where image appears online",  "https://tineye.com/"),
-    ]
-    for name, url in image_tools:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("STEP 2 — VIN & PLATE LOOKUP (FREE)")
-    lines.append("=" * 50)
-    lines.append("")
-
-    if is_vin:
-        vin_links = [
-            ("NHTSA VIN Decoder ★ FREE — specs/recalls",    f"https://vpic.nhtsa.dot.gov/decoder/Car/{plate}/0"),
-            ("Driving-Tests.org VIN — 100% free no signup", f"https://driving-tests.org/vin-decoder/?vin={plate}"),
-            ("EpicVIN — free basic decode",                 f"https://epicvin.com/vin-decoder?vin={plate}"),
-            ("VinFreeCheck — free specs",                   f"https://www.vinfreecheck.com/?vin={plate}"),
-            ("NICB VINCheck ★ FREE — stolen/salvage",      "https://www.nicb.org/vincheck"),
-            ("NHTSA Recalls by VIN",                        f"https://www.nhtsa.gov/vehicle/{plate}///complaints"),
-            ("NMVTIS Title Check",                          "https://www.vehiclehistory.gov/"),
-        ]
-    else:
-        vin_links = [
-            ("NHTSA VIN Decoder ★ FREE",                    "https://vpic.nhtsa.dot.gov/decoder/"),
-            ("Driving-Tests.org VIN — 100% free no signup", "https://driving-tests.org/vin-decoder/"),
-            ("EpicVIN Plate Lookup — free basic",           f"https://epicvin.com/license-plate-lookup?plate={plate}&state={state}"),
-            ("Faxvin Plate Search — free decode",           f"https://www.faxvin.com/license-plate-lookup/{state.lower()}/{plate}"),
-            ("VehicleHistory.com Plate",                    f"https://www.vehiclehistory.com/license-plate-search?plate={plate}&state={state}"),
-            ("NICB VINCheck ★ FREE — stolen/salvage",      "https://www.nicb.org/vincheck"),
-            ("NMVTIS Title Check",                          "https://www.vehiclehistory.gov/"),
-            ("NHTSA Recalls",                               "https://www.nhtsa.gov/recalls"),
-        ]
-    for name, url in vin_links:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("STEP 3 — SOCIAL MEDIA PLATE SEARCH (FREE)")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("People post crash photos, road rage clips, and dashcam footage.")
-    lines.append("")
-    social_plate = [
-        ("Facebook Posts",                f"https://www.facebook.com/search/posts/?q={plate}"),
-        ("Instagram",                     f"https://www.instagram.com/explore/search/keyword/?q={plate}"),
-        ("Twitter/X Live",                f"https://twitter.com/search?q=%22{plate}%22&f=live"),
-        ("Reddit",                        f"https://www.reddit.com/search/?q=%22{plate}%22"),
-        ("YouTube",                       f"https://www.youtube.com/results?search_query=%22{plate}%22"),
-        ("Google Images Plate",           f"https://www.google.com/search?tbm=isch&q=%22{plate}%22+New+Mexico"),
-        ("Nextdoor — local witness posts","https://nextdoor.com/"),
-    ]
-    for name, url in social_plate:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("STEP 4 — WITNESS & DASHCAM SOURCING (FREE)")
-    lines.append("=" * 50)
-    lines.append("")
-    witness = [
-        ("r/NewMexico — local hit & run reports",     "https://www.reddit.com/r/newmexico/search/?q=hit+and+run&sort=new"),
-        ("r/Albuquerque",                             "https://www.reddit.com/r/Albuquerque/search/?q=hit+and+run&sort=new"),
-        ("Google News — ABQ hit and run",             f"https://www.google.com/search?q=%22hit+and+run%22+%22albuquerque%22&tbm=nws"),
-        ("ABQ Journal Search",                        f"https://www.abqjournal.com/?s=hit+run"),
-        ("Waze Incident Map",                         "https://www.waze.com/livemap"),
-    ]
-    for name, url in witness:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("STEP 5 — OWNER IDENTIFICATION")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("Once make/model/plate confirmed:")
-    lines.append("  → NM MVD DPPA request for registered owner (staff handles)")
-    lines.append("  → Run owner name through SKIP TRACE module")
-    lines.append("  → Run owner name through PEOPLE SEARCH module")
-    lines.append("  → NM Courts prior incidents:")
-    lines.append("    https://caselookup.nmcourts.gov/caselookup/app")
-    lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("GOOGLE DORKS")
-    lines.append("=" * 50)
-    lines.append("")
-    dorks = [
-        f'"{plate}" New Mexico accident OR crash OR "hit and run"',
-        f'"{plate}" NM plate dashcam OR witness OR footage',
-        f'"{plate}" site:facebook.com',
-        f'"{plate}" site:reddit.com',
-        f'"{target}" "hit and run" Albuquerque OR "New Mexico"',
-        f'"{target}" accident OR crash "New Mexico"',
-    ]
-    for dork in dorks:
-        encoded = dork.replace(" ", "+").replace('"', '%22')
-        lines.append(f"  {dork}")
-        lines.append(f"  https://www.google.com/search?q={encoded}")
-        lines.append("")
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "hit_and_run", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: PHOTO FORENSICS
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_photo_forensics(target, job_id):
-    emit(job_id, "module_start", {"module": "photo_forensics"})
-    from urllib.parse import quote
-    lines = []
-    lines.append(f"TARGET: {target}")
-    lines.append("")
-    is_url = target.startswith("http")
-    target_encoded = quote(target, safe='') if is_url else target
-
-    lines.append("=" * 50)
-    lines.append("REVERSE IMAGE SEARCH — FREE")
-    lines.append("=" * 50)
-    lines.append("")
-
-    if is_url:
-        rev = [
-            ("Google Reverse Image",    f"https://images.google.com/searchbyimage?image_url={target_encoded}"),
-            ("TinEye",                  f"https://tineye.com/search?url={target_encoded}"),
-            ("Yandex (Best for faces)", f"https://yandex.com/images/search?url={target_encoded}&rpt=imageview"),
-            ("Bing Visual Search",      f"https://www.bing.com/images/search?view=detailv2&iss=sbi&q=imgurl:{target_encoded}"),
-            ("Lenso.ai (Face Search)",  f"https://lenso.ai/en?url={target_encoded}"),
-            ("PimEyes (Face Search)",   "https://pimeyes.com/en"),
-        ]
-    else:
-        rev = [
-            ("Google Reverse Image",    "https://images.google.com/"),
-            ("TinEye",                  "https://tineye.com/"),
-            ("Yandex (Best for faces)", "https://yandex.com/images/"),
-            ("Bing Visual Search",      "https://www.bing.com/images/search?view=detailv2&iss=sbi"),
-            ("Lenso.ai (Face Search)",  "https://lenso.ai/en"),
-            ("PimEyes (Face Search)",   "https://pimeyes.com/en"),
-        ]
-    for name, url in rev:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("PHOTO METADATA EXTRACTION — FREE")
-    lines.append("=" * 50)
-    lines.append("")
-    meta = [
-        ("Jeffrey EXIF Viewer",            "http://exif.regex.info/exif.cgi"),
-        ("ExifTool Online",                "https://exiftool.org/"),
-        ("Metadata2Go",                    "https://www.metadata2go.com/"),
-        ("FotoForensics (manipulation)",   "https://fotoforensics.com/"),
-        ("Forensically (clone detection)", "https://29a.ch/photo-forensics/"),
-        ("ImageEdited (edit detect)",      "https://imageedited.com/"),
-    ]
-    for name, url in meta:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("VIDEO FORENSICS — FREE")
-    lines.append("=" * 50)
-    lines.append("")
-    video = [
-        ("InVID WeVerify",      "https://www.invid-project.eu/tools-and-services/invid-verification-plugin/"),
-        ("YouTube DataViewer",  "https://citizenevidence.amnestyusa.org/"),
-        ("TrueMedia.org",       "https://www.truemedia.org/"),
-    ]
-    for name, url in video:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("GEOLOCATION FROM PHOTOS — FREE")
-    lines.append("=" * 50)
-    lines.append("")
-    geo = [
-        ("SunCalc (shadow/time analysis)", "https://www.suncalc.org/"),
-        ("Google Maps Street View",        "https://www.google.com/maps"),
-        ("Bing Maps Bird's Eye",           "https://www.bing.com/maps"),
-        ("Google Earth Web",               "https://earth.google.com/web/"),
-        ("Overpass Turbo (OpenStreetMap)", "https://overpass-turbo.eu/"),
-        ("GeoHack",                        "https://geohack.toolforge.org/"),
-    ]
-    for name, url in geo:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    if is_url:
-        lines.append("=" * 50)
-        lines.append("AUTOMATED METADATA EXTRACTION")
-        lines.append("=" * 50)
-        lines.append("")
-        try:
-            out, _, _ = run_cmd(
-                f"curl -s -L -o /tmp/fivet_img.jpg \"{target}\" 2>/dev/null && exiftool /tmp/fivet_img.jpg 2>/dev/null | head -40",
-                timeout=15
-            )
-            if out:
-                lines.append(out)
-            else:
-                lines.append("No metadata extracted — image may have metadata stripped.")
-        except:
-            lines.append("Could not fetch image for automated extraction.")
-        lines.append("")
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "photo_forensics", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: GEOLOCATION
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_geolocation(target, job_id):
-    emit(job_id, "module_start", {"module": "geolocation"})
-    lines = []
-    lines.append(f"TARGET: {target}")
-    lines.append("")
-    loc_plus = target.replace(" ", "+")
-
-    lines.append("=" * 50)
-    lines.append("MAP INTELLIGENCE — FREE")
-    lines.append("=" * 50)
-    lines.append("")
-    maps = [
-        ("Google Maps",        f"https://www.google.com/maps/search/{loc_plus}"),
-        ("Google Street View", f"https://www.google.com/maps?q={loc_plus}&layer=c"),
-        ("Google Earth Web",   f"https://earth.google.com/web/search/{loc_plus}"),
-        ("Bing Maps",          f"https://www.bing.com/maps?q={loc_plus}"),
-        ("OpenStreetMap",      f"https://www.openstreetmap.org/search?query={loc_plus}"),
-        ("Apple Maps",         f"https://maps.apple.com/?q={loc_plus}"),
-    ]
-    for name, url in maps:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("SATELLITE & HISTORICAL IMAGERY — FREE")
-    lines.append("=" * 50)
-    lines.append("")
-    satellite = [
-        ("Google Earth Historical",  f"https://earth.google.com/web/search/{loc_plus}"),
-        ("Sentinel Hub (Satellite)", "https://www.sentinel-hub.com/explore/eobrowser/"),
-        ("USGS EarthExplorer",       "https://earthexplorer.usgs.gov/"),
-        ("NASA Worldview",           "https://worldview.earthdata.nasa.gov/"),
-        ("Bing Birds Eye",           f"https://www.bing.com/maps?q={loc_plus}&style=b"),
-    ]
-    for name, url in satellite:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("SPECIALIZED LOCATION TOOLS — FREE")
-    lines.append("=" * 50)
-    lines.append("")
-    special = [
-        ("Wigle.net (WiFi Networks)", "https://wigle.net/search#fullSearch"),
-        ("Overpass Turbo",            "https://overpass-turbo.eu/"),
-        ("SunCalc (Sun Position)",    "https://www.suncalc.org/"),
-        ("CalcMaps (Distance/Area)",  "https://www.calcmaps.com/map-distance/"),
-    ]
-    for name, url in special:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    if re.match(r'^\d+\.\d+\.\d+\.\d+$', target):
-        try:
-            out, _, _ = run_cmd(f"curl -s 'https://ipapi.co/{target}/json/' 2>/dev/null")
-            data = json.loads(out)
-            lines.append("=" * 50)
-            lines.append("IP GEOLOCATION (LIVE)")
-            lines.append("=" * 50)
-            lines.append("")
-            lines.append(f"IP:       {data.get('ip', target)}")
-            lines.append(f"City:     {data.get('city', 'N/A')}")
-            lines.append(f"Region:   {data.get('region', 'N/A')}")
-            lines.append(f"Country:  {data.get('country_name', 'N/A')}")
-            lines.append(f"Org/ISP:  {data.get('org', 'N/A')}")
-            lines.append(f"Lat/Lon:  {data.get('latitude', 'N/A')}, {data.get('longitude', 'N/A')}")
-            lat = data.get('latitude','')
-            lon = data.get('longitude','')
-            if lat and lon:
-                lines.append(f"Maps:     https://www.google.com/maps?q={lat},{lon}")
-            lines.append("")
-        except:
-            pass
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "geolocation", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: USERNAME SEARCH
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_username_search(target, job_id):
-    emit(job_id, "module_start", {"module": "username_search"})
-    lines = []
-    lines.append(f"TARGET USERNAME: {target}")
-    lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("AUTOMATED SCANNER")
-    lines.append("=" * 50)
-    lines.append("")
-    out, _, _ = run_cmd(f"python3 -m sherlock {target} --timeout 8 2>/dev/null", timeout=120)
-    if out and "not found" not in out.lower():
-        lines.append("[SHERLOCK — 300+ PLATFORMS]")
-        lines.append(out)
-        lines.append("")
-    out2, _, rc2 = run_cmd(f"python3 -m maigret {target} --top-sites 50 2>/dev/null", timeout=120)
-    if out2 and rc2 == 0:
-        lines.append("[MAIGRET — FULL DOSSIER]")
-        lines.append(out2[:2000])
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("MANUAL USERNAME SEARCH — FREE")
-    lines.append("=" * 50)
-    lines.append("")
-    sites = [
-        ("WhatsMyName ★ FREE",   f"https://whatsmyname.app/?q={target}"),
-        ("IDCrawl ★ FREE",       f"https://www.idcrawl.com/{target}"),
-        ("UserSearch.org",       f"https://usersearch.org/results_normal.php?q={target}"),
-        ("Namechk",              f"https://namechk.com/{target}"),
-        ("Instant Username",     f"https://instantusername.com/#/{target}"),
-        ("Sherlock Web",         "https://sherlock-project.github.io/"),
-    ]
-    for name, url in sites:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("PLATFORM DIRECT CHECKS")
-    lines.append("=" * 50)
-    lines.append("")
-    platforms = [
-        ("Twitter/X",      f"https://twitter.com/{target}"),
-        ("Instagram",      f"https://www.instagram.com/{target}/"),
-        ("TikTok",         f"https://www.tiktok.com/@{target}"),
-        ("YouTube",        f"https://www.youtube.com/@{target}"),
-        ("Reddit",         f"https://www.reddit.com/user/{target}"),
-        ("GitHub",         f"https://github.com/{target}"),
-        ("LinkedIn",       f"https://www.linkedin.com/in/{target}"),
-        ("Pinterest",      f"https://www.pinterest.com/{target}/"),
-        ("Twitch",         f"https://www.twitch.tv/{target}"),
-        ("Snapchat",       f"https://www.snapchat.com/add/{target}"),
-        ("Venmo",          f"https://venmo.com/{target}"),
-        ("Cash App",       f"https://cash.app/${target}"),
-        ("Telegram",       f"https://t.me/{target}"),
-        ("Patreon",        f"https://www.patreon.com/{target}"),
-        ("Linktree",       f"https://linktr.ee/{target}"),
-    ]
-    for name, url in platforms:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "username_search", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: PHONE LOOKUP
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_phone(target, job_id):
-    emit(job_id, "module_start", {"module": "phone"})
-    clean = target.replace("-","").replace("(","").replace(")","").replace(" ","").replace("+1","").strip()
-    formatted = f"({clean[:3]}) {clean[3:6]}-{clean[6:]}" if len(clean) == 10 else target
-    phone_plus1 = f"+1{clean}" if len(clean) == 10 else target
-
-    lines = []
-    lines.append(f"TARGET:    {formatted}")
-    lines.append(f"CLEANED:   {clean}")
-    lines.append("")
-
-    ipqs_key = os.environ.get("IPQS_API_KEY", "")
-    nv_key = os.environ.get("NUMVERIFY_API_KEY", "")
-
-    if ipqs_key:
-        try:
-            ipqs_out, _, _ = run_cmd(
-                f"curl -s 'https://www.ipqualityscore.com/api/json/phone/{ipqs_key}/{clean}' 2>/dev/null",
-                timeout=10
-            )
-            ipqs_data = json.loads(ipqs_out)
-            if ipqs_data.get("success"):
-                lines.append("=== CARRIER INTELLIGENCE (IPQS) ===")
-                lines.append(f"Valid:        {ipqs_data.get('valid', 'N/A')}")
-                lines.append(f"Line Type:    {ipqs_data.get('line_type', 'N/A')}")
-                lines.append(f"Carrier:      {ipqs_data.get('carrier', 'N/A')}")
-                lines.append(f"Country:      {ipqs_data.get('country', 'N/A')}")
-                lines.append(f"Risky:        {ipqs_data.get('risky', False)}")
-                lines.append(f"Spam Score:   {ipqs_data.get('fraud_score', 'N/A')}")
-                lines.append(f"VoIP:         {ipqs_data.get('VOIP', False)}")
-                lines.append(f"Prepaid:      {ipqs_data.get('prepaid', False)}")
-                lines.append("")
-        except:
-            pass
-
-    if nv_key:
-        try:
-            nv_out, _, _ = run_cmd(
-                f"curl -s 'http://apilayer.net/api/validate?access_key={nv_key}&number={clean}&country_code=US&format=1' 2>/dev/null",
-                timeout=10
-            )
-            nv_data = json.loads(nv_out)
-            if nv_data.get("valid"):
-                lines.append("=== CARRIER INTELLIGENCE (NUMVERIFY) ===")
-                lines.append(f"Line Type:    {nv_data.get('line_type', 'N/A')}")
-                lines.append(f"Carrier:      {nv_data.get('carrier', 'N/A')}")
-                lines.append(f"Location:     {nv_data.get('location', 'N/A')}")
-                lines.append("")
-        except:
-            pass
-
-    if not ipqs_key and not nv_key:
-        lines.append("Add IPQS_API_KEY or NUMVERIFY_API_KEY to Render env vars for live carrier data.")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("FREE REVERSE LOOKUP SITES")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("⚠ NOTE: SpyDialer calls the number silently to retrieve voicemail.")
-    lines.append("  Target may see a missed call. Use intentionally.")
-    lines.append("")
-    sites = [
-        ("SPYDIALER ★ FREE — name via voicemail",   f"https://www.spydialer.com/default.aspx?phone={clean}"),
-        ("NUMLOOKUP ★ FREE — owner name, carrier",   f"https://www.numlookup.com/?number={clean}"),
-        ("ANYWHO (free directory)",                 f"https://www.anywho.com/reverse-lookup/{clean}"),
-        ("TRUEPEOPLESEARCH ★ FREE",                  f"https://www.truepeoplesearch.com/results?phoneno={clean}"),
-        ("THATSTHEM ★ FREE",                         f"https://thatsthem.com/phone/{clean}"),
-        ("FASTPEOPLESEARCH",                          f"https://www.fastpeoplesearch.com/phone/{clean}"),
-        ("FONEFINDER (carrier lookup)",              f"https://fonefinder.net/findphone.php?areacode={clean[:3]}&exchange={clean[3:6]}&thenumber={clean[6:]}"),
-        ("USPHONEBOOK",                              f"https://www.usphonebook.com/{clean}"),
-        ("411.COM",                                  f"https://www.411.com/phone/{clean}"),
-        ("TRUECALLER (community ID)",                f"https://www.truecaller.com/search/us/{clean}"),
-    ]
-    for name, url in sites:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("SPAM & REPORT DATABASES — FREE")
-    lines.append("=" * 50)
-    lines.append("")
-    spam_sites = [
-        ("800NOTES",       f"https://800notes.com/Phone.aspx/{clean}"),
-        ("CALLERCENTER",   f"https://callercenter.com/{clean}"),
-        ("NOMOROBO",       f"https://www.nomorobo.com/lookup/{clean}"),
-        ("SPAMCALLS",      f"https://spamcalls.net/en/search?n={clean}"),
-        ("WHOCALLEDUS",    f"https://whocalledus.com/calls/{clean}/"),
-    ]
-    for name, url in spam_sites:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("GOOGLE DORKS")
-    lines.append("=" * 50)
-    lines.append("")
-    dorks = [
-        f'"{formatted}"',
-        f'"{clean}"',
-        f'"{phone_plus1}"',
-        f'"{formatted}" name address',
-        f'"{clean}" site:facebook.com',
-        f'"{clean}" spam OR scam OR fraud',
-    ]
-    for dork in dorks:
-        encoded = dork.replace(" ", "+").replace('"', '%22')
-        lines.append(f"  {dork}")
-        lines.append(f"  https://www.google.com/search?q={encoded}")
-        lines.append("")
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "phone", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: EMAIL INVESTIGATION
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_email_investigate(target, job_id):
-    emit(job_id, "module_start", {"module": "email_investigate"})
-    lines = []
-    lines.append(f"TARGET EMAIL: {target}")
-    lines.append("")
-
-    out, err, rc = run_cmd(f"python3 -m holehe {target} --only-used 2>/dev/null", timeout=120)
-    if out and "holehe" not in out.lower() and "error" not in out.lower():
-        lines.append("=" * 50)
-        lines.append("HOLEHE — ACCOUNT DETECTION (120+ SITES)")
-        lines.append("=" * 50)
-        lines.append("")
-        lines.append(out)
-        lines.append("")
-
-    try:
-        rep_out, _, _ = run_cmd(
-            f"curl -s 'https://emailrep.io/{target}' -H 'User-Agent: fivet-osint' 2>/dev/null",
-            timeout=10
-        )
-        data = json.loads(rep_out)
-        details = data.get("details", {})
-        lines.append("=" * 50)
-        lines.append("EMAIL REPUTATION — FREE")
-        lines.append("=" * 50)
-        lines.append("")
-        lines.append(f"Reputation:    {data.get('reputation', 'N/A')}")
-        lines.append(f"Suspicious:    {data.get('suspicious', False)}")
-        lines.append(f"Blacklisted:   {details.get('blacklisted', False)}")
-        lines.append(f"Data Breach:   {details.get('data_breach', False)}")
-        lines.append(f"Disposable:    {details.get('disposable', False)}")
-        lines.append(f"Free Provider: {details.get('free_provider', False)}")
-        lines.append(f"Profiles:      {', '.join(details.get('profiles', [])) or 'None detected'}")
-        lines.append("")
-    except:
-        pass
-
-    try:
-        domain = target.split("@")[1]
-        dns_out, _, _ = run_cmd(f"dig +short A {domain} 2>/dev/null")
-        mx_out, _, _ = run_cmd(f"dig +short MX {domain} 2>/dev/null")
-        if dns_out or mx_out:
-            lines.append("=" * 50)
-            lines.append(f"EMAIL DOMAIN INTEL: {domain}")
-            lines.append("=" * 50)
-            lines.append("")
-            if dns_out:
-                lines.append(f"Domain IP:   {dns_out.split()[0]}")
-            if mx_out:
-                lines.append(f"Mail Server: {mx_out}")
-            lines.append("")
-    except:
-        pass
-
-    lines.append("=" * 50)
-    lines.append("FREE LOOKUP SITES")
-    lines.append("=" * 50)
-    lines.append("")
-    sites = [
-        ("TRUEPEOPLESEARCH ★ FREE",  f"https://www.truepeoplesearch.com/results?emailaddress={target}"),
-        ("THATSTHEM ★ FREE",          f"https://thatsthem.com/email/{target}"),
-        ("EMAILREP (reputation)",     f"https://emailrep.io/{target}"),
-        ("HUNTER.IO (verify)",        f"https://hunter.io/email-verifier/{target}"),
-        ("HAVEIBEENPWNED (breaches)", f"https://haveibeenpwned.com/account/{target}"),
-        ("DEHASHED (breaches)",       f"https://www.dehashed.com/search?query={target}"),
-        ("EPIEOS (social lookup)",    f"https://epieos.com/?q={target}&t=email"),
-    ]
-    for name, url in sites:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("GOOGLE DORKS")
-    lines.append("=" * 50)
-    lines.append("")
-    dorks = [
-        f'"{target}"',
-        f'"{target}" name address phone',
-        f'"{target}" site:linkedin.com',
-        f'"{target}" site:facebook.com',
-        f'"{target}" site:pastebin.com',
-        f'"{target}" leaked OR breach OR hacked',
-    ]
-    for dork in dorks:
-        encoded = dork.replace(" ", "+").replace('"', '%22')
-        lines.append(f"  {dork}")
-        lines.append(f"  https://www.google.com/search?q={encoded}")
-        lines.append("")
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "email_investigate", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: LICENSE PLATE LOOKUP
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_plate_lookup(target, job_id):
-    emit(job_id, "module_start", {"module": "plate_lookup"})
-    target_clean = target.upper().strip()
-    parts = target_clean.split()
-    states = ["NM","TX","AZ","CO","CA","FL","NY","IL","OH","GA","NC","MI","PA","WA","OR"]
-    if len(parts) >= 2 and parts[-1] in states:
-        plate = parts[0].replace("-", "").replace(",", "").strip()
-        state = parts[-1]
-    else:
-        plate = target_clean.replace(" ", "").replace("-", "").replace(",", "").strip()
-        state = "NM"
-
-    lines = []
-    lines.append(f"TARGET PLATE: {plate}")
-    lines.append(f"STATE:        {state}")
-    lines.append(f"NOTE: DPPA permissible purpose required. Law firms qualify.")
-    lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("FREE VEHICLE LOOKUP")
-    lines.append("=" * 50)
-    lines.append("")
-    free = [
-        ("VehicleHistory.com",              f"https://www.vehiclehistory.com/license-plate-search?plate={plate}&state={state}"),
-        ("Faxvin Plate Search",             f"https://www.faxvin.com/license-plate-lookup/{state.lower()}/{plate}"),
-        ("NICB VINCheck (stolen check)",    "https://www.nicb.org/vincheck"),
-        ("NHTSA Recalls",                   "https://www.nhtsa.gov/recalls"),
-        ("NMVTIS Vehicle History",          "https://www.vehiclehistory.gov/"),
-    ]
-    for name, url in free:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append(f"{state} MVD RECORDS REQUEST")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("Submit DPPA request to state MVD for registered owner info.")
-    lines.append("")
-    mvd_links = {
-        "NM": ("NM MVD", "https://www.mvd.newmexico.gov/", "(888) 683-4636"),
-        "AZ": ("AZ MVD", "https://www.azdot.gov/motor-vehicles", "(602) 712-7355"),
-        "TX": ("TX DMV", "https://www.txdmv.gov/", "(888) 368-4689"),
-        "CO": ("CO DMV", "https://dmv.colorado.gov/", "(303) 205-5600"),
-        "CA": ("CA DMV", "https://www.dmv.ca.gov/", "(800) 777-0133"),
-    }
-    mvd_name, mvd_url, mvd_phone = mvd_links.get(state, ("State MVD", "https://www.vehiclehistory.gov/", "Check state DMV website"))
-    lines.append(f"[{mvd_name} (DPPA request)]")
-    lines.append(f"  {mvd_url}")
-    lines.append(f"  Phone: {mvd_phone}")
-    lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("SOCIAL MEDIA PLATE SEARCH")
-    lines.append("=" * 50)
-    lines.append("")
-    social = [
-        ("Facebook",  f"https://www.facebook.com/search/posts/?q={plate}"),
-        ("Instagram", f"https://www.instagram.com/explore/search/keyword/?q={plate}"),
-        ("Twitter/X", f"https://twitter.com/search?q=%22{plate}%22&f=live"),
-        ("Reddit",    f"https://www.reddit.com/search/?q=%22{plate}%22"),
-    ]
-    for name, url in social:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("DPPA PERMISSIBLE PURPOSES (Law Firm)")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("  • Litigation or investigation in anticipation of litigation")
-    lines.append("  • Service of process")
-    lines.append("  • Licensed private investigator research")
-    lines.append("  • Insurance claims investigation")
-    lines.append("  • Locating missing persons or witnesses")
-    lines.append("")
-    lines.append("Cite: 18 U.S.C. § 2721(b)")
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "plate_lookup", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: BUSINESS SEARCH
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_business(target, job_id):
-    emit(job_id, "module_start", {"module": "business"})
-    name_plus = target.replace(" ", "+")
-    name_url = target.replace(" ", "-").lower()
-
-    lines = []
-    lines.append(f"TARGET: {target}")
-    lines.append("")
-
-    try:
-        out, _, _ = run_cmd(
-            f"curl -s 'https://api.opencorporates.com/v0.4/companies/search?q={name_plus}&jurisdiction_code=us_nm&format=json' 2>/dev/null",
-            timeout=10
-        )
-        data = json.loads(out)
-        companies = data.get("results", {}).get("companies", [])
-        if companies:
-            lines.append("=" * 50)
-            lines.append("OPENCORPORATES — NM RESULTS (FREE)")
-            lines.append("=" * 50)
-            lines.append("")
-            for c in companies[:5]:
-                co = c.get("company", {})
-                lines.append(f"  Name:       {co.get('name', 'N/A')}")
-                lines.append(f"  Status:     {co.get('current_status', 'N/A')}")
-                lines.append(f"  Type:       {co.get('company_type', 'N/A')}")
-                lines.append(f"  Registered: {co.get('incorporation_date', 'N/A')}")
-                lines.append(f"  Number:     {co.get('company_number', 'N/A')}")
-                lines.append(f"  URL:        {co.get('opencorporates_url', 'N/A')}")
-                lines.append("")
-        else:
-            lines.append("No NM results from OpenCorporates.")
-            lines.append("")
-    except Exception as e:
-        lines.append(f"OpenCorporates: {str(e)}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("SECRETARY OF STATE — FREE")
-    lines.append("=" * 50)
-    lines.append("")
-    sos = [
-        ("NM SOS Business Search",   f"https://portal.sos.state.nm.us/BFS/online/CorporationFormation/SearchBusinesses?SearchCriteria={name_plus}"),
-        ("NM SOS (alternate)",       "https://businessportal.sos.nm.gov/"),
-        ("AZ SOS",                   f"https://ecorp.azcc.gov/BusinessSearch/BusinessSearch?SearchTerm={name_plus}"),
-        ("CO SOS",                   f"https://www.sos.state.co.us/biz/BusinessEntityCriteriaExt.do?nameTyp=ENT&entityName={name_plus}"),
-        ("TX SOS",                   "https://mycpa.cpa.state.tx.us/coa/Index.html"),
-    ]
-    for name, url in sos:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("FEDERAL DATABASES — FREE")
-    lines.append("=" * 50)
-    lines.append("")
-    federal = [
-        ("SAM.gov (Federal Contractors)", f"https://sam.gov/search/?keywords={name_plus}&sort=relevanceScore&index=ei&is_active=true&page=1"),
-        ("SEC EDGAR (Public Companies)",  f"https://www.sec.gov/cgi-bin/browse-edgar?company={name_plus}&CIK=&type=&dateb=&owner=include&count=40&search_text=&action=getcompany"),
-        ("OpenCorporates All States",     f"https://opencorporates.com/companies?q={name_plus}&jurisdiction_code=us"),
-        ("PACER Business Search",         "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
-        ("BBB Albuquerque",               f"https://www.bbb.org/search?find_text={name_plus}&find_loc=Albuquerque%2C+NM"),
-    ]
-    for name, url in federal:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("BUSINESS INTELLIGENCE — FREE")
-    lines.append("=" * 50)
-    lines.append("")
-    intel = [
-        ("LinkedIn Company",     f"https://www.linkedin.com/search/results/companies/?keywords={name_plus}"),
-        ("Yelp Business",        f"https://www.yelp.com/search?find_desc={name_plus}&find_loc=Albuquerque%2C+NM"),
-        ("Google Business",      f"https://www.google.com/search?q={name_plus}+Albuquerque+NM+business"),
-        ("Bizapedia NM",         "https://www.bizapedia.com/nm/"),
-        ("Corporationwiki",      f"https://www.corporationwiki.com/search/results?term={name_plus}"),
-        ("OpenCorporates Officers", f"https://opencorporates.com/officers?q={name_plus}"),
-    ]
-    for name, url in intel:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    try:
-        ddg_out, _, _ = run_cmd(
-            f"curl -s 'https://api.duckduckgo.com/?q={name_plus}+company&format=json&no_html=1' 2>/dev/null",
-            timeout=10
-        )
-        ddg_data = json.loads(ddg_out)
-        if ddg_data.get("Abstract"):
-            lines.append("=" * 50)
-            lines.append("PUBLIC BUSINESS SUMMARY")
-            lines.append("=" * 50)
-            lines.append("")
-            lines.append(ddg_data["Abstract"])
-            if ddg_data.get("AbstractURL"):
-                lines.append(f"Source: {ddg_data['AbstractURL']}")
-            lines.append("")
-    except:
-        pass
-
-    result = "\n".join(lines)
-    emit(job_id, "module_done", {"module": "business", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: WHOIS
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_whois(target, job_id):
-    emit(job_id, "module_start", {"module": "whois"})
-    api_key = os.environ.get("WHOIS_API_KEY", "at_free")
-    try:
-        out, _, _ = run_cmd(
-            f"curl -s 'https://www.whoisxmlapi.com/whoisserver/WhoisService?apiKey={api_key}&domainName={target}&outputFormat=JSON' 2>/dev/null"
-        )
-        data = json.loads(out)
-        record = data.get("WhoisRecord", {})
-        registrant = record.get("registrant", {})
-        lines = [
-            f"Domain:      {record.get('domainName', target)}",
-            f"Registrar:   {record.get('registrarName', 'N/A')}",
-            f"Created:     {record.get('createdDate', 'N/A')}",
-            f"Expires:     {record.get('expiresDate', 'N/A')}",
-            f"Updated:     {record.get('updatedDate', 'N/A')}",
-            f"Status:      {record.get('status', 'N/A')}",
-            f"Registrant:  {registrant.get('organization', registrant.get('name', 'N/A'))}",
-            f"Country:     {registrant.get('country', 'N/A')}",
-        ]
-        nameservers = record.get("nameServers", {}).get("hostNames", [])
-        if nameservers:
-            lines.append(f"Nameservers: {', '.join(nameservers[:4])}")
-        result = "\n".join(lines)
-    except:
-        out, err, _ = run_cmd(f"whois {target} 2>/dev/null | head -40")
-        result = out if out else f"WHOIS lookup failed for {target}"
-    emit(job_id, "module_done", {"module": "whois", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: DNS RECORDS
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_dns(target, job_id):
-    emit(job_id, "module_start", {"module": "dns"})
-    lines = []
-    for rtype in ["A", "AAAA", "MX", "NS", "TXT", "CNAME"]:
-        out, _, _ = run_cmd(f"dig +short {rtype} {target} 2>/dev/null")
-        if out:
-            lines.append(f"[{rtype}] {out}")
-    result = "\n".join(lines) if lines else "No DNS records found."
-    emit(job_id, "module_done", {"module": "dns", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: PORT SCAN
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_nmap(target, job_id):
-    emit(job_id, "module_start", {"module": "nmap"})
-    common_ports = {
-        21:"FTP",22:"SSH",25:"SMTP",53:"DNS",80:"HTTP",
-        110:"POP3",143:"IMAP",443:"HTTPS",445:"SMB",
-        3306:"MySQL",3389:"RDP",8080:"HTTP-Alt",8443:"HTTPS-Alt"
-    }
-    try:
-        ip = socket.gethostbyname(target)
-        open_ports = []
-        for port, service in common_ports.items():
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(1)
-                if sock.connect_ex((ip, port)) == 0:
-                    open_ports.append(f"  {port}/tcp  OPEN  {service}")
-                sock.close()
-            except:
-                pass
-        result = f"Host: {target} ({ip})\n\n" + ("\n".join(open_ports) if open_ports else "No common ports open.")
-    except Exception as e:
-        result = f"Port scan failed: {str(e)}"
-    emit(job_id, "module_done", {"module": "nmap", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: GEOIP
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_geoip(target, job_id):
-    emit(job_id, "module_start", {"module": "geoip"})
-    try:
-        ip = socket.gethostbyname(target)
-        out, _, _ = run_cmd(f"curl -s 'https://ipapi.co/{ip}/json/' 2>/dev/null")
-        data = json.loads(out)
-        lines = [
-            f"IP:       {data.get('ip', ip)}",
-            f"City:     {data.get('city', 'N/A')}",
-            f"Region:   {data.get('region', 'N/A')}",
-            f"Country:  {data.get('country_name', 'N/A')}",
-            f"Org/ISP:  {data.get('org', 'N/A')}",
-            f"Timezone: {data.get('timezone', 'N/A')}",
-            f"Lat/Lon:  {data.get('latitude', 'N/A')}, {data.get('longitude', 'N/A')}",
-        ]
-        result = "\n".join(lines)
-    except Exception as e:
-        result = f"GeoIP lookup failed: {str(e)}"
-    emit(job_id, "module_done", {"module": "geoip", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: SHODAN
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_shodan(target, job_id):
-    emit(job_id, "module_start", {"module": "shodan"})
-    api_key = os.environ.get("SHODAN_API_KEY", "")
-    if not api_key:
-        result = "Add SHODAN_API_KEY to Render Environment Variables."
-    else:
-        try:
-            import urllib.request
-            ip = socket.gethostbyname(target)
-            url = f"https://api.shodan.io/shodan/host/{ip}?key={api_key}"
-            with urllib.request.urlopen(url, timeout=10) as r:
-                data = json.loads(r.read().decode())
-            if "error" in data:
-                result = f"Shodan: {data['error']}"
-            else:
-                ports = data.get("ports", [])
-                lines = [
-                    f"IP:      {ip}",
-                    f"Org:     {data.get('org', 'N/A')}",
-                    f"ISP:     {data.get('isp', 'N/A')}",
-                    f"Country: {data.get('country_name', 'N/A')}",
-                    f"City:    {data.get('city', 'N/A')}",
-                    f"Ports:   {', '.join(map(str, ports)) or 'None'}",
-                    f"Vulns:   {', '.join(data.get('vulns', {}).keys()) or 'None'}",
-                ]
-                result = "\n".join(lines)
-        except Exception as e:
-            result = f"Shodan: {str(e)}"
-    emit(job_id, "module_done", {"module": "shodan", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: VIRUSTOTAL
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_virustotal(target, job_id):
-    emit(job_id, "module_start", {"module": "virustotal"})
-    api_key = os.environ.get("VT_API_KEY", "")
-    if not api_key:
-        result = "Add VT_API_KEY to Render Environment Variables."
-    else:
-        out, _, _ = run_cmd(
-            f"curl -s --request GET "
-            f"--url 'https://www.virustotal.com/api/v3/domains/{target}' "
-            f"--header 'x-apikey: {api_key}' 2>/dev/null"
-        )
-        try:
-            data = json.loads(out)
-            attrs = data.get("data", {}).get("attributes", {})
-            stats = attrs.get("last_analysis_stats", {})
-            cats = attrs.get("categories", {})
-            result = (
-                f"Malicious:   {stats.get('malicious', 0)}\n"
-                f"Suspicious:  {stats.get('suspicious', 0)}\n"
-                f"Harmless:    {stats.get('harmless', 0)}\n"
-                f"Reputation:  {attrs.get('reputation', 'N/A')}\n"
-                f"Categories:  {', '.join(set(cats.values())) if cats else 'N/A'}"
-            )
-        except:
-            result = out[:500] if out else "VirusTotal lookup failed."
-    emit(job_id, "module_done", {"module": "virustotal", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE: GOOGLE DORKS
-# ══════════════════════════════════════════════════════════════════════════════
-
-def module_google_dorks(target, job_id):
-    emit(job_id, "module_start", {"module": "dorks"})
-    dorks = [
-        f'site:linkedin.com "{target}"',
-        f'site:twitter.com "{target}"',
-        f'site:facebook.com "{target}"',
-        f'"{target}" filetype:pdf',
-        f'"{target}" inurl:cv OR inurl:resume',
-        f'"{target}" site:pastebin.com',
-        f'"{target}" site:github.com',
-        f'"{target}" site:reddit.com',
-        f'"{target}" site:instagram.com',
-        f'"{target}" site:youtube.com',
-    ]
-    result = "Google Dork Queries (copy into Google):\n\n"
-    result += "\n".join(f"  {d}" for d in dorks)
-    result += "\n\nDirect links:\n"
-    for d in dorks:
-        encoded = d.replace(" ", "+").replace('"', '%22')
-        result += f"  https://www.google.com/search?q={encoded}\n"
-    emit(job_id, "module_done", {"module": "dorks", "result": result})
-    return result
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MODULE REGISTRY
-# sherlock is NOT listed standalone — runs inside username_search
-# ══════════════════════════════════════════════════════════════════════════════
-
-MODULE_MAP = {
-    "people":            module_people_search,
-    "public_records":    module_public_records,
-    "property":          module_property,
-    "skip_trace":        module_skip_trace,
-    "social_media":      module_social_media,
-    "social_footprint":  module_social_footprint,
-    "photo_forensics":   module_photo_forensics,
-    "hit_and_run":       module_hit_and_run,
-    "username_search":   module_username_search,
-    "phone":             module_phone,
-    "email_investigate": module_email_investigate,
-    "plate_lookup":      module_plate_lookup,
-    "geolocation":       module_geolocation,
-    "business":          module_business,
-    "whois":             module_whois,
-    "dns":               module_dns,
-    "nmap":              module_nmap,
-    "geoip":             module_geoip,
-    "shodan":            module_shodan,
-    "virustotal":        module_virustotal,
-    "dorks":             module_google_dorks,
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FIVE T // OSINT Agent</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --bg:#060a0f;--panel:#0b1118;--border:#1a2a3a;
+  --accent:#00a896;--accent2:#ff6b35;--accent3:#39ff14;
+  --text:#c8d8e8;--dim:#4a6070;--danger:#ff3b3b;--warn:#ffb300;
+}
+body{background:var(--bg);color:var(--text);font-family:'Rajdhani',sans-serif;font-size:15px;min-height:100vh;}
+body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,168,150,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,168,150,0.025) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0;}
+.app{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+header{border-bottom:1px solid var(--border);padding:10px 20px;display:flex;align-items:center;gap:14px;background:rgba(6,10,15,0.98);flex-shrink:0;}
+.logo{font-family:'Share Tech Mono',monospace;font-size:16px;color:var(--accent);letter-spacing:2px;display:flex;align-items:center;gap:9px;}
+.logo-ring{width:26px;height:26px;border:2px solid var(--accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;animation:glow 3s ease-in-out infinite;}
+@keyframes glow{0%,100%{box-shadow:0 0 4px var(--accent)}50%{box-shadow:0 0 18px var(--accent),0 0 36px rgba(0,168,150,0.15)}}
+.hdr-right{margin-left:auto;font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);display:flex;gap:20px;align-items:center;}
+.dot-live{width:6px;height:6px;border-radius:50%;background:var(--accent3);display:inline-block;margin-right:5px;animation:blink 1.5s infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.2}}
+#backendStatus{font-size:9px;}
+.body{display:flex;flex:1;overflow:hidden;}
+aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display:flex;flex-direction:column;gap:16px;overflow-y:auto;flex-shrink:0;}
+.slabel{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--accent);letter-spacing:3px;text-transform:uppercase;margin-bottom:9px;display:flex;align-items:center;gap:8px;}
+.slabel::after{content:'';flex:1;height:1px;background:var(--border);}
+.type-wrap{display:flex;flex-wrap:wrap;gap:5px;}
+.tbtn{padding:4px 9px;border:1px solid var(--border);border-radius:2px;font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:1px;cursor:pointer;background:var(--panel);color:var(--dim);transition:all .15s;}
+.tbtn.active,.tbtn:hover{border-color:var(--accent2);color:var(--accent2);background:rgba(255,107,53,0.08);}
+.mod-item{display:flex;align-items:center;gap:8px;padding:7px 8px;border:1px solid var(--border);border-radius:3px;cursor:pointer;margin-bottom:5px;transition:all .15s;background:var(--panel);}
+.mod-item.active{border-color:rgba(0,168,150,0.3);background:rgba(0,168,150,0.04);}
+.mod-dot{width:7px;height:7px;border-radius:50%;background:var(--dim);flex-shrink:0;transition:background .15s;}
+.mod-item.active .mod-dot{background:var(--accent3);}
+.mod-name{flex:1;font-size:12px;font-weight:600;color:var(--text);}
+.mod-tag{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);}
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.stat-box{padding:10px 8px;border:1px solid var(--border);border-radius:3px;background:var(--panel);text-align:center;}
+.stat-num{font-family:'Share Tech Mono',monospace;font-size:20px;color:var(--accent);line-height:1;}
+.stat-lbl{font-size:9px;color:var(--dim);letter-spacing:1px;margin-top:3px;text-transform:uppercase;}
+.center{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.search-area{padding:14px 18px;border-bottom:1px solid var(--border);flex-shrink:0;}
+.search-row{display:flex;gap:8px;}
+.input-wrap{flex:1;position:relative;}
+.input-wrap::before{content:'›';position:absolute;left:12px;top:50%;transform:translateY(-50%);font-family:'Share Tech Mono',monospace;color:var(--accent);font-size:18px;pointer-events:none;}
+#searchInput{width:100%;background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:11px 14px 11px 30px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:13px;outline:none;transition:border-color .2s;}
+#searchInput:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(0,168,150,0.08);}
+#searchInput::placeholder{color:#2a3a4a;}
+.run-btn{padding:11px 22px;background:var(--accent);color:var(--bg);border:none;border-radius:4px;font-family:'Share Tech Mono',monospace;font-size:12px;font-weight:bold;letter-spacing:2px;cursor:pointer;transition:all .2s;white-space:nowrap;}
+.run-btn:hover{background:#00bfae;box-shadow:0 0 20px rgba(0,168,150,0.35);}
+.run-btn:disabled{background:#0d1720;color:#2a3a4a;cursor:not-allowed;}
+.clr-btn{padding:11px 12px;background:transparent;border:1px solid var(--border);color:var(--dim);font-family:'Share Tech Mono',monospace;font-size:10px;cursor:pointer;border-radius:4px;transition:all .2s;}
+.clr-btn:hover{border-color:var(--danger);color:var(--danger);}
+.prog-area{padding:8px 18px 0;display:none;}
+.prog-area.show{display:block;}
+.prog-track{height:2px;background:var(--border);border-radius:2px;overflow:hidden;}
+.prog-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent3));border-radius:2px;transition:width .35s ease;width:0%;}
+.prog-lbl{font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--dim);margin-top:4px;letter-spacing:1px;}
+.results{flex:1;overflow-y:auto;padding:16px 18px;}
+.results::-webkit-scrollbar{width:4px;}
+.results::-webkit-scrollbar-track{background:var(--bg);}
+.results::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:14px;color:var(--dim);text-align:center;padding:40px 20px;}
+.empty-icon{font-size:48px;opacity:.2;}
+.empty-title{font-family:'Share Tech Mono',monospace;font-size:13px;letter-spacing:3px;}
+.empty-sub{font-size:13px;max-width:420px;line-height:1.65;opacity:.65;}
+.backend-cfg{margin-top:20px;padding:14px 18px;border:1px solid var(--border);border-radius:4px;background:var(--panel);max-width:440px;width:100%;text-align:left;}
+.cfg-label{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--accent);letter-spacing:2px;margin-bottom:8px;}
+.cfg-row{display:flex;gap:8px;}
+#backendUrl{flex:1;background:#060a0f;border:1px solid var(--border);border-radius:3px;padding:8px 10px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:11px;outline:none;}
+#backendUrl:focus{border-color:var(--accent);}
+.cfg-btn{padding:8px 14px;background:transparent;border:1px solid var(--accent);color:var(--accent);font-family:'Share Tech Mono',monospace;font-size:10px;cursor:pointer;border-radius:3px;letter-spacing:1px;}
+.cfg-btn:hover{background:rgba(0,168,150,0.08);}
+.card{border:1px solid var(--border);border-left:3px solid var(--border);border-radius:4px;background:var(--panel);margin-bottom:10px;overflow:hidden;animation:fadeUp .3s ease;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.card.running{border-left-color:var(--warn);}
+.card.done{border-left-color:var(--accent3);}
+.card.error{border-left-color:var(--danger);}
+.card-hdr{padding:9px 14px;display:flex;align-items:center;gap:10px;cursor:pointer;background:rgba(0,0,0,0.2);user-select:none;}
+.card-hdr:hover{background:rgba(0,168,150,0.03);}
+.card-badge{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:2px;padding:2px 8px;border-radius:2px;background:rgba(0,168,150,0.1);color:var(--accent);border:1px solid rgba(0,168,150,0.2);}
+.card-title{flex:1;font-size:13px;font-weight:600;color:var(--text);}
+.card-status{font-family:'Share Tech Mono',monospace;font-size:10px;display:flex;align-items:center;gap:6px;}
+.card-status.running{color:var(--warn);}
+.card-status.done{color:var(--accent3);}
+.card-status.error{color:var(--danger);}
+.card-toggle{color:var(--dim);font-size:11px;transition:transform .2s;}
+.card-toggle.open{transform:rotate(180deg);}
+.card-body{padding:14px;border-top:1px solid var(--border);display:none;}
+.card-body.open{display:block;}
+.card-content{font-family:'Share Tech Mono',monospace;font-size:11px;color:#8ab0c8;line-height:1.75;white-space:pre-wrap;word-break:break-word;}
+.spinner{display:inline-block;width:10px;height:10px;border:2px solid var(--border);border-top-color:var(--warn);border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.right{width:185px;border-left:1px solid var(--border);padding:14px 12px;display:flex;flex-direction:column;gap:14px;flex-shrink:0;}
+.history-item{padding:6px 8px;border:1px solid var(--border);border-radius:3px;margin-bottom:4px;font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--dim);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:all .15s;}
+.history-item:hover{border-color:var(--accent);color:var(--accent);}
+.ai-btn{width:100%;padding:9px;background:rgba(0,168,150,0.12);border:1px solid var(--accent);color:var(--accent);font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:1px;cursor:pointer;border-radius:3px;transition:all .2s;line-height:1.4;}
+.ai-btn:hover{background:rgba(0,168,150,0.25);box-shadow:0 0 12px rgba(0,168,150,0.2);}
+.ai-btn:disabled{border-color:var(--border);color:var(--dim);cursor:not-allowed;background:transparent;}
+.exp-btn{width:100%;padding:9px;background:transparent;border:1px solid var(--accent2);color:var(--accent2);font-family:'Share Tech Mono',monospace;font-size:10px;letter-spacing:2px;cursor:pointer;border-radius:3px;transition:all .2s;}
+.exp-btn:hover{background:rgba(255,107,53,0.1);}
+.exp-btn:disabled{border-color:var(--border);color:var(--dim);cursor:not-allowed;}
+.scanline{position:fixed;left:0;right:0;height:2px;background:linear-gradient(transparent,rgba(0,168,150,0.05),transparent);pointer-events:none;animation:scan 8s linear infinite;z-index:999;}
+@keyframes scan{0%{top:-2px}100%{top:100vh}}
+</style>
+</head>
+<body>
+<div id="lockscreen" style="position:fixed;inset:0;background:#060a0f;z-index:9999;display:flex;align-items:center;justify-content:center;background-image:linear-gradient(rgba(0,168,150,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,168,150,0.025) 1px,transparent 1px);background-size:40px 40px;">
+<div style="border:1px solid #1a2a3a;border-radius:6px;padding:36px 40px;background:#0b1118;display:flex;flex-direction:column;align-items:center;gap:18px;min-width:320px;max-width:360px;">
+  <svg width="100" height="72" viewBox="0 0 100 72" style="animation:glow 3s infinite;filter:drop-shadow(0 0 16px #00a896)">
+    <circle cx="50" cy="36" r="48" fill="none" stroke="#00a896" stroke-width="0.5" opacity="0.08"/>
+    <circle cx="50" cy="36" r="42" fill="none" stroke="#00a896" stroke-width="0.6" opacity="0.12"/>
+    <circle cx="50" cy="36" r="36" fill="none" stroke="#00a896" stroke-width="0.7" opacity="0.18"/>
+    <circle cx="50" cy="36" r="30" fill="none" stroke="#00a896" stroke-width="0.8" opacity="0.25"/>
+    <circle cx="50" cy="36" r="24" fill="none" stroke="#00a896" stroke-width="1" opacity="0.35"/>
+    <ellipse cx="50" cy="36" rx="46" ry="32" fill="#060a0f"/>
+    <path d="M4 36 Q50 4 96 36" fill="#060a0f" stroke="#00a896" stroke-width="1.8"/>
+    <path d="M4 36 Q50 68 96 36" fill="#060a0f" stroke="#00a896" stroke-width="1.8"/>
+    <ellipse cx="50" cy="36" rx="46" ry="32" fill="none" stroke="#00a896" stroke-width="1.8"/>
+    <circle cx="50" cy="36" r="20" fill="#060a0f" stroke="#00a896" stroke-width="1.8"/>
+    <circle cx="50" cy="36" r="17" fill="none" stroke="#00a896" stroke-width="0.6" opacity="0.4"/>
+    <circle cx="50" cy="36" r="14" fill="none" stroke="#00a896" stroke-width="0.7" opacity="0.5"/>
+    <circle cx="50" cy="36" r="11" fill="none" stroke="#00a896" stroke-width="0.8" opacity="0.6"/>
+    <circle cx="50" cy="36" r="8" fill="#00a896" opacity="0.85"/>
+    <circle cx="50" cy="36" r="5.5" fill="#060a0f"/>
+    <circle cx="50" cy="36" r="3" fill="none" stroke="#00a896" stroke-width="1" opacity="0.8"/>
+    <circle cx="54" cy="31" r="2.5" fill="#00a896" opacity="0.6"/>
+    <circle cx="54" cy="31" r="1.2" fill="white" opacity="0.4"/>
+    <circle cx="50" cy="36" r="1.5" fill="#00a896"/>
+  </svg>
+  <div style="font-family:Share Tech Mono,monospace;font-size:16px;color:#00a896;letter-spacing:3px;text-align:center;">FIVE T // OSINT</div>
+  <div style="font-family:Share Tech Mono,monospace;font-size:10px;color:#4a6070;letter-spacing:2px;text-align:center;">AUTHORIZED ACCESS ONLY</div>
+  <input id="pwUsername" type="text" placeholder="USERNAME" style="width:100%;background:#060a0f;border:1px solid #1a2a3a;border-radius:4px;padding:12px 14px;color:#c8d8e8;font-family:Share Tech Mono,monospace;font-size:14px;outline:none;text-align:center;letter-spacing:2px;" onkeydown="if(event.key==='Enter')document.getElementById('pwInput').focus()"/>
+  <input id="pwInput" type="password" placeholder="PASSWORD" style="width:100%;background:#060a0f;border:1px solid #1a2a3a;border-radius:4px;padding:12px 14px;color:#c8d8e8;font-family:Share Tech Mono,monospace;font-size:14px;outline:none;text-align:center;letter-spacing:4px;" onkeydown="if(event.key==='Enter')checkPw()"/>
+  <button onclick="checkPw()" style="width:100%;padding:12px;background:#00a896;color:#060a0f;border:none;border-radius:4px;font-family:Share Tech Mono,monospace;font-size:13px;font-weight:bold;letter-spacing:2px;cursor:pointer;">AUTHENTICATE</button>
+  <div id="pwErr" style="font-family:Share Tech Mono,monospace;font-size:11px;color:#ff3b3b;letter-spacing:1px;display:none;">&#9888; ACCESS DENIED — INVALID CODE</div>
+</div>
+</div>
+<div class="scanline"></div>
+<div class="app">
+  <header>
+    <div class="logo"><div class="logo-ring">◎</div>FIVE T // OSINT AGENT</div>
+    <div class="hdr-right">
+      <span id="userDisplay" style="font-size:10px;color:#00a896;letter-spacing:1px;"></span>
+      <span><span class="dot-live"></span>LIVE</span>
+      <span id="backendStatus" style="color:var(--warn)">⬤ BACKEND: NOT CONNECTED</span>
+      <button onclick="showAuditLog()" id="auditBtn" style="display:none;padding:4px 10px;background:transparent;border:1px solid #00a896;color:#00a896;font-family:Share Tech Mono,monospace;font-size:9px;cursor:pointer;border-radius:2px;letter-spacing:1px;">AUDIT LOG</button>
+      <button onclick="logout()" style="padding:4px 10px;background:transparent;border:1px solid #ff3b3b;color:#ff3b3b;font-family:Share Tech Mono,monospace;font-size:9px;cursor:pointer;border-radius:2px;letter-spacing:1px;">LOGOUT</button>
+      <span id="clock"></span>
+    </div>
+  </header>
+  <div class="body">
+    <aside>
+      <div>
+        <div class="slabel">Target Type</div>
+        <div class="type-wrap" id="typeWrap"></div>
+      </div>
+      <div>
+        <div class="slabel">Modules</div>
+        <div id="modList"></div>
+      </div>
+      <div style="margin-top:auto;">
+        <div class="slabel">Stats</div>
+        <div class="stat-grid">
+          <div class="stat-box"><div class="stat-num" id="sQueries">0</div><div class="stat-lbl">Queries</div></div>
+          <div class="stat-box"><div class="stat-num" id="sMods">0</div><div class="stat-lbl">Modules</div></div>
+          <div class="stat-box"><div class="stat-num" id="sFindings">0</div><div class="stat-lbl">Findings</div></div>
+          <div class="stat-box"><div class="stat-num" id="sTime">—</div><div class="stat-lbl">Last Run</div></div>
+        </div>
+      </div>
+    </aside>
+    <div class="center">
+      <div class="search-area">
+        <div class="search-row">
+          <div class="input-wrap">
+            <input id="searchInput" type="text" placeholder="Target: name, domain, IP, email, username, phone, plate…"/>
+          </div>
+          <button class="run-btn" id="runBtn" onclick="runInvestigation()">▶ INVESTIGATE</button>
+          <button class="clr-btn" onclick="clearAll()">CLR</button>
+        </div>
+      </div>
+      <div class="prog-area" id="progArea">
+        <div class="prog-track"><div class="prog-fill" id="progFill"></div></div>
+        <div class="prog-lbl" id="progLbl">INITIALIZING…</div>
+      </div>
+      <div class="results" id="results">
+        <div class="empty" id="emptyState">
+          <div class="empty-icon">◎</div>
+          <div class="empty-title">AWAITING TARGET</div>
+          <div class="empty-sub">21 OSINT modules running in parallel. People Search, Skip Trace, Social Footprint, Hit & Run, Public Records, Property, Photo Forensics, Username, Phone, Email, Plate, Business, Geolocation, WHOIS, DNS, Shodan, VirusTotal & more.</div>
+          <div class="backend-cfg" id="backendCfg">
+            <div class="cfg-label">BACKEND URL</div>
+            <div class="cfg-row">
+              <input id="backendUrl" type="text" placeholder="https://your-backend.onrender.com"/>
+              <button class="cfg-btn" onclick="testBackend()">TEST</button>
+            </div>
+            <div id="cfgMsg" style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);margin-top:8px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="right">
+      <div>
+        <div class="slabel">History</div>
+        <div id="historyList"><div style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);">No searches yet</div></div>
+      </div>
+      <div style="margin-top:auto;display:flex;flex-direction:column;gap:8px;">
+        <button class="ai-btn" id="aiBtn" onclick="analyzeWithAI()" disabled>⚡ ANALYZE WITH AI</button>
+        <button class="exp-btn" id="expBtn" onclick="exportReport()" disabled>⬇ EXPORT</button>
+        <div style="font-family:Share Tech Mono,monospace;font-size:9px;color:var(--dim);text-align:center;line-height:1.7;margin-top:4px;">
+          Parallel execution<br>
+          21 OSINT modules<br>
+          Verified free tools<br>
+          Export to .txt
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────────────
+let authToken = null;
+let BACKEND = 'https://sentinel-osint-ui.onrender.com';
+let targetType = 'PERSON';
+let activeModIds = new Set();
+let running = false;
+let allResults = {};
+let history = JSON.parse(localStorage.getItem('fivet_history') || '[]');
+let stats = JSON.parse(localStorage.getItem('fivet_stats') || '{"queries":0,"findings":0}');
+
+const TARGET_TYPES = ['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','PLATE','LOCATION'];
+
+// ── Module definitions — all paywall tools removed, all sources verified free ──
+const ALL_MODULES = [
+  // PERSON
+  { id:'people',            name:'People Search',           tag:'PEOP',  types:['PERSON'] },
+  { id:'public_records',    name:'Public Records',          tag:'PREC',  types:['PERSON'] },
+  { id:'property',          name:'Property Records',        tag:'PROP',  types:['PERSON','COMPANY'] },
+  { id:'skip_trace',        name:'Skip Trace',              tag:'SKIP',  types:['PERSON'] },
+  { id:'social_media',      name:'Social Media Search',     tag:'SOCL',  types:['PERSON','USERNAME'] },
+  { id:'social_footprint',  name:'Social Footprint',        tag:'FOOT',  types:['PERSON'] },
+  { id:'photo_forensics',   name:'Photo & Video Forensics', tag:'FOTO',  types:['PERSON','USERNAME'] },
+  // PLATE / LOCATION
+  { id:'hit_and_run',       name:'Hit & Run / Vehicle',     tag:'H&R',   types:['PLATE','LOCATION'] },
+  { id:'plate_lookup',      name:'License Plate Lookup',    tag:'PLATE', types:['PLATE'] },
+  // USERNAME
+  { id:'username_search',   name:'Username Search',         tag:'USER',  types:['USERNAME'] },
+  // PHONE
+  { id:'phone',             name:'Phone Lookup',            tag:'PHONE', types:['PHONE'] },
+  // EMAIL
+  { id:'email_investigate', name:'Email Investigation',     tag:'EMAIL', types:['EMAIL'] },
+  // COMPANY
+  { id:'business',          name:'Business Search',         tag:'BIZ',   types:['COMPANY'] },
+  // LOCATION / IP
+  { id:'geolocation',       name:'Geolocation Intel',       tag:'GEO',   types:['LOCATION','IP'] },
+  // DOMAIN / IP
+  { id:'whois',             name:'WHOIS Lookup',            tag:'WHOIS', types:['DOMAIN','IP'] },
+  { id:'dns',               name:'DNS Records',             tag:'DNS',   types:['DOMAIN'] },
+  { id:'nmap',              name:'Port Scan',               tag:'NMAP',  types:['DOMAIN','IP'] },
+  { id:'geoip',             name:'GeoIP Location',          tag:'GEOIP', types:['IP','DOMAIN'] },
+  { id:'shodan',            name:'Shodan',                  tag:'SHDN',  types:['IP','DOMAIN'] },
+  { id:'virustotal',        name:'VirusTotal',              tag:'VT',    types:['DOMAIN','IP','EMAIL'] },
+  // DORKS — available all types, never auto-selected
+  { id:'dorks',             name:'Google Dorks',            tag:'DORK',  types:['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','PLATE','LOCATION'] },
+];
+
+function init() {
+  if (BACKEND) document.getElementById('backendUrl').value = BACKEND;
+  renderTypes();
+  renderModules();
+  renderHistory();
+  updateStats();
+  setInterval(() => { document.getElementById('clock').textContent = new Date().toLocaleTimeString(); }, 1000);
+  if (BACKEND) testBackend(true);
+  const cfg = document.getElementById('backendCfg');
+  if (cfg) cfg.style.display = isAdmin ? 'block' : 'none';
+  const auditBtn = document.getElementById('auditBtn');
+  if (auditBtn) auditBtn.style.display = isAdmin ? 'inline-block' : 'none';
 }
 
-DOMAIN_IP_MODULES = {"whois", "dns", "nmap", "geoip", "shodan", "virustotal"}
-PERSON_ONLY_MODULES = {"people", "public_records", "property", "skip_trace",
-                       "social_media", "social_footprint", "photo_forensics"}
+function renderTypes() {
+  const wrap = document.getElementById('typeWrap');
+  wrap.innerHTML = TARGET_TYPES.map(t =>
+    `<button class="tbtn${t===targetType?' active':''}" onclick="setType('${t}',this)">${t}</button>`
+  ).join('');
+}
 
+function setType(t, btn) {
+  targetType = t;
+  document.querySelectorAll('.tbtn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  activeModIds = new Set();
+  renderModules();
+}
 
-def run_investigation(job_id, target, target_type, selected_modules):
-    try:
-        cutoff = time.time() - 3600
-        stale = [jid for jid, j in list(jobs.items())
-                 if datetime.fromisoformat(j["started"]).timestamp() < cutoff]
-        for jid in stale:
-            del jobs[jid]
+function renderModules() {
+  const list = document.getElementById('modList');
+  list.innerHTML = '';
+  ALL_MODULES.forEach(mod => {
+    const relevant = mod.types && mod.types.includes(targetType);
+    if (relevant && mod.id !== 'dorks' && !activeModIds.has(mod.id)) {
+      activeModIds.add(mod.id);
+    }
+    // Always ensure dorks starts unchecked
+    activeModIds.delete('dorks');
+    if (!relevant) return;
+    const active = activeModIds.has(mod.id);
+    const el = document.createElement('div');
+    el.className = `mod-item${active?' active':''}`;
+    el.dataset.id = mod.id;
+    el.innerHTML = `<div class="mod-dot"></div><div class="mod-name">${mod.name}</div><div class="mod-tag">${mod.tag}</div>`;
+    el.onclick = () => {
+      if (!isAdmin) return;
+      if (activeModIds.has(mod.id)) activeModIds.delete(mod.id);
+      else activeModIds.add(mod.id);
+      el.classList.toggle('active');
+      document.getElementById('sMods').textContent = activeModIds.size;
+    };
+    list.appendChild(el);
+  });
+  document.getElementById('sMods').textContent = activeModIds.size;
+}
 
-        tt = (target_type or "PERSON").upper()
+async function testBackend(silent) {
+  const url = document.getElementById('backendUrl').value.trim().replace(/\/$/, '');
+  if (!url) { if (!silent) showCfgMsg('Enter your backend URL first.', 'warn'); return; }
+  BACKEND = url;
+  localStorage.setItem('fivet_backend', url);
+  const statusEl = document.getElementById('backendStatus');
+  try {
+    statusEl.style.color = 'var(--warn)';
+    statusEl.textContent = '⬤ BACKEND: TESTING…';
+    const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(8000) });
+    const data = await res.json();
+    statusEl.style.color = 'var(--accent3)';
+    statusEl.textContent = '⬤ BACKEND: CONNECTED';
+    const tools = Object.entries(data.tools || {}).map(([k,v]) => `${k}:${v?'✓':'✗'}`).join(' ');
+    if (!silent) showCfgMsg(`Connected! Tools: ${tools}`, 'ok');
+  } catch(e) {
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = '⬤ BACKEND: OFFLINE';
+    if (!silent) showCfgMsg(`Cannot reach backend: ${e.message}`, 'err');
+  }
+}
 
-        if tt == "PERSON":
-            selected_modules = [m for m in selected_modules if m not in DOMAIN_IP_MODULES]
-        elif tt in ("DOMAIN", "IP"):
-            selected_modules = [m for m in selected_modules if m not in PERSON_ONLY_MODULES]
+function showCfgMsg(msg, type) {
+  const el = document.getElementById('cfgMsg');
+  el.textContent = msg;
+  el.style.color = type==='ok' ? 'var(--accent3)' : type==='err' ? 'var(--danger)' : 'var(--warn)';
+}
 
-        threads = []
-        for mod_id in selected_modules:
-            fn = MODULE_MAP.get(mod_id)
-            if fn:
-                t = threading.Thread(target=fn, args=(target, job_id), daemon=True)
-                threads.append(t)
-                t.start()
-        for t in threads:
-            t.join(timeout=130)
-        jobs[job_id]["status"] = "complete"
-        emit(job_id, "done", {"message": f"Complete: {target}"})
-    except Exception as e:
-        jobs[job_id]["status"] = "error"
-        emit(job_id, "error", {"message": str(e)})
+async function runInvestigation() {
+  const query = document.getElementById('searchInput').value.trim();
+  if (!query || running) return;
+  if (!BACKEND) { showCfgMsg('Set your backend URL first!', 'err'); return; }
 
+  running = true;
+  allResults = {};
+  document.getElementById('runBtn').disabled = true;
+  document.getElementById('runBtn').textContent = '⏳ RUNNING';
+  document.getElementById('expBtn').disabled = true;
+  document.getElementById('aiBtn').disabled = true;
 
-# ── Authentication ────────────────────────────────────────────────────────────
-import secrets
+  addHistory(query);
+  stats.queries++;
+  logAudit(currentUser?.username || 'unknown', 'SEARCH', `Target type: ${targetType}`, query);
+  updateStats();
 
-active_sessions = {}
+  const resultsEl = document.getElementById('results');
+  resultsEl.innerHTML = '';
+  const mods = [...activeModIds];
+  const modCards = {};
 
-def get_users():
-    users = {}
-    for key, val in os.environ.items():
-        if key.startswith('USER_'):
-            username = key[5:].lower()
-            parts = val.split(':')
-            if len(parts) >= 3:
-                users[username] = {
-                    'password': parts[0],
-                    'role': parts[1],
-                    'name': parts[2]
-                }
-    return users
+  setProgress(true, 0, 'LAUNCHING MODULES…');
 
-def log_auth_event(username, action, detail, ip="unknown"):
-    print(f"[AUTH] {action} | user={username} | {detail} | ip={ip} | time={datetime.utcnow().isoformat()}")
+  mods.forEach(id => {
+    const mod = ALL_MODULES.find(m => m.id === id);
+    if (!mod) return;
+    const card = createCard(id, mod.name, mod.tag);
+    resultsEl.appendChild(card);
+    modCards[id] = card;
+  });
 
-@app.route("/api/auth/login", methods=["POST"])
-def login():
-    data = request.json
-    username = data.get("username", "").strip().lower()
-    password = data.get("password", "")
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
-    users = get_users()
-    user = users.get(username)
-    if user and user["password"] == password:
-        token = secrets.token_hex(32)
-        active_sessions[token] = {
-            "username": username,
-            "role": user["role"],
-            "name": user["name"],
-            "created": datetime.utcnow().isoformat(),
-            "ip": ip
+  const t0 = Date.now();
+
+  try {
+    const params = new URLSearchParams({ target: query, type: targetType, modules: mods.join(',') });
+    const res = await fetch(`${BACKEND}/api/investigate?${params}`, { method: 'GET' });
+    const { job_id } = await res.json();
+
+    let done = 0;
+    await new Promise((resolve, reject) => {
+      const es = new EventSource(`${BACKEND}/api/stream/${job_id}`);
+      es.onmessage = (e) => {
+        const event = JSON.parse(e.data);
+        if (event.type === 'module_start') {
+          updateCard(modCards[event.data.module], 'running');
+        } else if (event.type === 'module_done') {
+          updateCard(modCards[event.data.module], 'done', event.data.result);
+          allResults[event.data.module] = event.data.result;
+          stats.findings++;
+          updateStats();
+          done++;
+          setProgress(true, Math.round(done / mods.length * 100), `${done}/${mods.length} MODULES COMPLETE`);
+        } else if (event.type === 'done') {
+          es.close(); resolve();
+        } else if (event.type === 'error') {
+          es.close(); reject(new Error(event.data.message));
         }
-        log_auth_event(username, "LOGIN_SUCCESS", f"User {user['name']} authenticated", ip)
-        return jsonify({"success": True, "token": token, "username": username,
-                        "role": user["role"], "name": user["name"]})
-    else:
-        log_auth_event(username, "LOGIN_FAILED", "Invalid credentials", ip)
-        return jsonify({"success": False, "error": "Invalid credentials"}), 401
+      };
+      es.onerror = () => { es.close(); resolve(); };
+      setTimeout(() => { es.close(); resolve(); }, 150000);
+    });
+  } catch (e) {
+    const errCard = document.createElement('div');
+    errCard.style.cssText = 'padding:14px;border:1px solid var(--danger);border-radius:4px;font-family:Share Tech Mono,monospace;font-size:11px;color:var(--danger);';
+    errCard.textContent = `Error: ${e.message}`;
+    resultsEl.insertBefore(errCard, resultsEl.firstChild);
+  }
 
-@app.route("/api/auth/verify", methods=["POST"])
-def verify_token():
-    data = request.json
-    token = data.get("token", "")
-    session = active_sessions.get(token)
-    if session:
-        return jsonify({"valid": True, "username": session["username"],
-                        "role": session["role"], "name": session["name"]})
-    return jsonify({"valid": False}), 401
+  const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+  stats.lastTime = elapsed + 's';
+  document.getElementById('sTime').textContent = elapsed + 's';
+  localStorage.setItem('fivet_stats', JSON.stringify(stats));
+  setProgress(true, 100, `✓ COMPLETE — ${mods.length} modules in ${elapsed}s`);
+  setTimeout(() => setProgress(false), 3500);
 
-@app.route("/api/auth/logout", methods=["POST"])
-def logout():
-    data = request.json
-    token = data.get("token", "")
-    session = active_sessions.pop(token, None)
-    if session:
-        log_auth_event(session["username"], "LOGOUT", "User logged out")
-    return jsonify({"success": True})
+  document.getElementById('runBtn').disabled = false;
+  document.getElementById('runBtn').textContent = '▶ INVESTIGATE';
+  document.getElementById('expBtn').disabled = false;
+  document.getElementById('aiBtn').disabled = false;
+  running = false;
+}
 
-@app.route("/api/auth/audit", methods=["POST"])
-def get_audit():
-    data = request.json
-    token = data.get("token", "")
-    session = active_sessions.get(token)
-    if not session or session.get("role") != "admin":
-        return jsonify({"error": "Unauthorized"}), 403
-    return jsonify({"message": "Audit log is written to Render server logs. Check Render dashboard → Logs."})
+function createCard(id, name, tag) {
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.id = `card-${id}`;
+  el.innerHTML = `
+    <div class="card-hdr" onclick="toggleCard('${id}')">
+      <span class="card-badge">${tag}</span>
+      <span class="card-title">${name}</span>
+      <span class="card-status running" id="cs-${id}"><span class="spinner"></span> PENDING</span>
+      <span class="card-toggle open" id="ct-${id}">▼</span>
+    </div>
+    <div class="card-body open" id="cb-${id}">
+      <div class="card-content" id="cc-${id}">Waiting to start…</div>
+    </div>`;
+  return el;
+}
 
-@app.route("/api/investigate", methods=["GET", "POST"])
-def investigate():
-    if request.method == "POST":
-        data = request.json or {}
-    else:
-        data = request.args
-    target = data.get("target", "").strip()
-    target_type = data.get("type", "PERSON")
-    modules_param = data.get("modules", "")
-    if isinstance(modules_param, str) and modules_param:
-        selected_modules = modules_param.split(",")
-    elif isinstance(modules_param, list):
-        selected_modules = modules_param
-    else:
-        selected_modules = list(MODULE_MAP.keys())
-    if not target:
-        return jsonify({"error": "No target provided"}), 400
-    job_id = f"job_{int(time.time()*1000)}"
-    new_job(job_id)
-    threading.Thread(
-        target=run_investigation,
-        args=(job_id, target, target_type, selected_modules),
-        daemon=True
-    ).start()
-    return jsonify({"job_id": job_id})
+function updateCard(cardEl, state, content) {
+  if (!cardEl) return;
+  const id = cardEl.id.replace('card-', '');
+  cardEl.className = `card ${state}`;
+  const statusEl = document.getElementById(`cs-${id}`);
+  statusEl.className = `card-status ${state}`;
+  if (state === 'running') {
+    statusEl.innerHTML = '<span class="spinner"></span> SCANNING';
+    document.getElementById(`cc-${id}`).textContent = 'Running…';
+  } else if (state === 'done') {
+    statusEl.innerHTML = '✓ DONE';
+    document.getElementById(`cc-${id}`).textContent = content || 'No results.';
+  } else if (state === 'error') {
+    statusEl.innerHTML = '✗ ERROR';
+    document.getElementById(`cc-${id}`).textContent = content || 'Module failed.';
+  }
+}
 
-@app.route("/api/stream/<job_id>")
-def stream(job_id):
-    def generate():
-        if job_id not in jobs:
-            yield f"data: {json.dumps({'type':'error','data':{'message':'Job not found'}})}\n\n"
-            return
-        while True:
-            try:
-                event = jobs[job_id]["events"].get(timeout=30)
-                yield f"data: {json.dumps(event)}\n\n"
-                if event["type"] in ("done", "error"):
-                    break
-            except queue.Empty:
-                yield f"data: {json.dumps({'type':'ping','data':{}})}\n\n"
-                if jobs[job_id]["status"] in ("complete", "error"):
-                    break
-    return Response(generate(), mimetype="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+function toggleCard(id) {
+  document.getElementById(`cb-${id}`).classList.toggle('open');
+  document.getElementById(`ct-${id}`).classList.toggle('open');
+}
 
-@app.route("/api/health")
-def health():
-    tools = {t: tool_available(t) for t in ["whois", "dig", "curl"]}
-    return jsonify({"status": "ok", "tools": tools})
+function setProgress(show, pct, label) {
+  const area = document.getElementById('progArea');
+  show ? area.classList.add('show') : area.classList.remove('show');
+  document.getElementById('progFill').style.width = pct + '%';
+  document.getElementById('progLbl').textContent = label || '';
+}
 
-@app.route("/")
-def index():
-    return "FIVE T OSINT Backend running. Connect your frontend."
+function clearAll() {
+  allResults = {};
+  activeModIds = new Set();
+  document.getElementById('results').innerHTML = `
+    <div class="empty" id="emptyState">
+      <div class="empty-icon">◎</div>
+      <div class="empty-title">AWAITING TARGET</div>
+      <div class="empty-sub">21 OSINT modules running in parallel. All sources verified free.</div>
+      <div class="backend-cfg" id="backendCfg">
+        <div class="cfg-label">BACKEND URL</div>
+        <div class="cfg-row">
+          <input id="backendUrl" type="text" value="${BACKEND}"/>
+          <button class="cfg-btn" onclick="testBackend()">TEST</button>
+        </div>
+        <div id="cfgMsg" style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);margin-top:8px;"></div>
+      </div>
+    </div>`;
+  setProgress(false);
+  document.getElementById('expBtn').disabled = true;
+  document.getElementById('aiBtn').disabled = true;
+  renderModules();
+}
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+function addHistory(q) {
+  history = [q, ...history.filter(x => x !== q)].slice(0, 10);
+  localStorage.setItem('fivet_history', JSON.stringify(history));
+  renderHistory();
+}
+
+function renderHistory() {
+  const el = document.getElementById('historyList');
+  if (!history.length) {
+    el.innerHTML = '<div style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);">No searches yet</div>';
+    return;
+  }
+  el.innerHTML = history.map(h =>
+    `<div class="history-item" onclick="document.getElementById('searchInput').value='${h.replace(/'/g,"\\'")}';">${h}</div>`
+  ).join('');
+}
+
+function updateStats() {
+  document.getElementById('sQueries').textContent = stats.queries;
+  document.getElementById('sFindings').textContent = stats.findings;
+  if (stats.lastTime) document.getElementById('sTime').textContent = stats.lastTime;
+}
+
+function exportReport() {
+  const target = document.getElementById('searchInput').value.trim();
+  if (!Object.keys(allResults).length) return;
+  let r = `FIVE T OSINT REPORT\n${'='.repeat(50)}\nTarget: ${target}\nType: ${targetType}\nDate: ${new Date().toUTCString()}\n${'='.repeat(50)}\n`;
+  Object.entries(allResults).forEach(([mod, content]) => {
+    r += `\n\n${mod.toUpperCase()}\n${'-'.repeat(30)}\n${content}\n`;
+  });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([r], { type: 'text/plain' }));
+  a.download = `fivet_${target.replace(/\s+/g,'_')}.txt`;
+  a.click();
+}
+
+function analyzeWithAI() {
+  const target = document.getElementById('searchInput').value.trim();
+  if (!Object.keys(allResults).length) return;
+
+  let resultsSummary = '';
+  Object.entries(allResults).forEach(([mod, content]) => {
+    resultsSummary += `\n\n=== ${mod.toUpperCase()} ===\n${content}`;
+  });
+
+  const prompt = `You are an OSINT investigator assistant for Parnall Law Firm, a personal injury law firm in Albuquerque, New Mexico. You are assisting investigators Rick Anglada, T. Lopez, and C. McPherson.
+
+Analyze the following FIVE T OSINT investigation results for: ${target}
+Target Type: ${targetType}
+Investigation Date: ${new Date().toUTCString()}
+
+Based on the raw module output below, provide:
+
+1. MOST LIKELY CURRENT ADDRESS — with confidence level (High/Medium/Low) and which sources corroborate it
+2. PHONE NUMBERS FOUND — list each with carrier/type if available
+3. EMPLOYMENT LEADS — employer name, address if findable, source
+4. SOCIAL MEDIA PROFILES — which are most likely to match the subject and why
+5. RELATIVES & ASSOCIATES — names and locations useful for indirect contact or service of process
+6. RED FLAGS & INCONSISTENCIES — anything that contradicts across sources
+7. RECOMMENDED NEXT STEPS — specific actions ranked by priority
+8. DRAFT INVESTIGATIVE MEMO — formatted for the case file, ready to use
+
+Keep the memo concise and professional. Flag anything relevant to personal injury litigation, hit and run cases, or service of process.
+
+INVESTIGATION RESULTS:
+${resultsSummary}`;
+
+  const encoded = encodeURIComponent(prompt);
+  window.open(`https://claude.ai/new?q=${encoded}`, '_blank');
+}
+
+document.getElementById('searchInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') runInvestigation();
+});
+</script>
+
+<script>
+// ── Authentication — passwords stored in Render env vars, NOT here ────────────
+let currentUser = null;
+let isAdmin = false;
+let auditLog = JSON.parse(localStorage.getItem('fivet_audit') || '[]');
+let failedLogins = {};
+
+async function checkPw() {
+  const username = document.getElementById('pwUsername').value.trim().toLowerCase();
+  const password = document.getElementById('pwInput').value;
+  const now = new Date().toISOString();
+
+  if (failedLogins[username] && failedLogins[username].count >= 5) {
+    const diff = (new Date() - new Date(failedLogins[username].lastAttempt)) / 1000 / 60;
+    if (diff < 30) {
+      showPwErr(`Account locked. Try again in ${Math.ceil(30-diff)} minutes.`);
+      return;
+    } else {
+      failedLogins[username] = { count: 0 };
+    }
+  }
+
+  try {
+    const res = await fetch(`${BACKEND}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      authToken = data.token;
+      currentUser = { username, role: data.role, name: data.name, token: data.token };
+      isAdmin = data.role === 'admin';
+      failedLogins[username] = { count: 0 };
+      sessionStorage.setItem('fivet_auth', JSON.stringify(currentUser));
+      document.getElementById('lockscreen').style.display = 'none';
+      logAudit(username, 'LOGIN_SUCCESS', `User ${data.name} logged in`);
+      updateUserDisplay();
+      init();
+    } else {
+      if (!failedLogins[username]) failedLogins[username] = { count: 0 };
+      failedLogins[username].count++;
+      failedLogins[username].lastAttempt = now;
+      showPwErr(`⚠ Invalid credentials (${failedLogins[username].count}/5 attempts)`);
+      document.getElementById('pwInput').value = '';
+    }
+  } catch(e) {
+    showPwErr('⚠ Cannot reach backend — check connection');
+  }
+}
+
+function showPwErr(msg) {
+  const err = document.getElementById('pwErr');
+  err.textContent = msg;
+  err.style.display = 'block';
+  setTimeout(() => err.style.display = 'none', 4000);
+}
+
+function logAudit(username, action, detail, target) {
+  const entry = { timestamp: new Date().toISOString(), username, action, detail: detail||'', target: target||'', ip: 'client-side' };
+  auditLog.unshift(entry);
+  if (auditLog.length > 1000) auditLog = auditLog.slice(0, 1000);
+  localStorage.setItem('fivet_audit', JSON.stringify(auditLog));
+}
+
+function updateUserDisplay() {
+  if (currentUser) {
+    const hdr = document.getElementById('userDisplay');
+    if (hdr) hdr.textContent = `${currentUser.name} (${currentUser.role.toUpperCase()})`;
+  }
+}
+
+async function logout() {
+  try {
+    if (authToken) {
+      await fetch(`${BACKEND}/api/auth/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: authToken })
+      });
+    }
+  } catch(e) {}
+  sessionStorage.removeItem('fivet_auth');
+  currentUser = null;
+  isAdmin = false;
+  authToken = null;
+  location.reload();
+}
+
+function showAuditLog() {
+  if (!isAdmin) return;
+  const win = window.open('', '_blank');
+  win.document.write('<html><head><title>FIVE T Audit Log</title>');
+  win.document.write('<style>body{background:#060a0f;color:#c8d8e8;font-family:monospace;padding:20px;}h1{color:#00a896;letter-spacing:3px;}table{width:100%;border-collapse:collapse;}th{background:#0b1118;color:#00a896;padding:8px;text-align:left;font-size:11px;}td{padding:6px 8px;font-size:11px;border-bottom:1px solid #1a2a3a;}.login{color:#39ff14}.logout{color:#4a6070}.search{color:#ffb300}.failed{color:#ff3b3b}</style></head><body>');
+  win.document.write('<h1>◎ FIVE T // AUDIT LOG</h1>');
+  win.document.write(`<p style="color:#4a6070;font-size:11px;margin-bottom:16px">Total: ${auditLog.length} | ${new Date().toISOString()}</p>`);
+  win.document.write('<table><tr><th>TIMESTAMP</th><th>USER</th><th>ACTION</th><th>DETAIL</th><th>TARGET</th></tr>');
+  auditLog.forEach(e => {
+    const cls = e.action.includes('SUCCESS') ? 'login' : e.action.includes('LOGOUT') ? 'logout' : e.action.includes('SEARCH') ? 'search' : 'failed';
+    win.document.write(`<tr><td>${e.timestamp}</td><td>${e.username}</td><td class="${cls}">${e.action}</td><td>${e.detail}</td><td>${e.target||''}</td></tr>`);
+  });
+  win.document.write('</table></body></html>');
+}
+
+window.addEventListener('load', async () => {
+  const saved = sessionStorage.getItem('fivet_auth');
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      authToken = parsed.token;
+      const res = await fetch(`${BACKEND}/api/auth/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: authToken })
+      });
+      const data = await res.json();
+      if (data.valid) {
+        currentUser = { username: data.username, role: data.role, name: data.name };
+        isAdmin = data.role === 'admin';
+        document.getElementById('lockscreen').style.display = 'none';
+        updateUserDisplay();
+        init();
+      } else {
+        sessionStorage.removeItem('fivet_auth');
+      }
+    } catch(e) {
+      try {
+        currentUser = JSON.parse(saved);
+        isAdmin = currentUser.role === 'admin';
+        document.getElementById('lockscreen').style.display = 'none';
+        updateUserDisplay();
+        init();
+      } catch(e2) { sessionStorage.removeItem('fivet_auth'); }
+    }
+  }
+});
+</script>
+</body>
+</html>
