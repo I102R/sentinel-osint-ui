@@ -667,6 +667,7 @@ async function checkPw() {
     if (data.success) {
       authToken = data.token; currentUser = { username, role: data.role, name: data.name, token: data.token };
       isAdmin = data.role === 'admin'; failedLogins[username] = { count: 0 };
+      if (isAdmin) { const ab = document.getElementById('auditBtn'); if (ab) ab.style.display = 'inline-block'; }
       sessionStorage.setItem('fivet_auth', JSON.stringify(currentUser));
       document.getElementById('lockscreen').style.display = 'none';
       logAudit(username, 'LOGIN_SUCCESS', `User ${data.name} logged in`);
@@ -697,6 +698,8 @@ function updateUserDisplay() {
   if (currentUser) {
     const hdr = document.getElementById('userDisplay');
     if (hdr) hdr.textContent = `${currentUser.name} (${currentUser.role.toUpperCase()})`;
+    const ab = document.getElementById('auditBtn');
+    if (ab) ab.style.display = isAdmin ? 'inline-block' : 'none';
   }
 }
 
@@ -733,12 +736,14 @@ window.addEventListener('load', async () => {
       if (data.valid) {
         currentUser = { username: data.username, role: data.role, name: data.name };
         isAdmin = data.role === 'admin';
+        if (isAdmin) { const ab = document.getElementById('auditBtn'); if (ab) ab.style.display = 'inline-block'; }
         document.getElementById('lockscreen').style.display = 'none';
         updateUserDisplay(); init();
       } else { sessionStorage.removeItem('fivet_auth'); }
     } catch(e) {
       try {
         currentUser = JSON.parse(saved); isAdmin = currentUser.role === 'admin';
+        if (isAdmin) { const ab = document.getElementById('auditBtn'); if (ab) ab.style.display = 'inline-block'; }
         document.getElementById('lockscreen').style.display = 'none';
         updateUserDisplay(); init();
       } catch(e2) { sessionStorage.removeItem('fivet_auth'); }
