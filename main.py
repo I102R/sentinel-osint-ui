@@ -2,7 +2,8 @@
 FIVE T OSINT Agent - Backend Server
 Runs on Render.com (Python 3.10+)
 All modules audited June 2026 — paywall tools removed, free tools verified.
-v2.0 — Additional Identifiers (DOB/SSN/OLN), auto dorks integrated into all PERSON modules
+v2.1 — Full URL audit: parameterized where possible, MANUAL labels on form-entry tools,
+        duplicates removed, no stone left unturned.
 """
 
 from flask import Flask, request, jsonify, Response
@@ -111,8 +112,6 @@ def parse_name_location(target):
 
 # ── Additional Identifiers Parser ─────────────────────────────────────────────
 def parse_identifiers(data):
-    """Extract and validate Additional Identifier fields from request data.
-    SSN raw value is cleared immediately after masking — never logged."""
     ids = {
         "dob_month":  str(data.get("dob_month", "")).strip(),
         "dob_day":    str(data.get("dob_day", "")).strip(),
@@ -140,13 +139,11 @@ def parse_identifiers(data):
     else:
         ids["ssn_display"] = ""
         ids["ssn_last4"] = ""
-    ids["ssn_value"] = ""  # clear raw value immediately
+    ids["ssn_value"] = ""
     return ids
 
 # ── Dork Builder ──────────────────────────────────────────────────────────────
 def build_dorks(name_part, location_part, state, city, ids):
-    """Build all dork sets keyed by module: people, skip, social, court.
-    Each value is a list of (label, query_string, badge) tuples."""
     n = f'"{name_part}"'
     loc = f'"{location_part}"' if location_part else ""
     st  = f'"{state}"' if state else ""
@@ -228,7 +225,6 @@ def build_dorks(name_part, location_part, state, city, ids):
 
 
 def render_dorks(dork_list, section_label):
-    """Render a dork list into output lines."""
     lines = []
     lines.append("=" * 50)
     lines.append(f"[ AUTO DORKS ] — {section_label}")
@@ -244,7 +240,6 @@ def render_dorks(dork_list, section_label):
 
 
 def render_identifier_sources(ids, name_part, first, last):
-    """Render Additional Identifier source blocks. SSN raw value already cleared."""
     lines = []
     yr        = ids.get("dob_year","")
     dob_m     = ids.get("dob_month","")
@@ -278,9 +273,9 @@ def render_identifier_sources(ids, name_part, first, last):
             dob_str = yr
         lines.append(f"DOB on file: {dob_str}")
         lines.append("")
-        lines.append("[NM Voter Portal — DOB exact match]")
+        lines.append("[NM Voter Portal — DOB exact match]  ⚑ MANUAL: enter name + DOB on site")
         lines.append("  https://voterportal.servis.sos.nm.gov/WhereToVote.aspx")
-        lines.append("  TIP: Enter full DOB for exact-match — highest-confidence free address source")
+        lines.append("  TIP: Highest-confidence free address source — DOB exact match eliminates false hits")
         lines.append("")
         lines.append("[FamilyTreeNow — DOB filter]")
         lines.append(f"  https://www.familytreenow.com/search/people/results?first={first}&last={last}&birthyear={yr}")
@@ -288,12 +283,12 @@ def render_identifier_sources(ids, name_part, first, last):
         lines.append("[TruePeopleSearch — DOB narrow]")
         lines.append(f"  https://www.truepeoplesearch.com/results?name={quote_plus(name_part)}&birthdate={dob_str}")
         lines.append("")
-        lines.append("[NM CourtLook — DOB filter]")
+        lines.append("[NM CourtLook — DOB filter]  ⚑ MANUAL: enter name + DOB on site")
         lines.append("  https://caselookup.nmcourts.gov/caselookup/app")
-        lines.append(f"  TIP: Use DOB {dob_str} to eliminate same-name hits in court results")
+        lines.append(f"  TIP: DOB {dob_str} eliminates same-name hits in court results")
         lines.append("")
         if yr:
-            lines.append("[SSN Issuance Validator — cross-check DOB/origin]  [DOB]")
+            lines.append("[SSN Issuance Validator — cross-check DOB/origin]  ⚑ MANUAL: enter SSN prefix on site  [DOB]")
             lines.append("  https://www.ssnvalidator.com")
             lines.append(f"  TIP: Birth year {yr} — confirm SSN issue state matches subject origin")
             lines.append("")
@@ -310,18 +305,18 @@ def render_identifier_sources(ids, name_part, first, last):
         lines.append(f"SSN on file: {ssn_disp}")
         lines.append(f"Type: {ssn_type.upper() if ssn_type else 'UNKNOWN'}")
         lines.append("")
-        lines.append("[SSN Issuance State Lookup — free]")
+        lines.append("[SSN Issuance State Lookup — free]  ⚑ MANUAL: enter SSN prefix on site")
         lines.append("  https://www.ssnvalidator.com")
-        lines.append("  TIP: Confirms state of issuance and approximate year — validates subject age/origin")
+        lines.append("  TIP: Confirms state of issuance + approximate year — validates subject age/origin")
         lines.append("")
         if ssn_type == "full":
-            lines.append("[PACER — bankruptcy search with SSN filter]")
+            lines.append("[PACER — bankruptcy search]  ⚑ MANUAL: register free, search by SSN")
             lines.append("  https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf")
             lines.append("")
-            lines.append("[NM Taxation & Revenue — TAP tax lien search]")
+            lines.append("[NM Taxation & Revenue — TAP tax lien search]  ⚑ MANUAL: enter name/SSN on site")
             lines.append("  https://tap.state.nm.us/tap/_/")
             lines.append("")
-            lines.append("[IRS Tax Lien Search]")
+            lines.append("[IRS Tax Lien Search]  ⚑ MANUAL: enter name on site")
             lines.append("  https://www.irs.gov/businesses/small-businesses-self-employed/search-for-a-lien")
             lines.append("")
             lines.append("[UCC Filings NM — debtor search]")
@@ -354,20 +349,20 @@ def render_identifier_sources(ids, name_part, first, last):
                 "CA": ("CA DMV","https://www.dmv.ca.gov/","(800) 777-0133"),
             }
             mvd = mvd_links.get(oln_state, ("State MVD","https://www.vehiclehistory.gov/","Check state DMV"))
-            lines.append(f"[{mvd[0]} — DPPA formal request]  [OLN]")
+            lines.append(f"[{mvd[0]} — DPPA formal request]  ⚑ MANUAL: submit DPPA form  [OLN]")
             lines.append(f"  {mvd[1]}")
             lines.append(f"  Phone: {mvd[2]}")
             lines.append(f"  TIP: Submit DPPA permissible use request with OLN {oln}")
             lines.append("")
-            lines.append("[AAMVA PDPS — national driver pointer system]  [OLN]")
+            lines.append("[AAMVA PDPS — national driver pointer system]  ⚑ MANUAL: DPPA certification required  [OLN]")
             lines.append("  https://www.aamva.org/technology/systems/pdps/")
-            lines.append("  TIP: CDL holders and serious traffic offenders — DPPA certification required")
+            lines.append("  TIP: CDL holders and serious traffic offenders")
             lines.append("")
-            lines.append("[LexisNexis C.L.U.E. — prior insurance claims]  [OLN]")
+            lines.append("[LexisNexis C.L.U.E. — prior insurance claims]  ⚑ MANUAL: firm account required  [OLN]")
             lines.append("  https://personalreports.lexisnexis.com")
             lines.append(f"  TIP: OLN {oln} — prior claims history material to PI damages")
             lines.append("")
-        lines.append("[NM CourtLook — traffic/DUI filter]  [OLN]")
+        lines.append("[NM CourtLook — traffic/DUI filter]  ⚑ MANUAL: enter OLN on site  [OLN]")
         lines.append("  https://caselookup.nmcourts.gov/caselookup/app")
         lines.append(f"  TIP: Search by OLN {oln} for traffic citations, DUI, reckless driving history")
         lines.append("")
@@ -398,21 +393,21 @@ def module_people_search(target, job_id, ids=None):
     lines.append("")
     lines.append("=" * 50); lines.append("FREE PEOPLE FINDER SITES"); lines.append("=" * 50); lines.append("")
     sites = [
-        ("FAMILYTREENOW BEST FREE",  f"https://www.familytreenow.com/search/people/results?first={first}&last={last}&state={state}"),
-        ("TRUEPEOPLESEARCH",         f"https://www.truepeoplesearch.com/results?name={name_plus}&citystatezip={loc_plus}"),
-        ("FASTPEOPLESEARCH",         f"https://www.fastpeoplesearch.com/name/{name_url}"),
-        ("THATSTHEM 100% FREE",      f"https://thatsthem.com/name/{first}-{last}"),
-        ("IDCRAWL social+records",   f"https://www.idcrawl.com/name/{first}-{last}"),
-        ("PEEKYOU social+records",   f"https://www.peekyou.com/{first}_{last}"),
-        ("ZABASEARCH",               f"https://www.zabasearch.com/people/{first}+{last}/{state}/"),
-        ("411.COM",                  f"https://www.411.com/name/{first}-{last}/{state}"),
-        ("USPHONEBOOK",              f"https://www.usphonebook.com/{first}-{last}"),
-        ("CLUSTRMAPS",               f"https://clustrmaps.com/person/{last}-{first}/"),
-        ("SEARCHPEOPLEFREE",         f"https://www.searchpeoplefree.com/find/{first}-{last}"),
-        ("NUWBER",                   f"https://nuwber.com/search?firstName={first}&lastName={last}&city={quote_plus(city)}&state={state}"),
-        ("VOTERRECORDS.COM",         f"https://voterrecords.com/voters/{name_url}/1"),
-        ("PUBLICRECORDS.ONLINE",     f"https://publicrecords.online/search/?first_name={first}&last_name={last}&state={state}"),
-        ("INTELIUS preview free",    f"https://www.intelius.com/people-search/results/?fn={first}&ln={last}&state={state}"),
+        ("FAMILYTREENOW",        f"https://www.familytreenow.com/search/people/results?first={first}&last={last}&state={state}"),
+        ("TRUEPEOPLESEARCH",     f"https://www.truepeoplesearch.com/results?name={name_plus}&citystatezip={loc_plus}"),
+        ("FASTPEOPLESEARCH",     f"https://www.fastpeoplesearch.com/name/{name_url}"),
+        ("THATSTHEM",            f"https://thatsthem.com/name/{first}-{last}"),
+        ("IDCRAWL",              f"https://www.idcrawl.com/name/{first}-{last}"),
+        ("PEEKYOU",              f"https://www.peekyou.com/{first}_{last}"),
+        ("ZABASEARCH",           f"https://www.zabasearch.com/people/{first}+{last}/{state}/"),
+        ("411.COM",              f"https://www.411.com/name/{first}-{last}/{state}"),
+        ("USPHONEBOOK",          f"https://www.usphonebook.com/{first}-{last}"),
+        ("CLUSTRMAPS",           f"https://clustrmaps.com/person/{last}-{first}/"),
+        ("SEARCHPEOPLEFREE",     f"https://www.searchpeoplefree.com/find/{first}-{last}"),
+        ("NUWBER",               f"https://nuwber.com/search?firstName={first}&lastName={last}&city={quote_plus(city)}&state={state}"),
+        ("VOTERRECORDS.COM",     f"https://voterrecords.com/voters/{name_url}/1"),
+        ("PUBLICRECORDS.ONLINE", f"https://publicrecords.online/search/?first_name={first}&last_name={last}&state={state}"),
+        ("INTELIUS preview",     f"https://www.intelius.com/people-search/results/?fn={first}&ln={last}&state={state}"),
     ]
     for nm, url in sites:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
@@ -429,11 +424,11 @@ def module_people_search(target, job_id, ids=None):
         lines.append(f"[{platform}]"); lines.append(f"  {url}"); lines.append("")
     lines.append("=" * 50); lines.append("COURT & PUBLIC RECORDS"); lines.append("=" * 50); lines.append("")
     for nm, url in [
-        ("NM Courts CourtLook",   "https://caselookup.nmcourts.gov/caselookup/app"),
-        ("PACER Federal Courts",  "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
+        ("NM Courts CourtLook — MANUAL: enter name",  "https://caselookup.nmcourts.gov/caselookup/app"),
+        ("PACER Federal Courts — MANUAL: free acct",  "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
         ("CourtListener Free",    f"https://www.courtlistener.com/?q={name_plus}&type=p"),
         ("OpenSanctions",         f"https://www.opensanctions.org/search/?q={name_plus}"),
-        ("VINE Offender NM",      "https://vinelink.vineapps.com/search/NM/Person"),
+        ("VINE Offender NM — MANUAL: enter name",     "https://vinelink.vineapps.com/search/NM/Person"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines.extend(render_identifier_sources(ids, name_part, first, last))
@@ -454,6 +449,10 @@ def module_people_search(target, job_id, ids=None):
     return result
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# MODULE: PUBLIC RECORDS
+# ══════════════════════════════════════════════════════════════════════════════
+
 def module_public_records(target, job_id, ids=None):
     if ids is None: ids = {}
     emit(job_id, "module_start", {"module": "public_records"})
@@ -462,53 +461,52 @@ def module_public_records(target, job_id, ids=None):
     lines = [f"TARGET: {name_part}", ""]
     lines.append("=" * 50); lines.append("FREE PEOPLE & ADDRESS RECORDS"); lines.append("=" * 50); lines.append("")
     for nm, url in [
-        ("JudyRecords 740M Court Cases FREE", f"https://www.judyrecords.com/search?q={name_plus}"),
-        ("FamilyTreeNow BEST FREE", f"https://www.familytreenow.com/search/people/results?first={first}&last={last}"),
-        ("TruePeopleSearch", f"https://www.truepeoplesearch.com/results?name={name_plus}"),
-        ("FastPeopleSearch", f"https://www.fastpeoplesearch.com/name/{name_part.replace(' ','-').lower()}"),
-        ("ThatsThem 100% FREE", f"https://thatsthem.com/name/{first}-{last}"),
-        ("IDCrawl", f"https://www.idcrawl.com/name/{first}-{last}"),
-        ("ClustrMaps", f"https://clustrmaps.com/person/{last}-{first}/"),
-        ("SearchPeopleFree", f"https://www.searchpeoplefree.com/find/{first}-{last}"),
-        ("Nuwber", f"https://nuwber.com/search?firstName={first}&lastName={last}"),
-        ("PublicRecords.Online", f"https://publicrecords.online/search/?first_name={first}&last_name={last}"),
-        ("PublicRecordsNow", "https://www.publicrecordsnow.com/"),
+        ("JudyRecords 740M cases",       f"https://www.judyrecords.com/search?q={name_plus}"),
+        ("FamilyTreeNow",                f"https://www.familytreenow.com/search/people/results?first={first}&last={last}"),
+        ("TruePeopleSearch",             f"https://www.truepeoplesearch.com/results?name={name_plus}"),
+        ("FastPeopleSearch",             f"https://www.fastpeoplesearch.com/name/{name_part.replace(' ','-').lower()}"),
+        ("ThatsThem",                    f"https://thatsthem.com/name/{first}-{last}"),
+        ("IDCrawl",                      f"https://www.idcrawl.com/name/{first}-{last}"),
+        ("ClustrMaps",                   f"https://clustrmaps.com/person/{last}-{first}/"),
+        ("SearchPeopleFree",             f"https://www.searchpeoplefree.com/find/{first}-{last}"),
+        ("Nuwber",                       f"https://nuwber.com/search?firstName={first}&lastName={last}"),
+        ("PublicRecords.Online",         f"https://publicrecords.online/search/?first_name={first}&last_name={last}"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines.append("=" * 50); lines.append("ARREST & CRIMINAL RECORDS"); lines.append("=" * 50); lines.append("")
     for nm, url in [
-        ("JudyRecords 740M US Cases FREE", f"https://www.judyrecords.com/search?q={name_plus}"),
-        ("Trellis.law State Courts Free", f"https://trellis.law/person/{first}-{last}"),
-        ("NM Courts CourtLook", "https://caselookup.nmcourts.gov/caselookup/app"),
-        ("PACER Federal Courts", "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
-        ("CourtListener Free Federal", f"https://www.courtlistener.com/?q={name_plus}&type=p"),
-        ("VINE Offender Search NM", "https://vinelink.vineapps.com/search/NM/Person"),
-        ("NM Corrections Inmate", "https://www.cd.nm.gov/divisions/oid/offender-search/"),
-        ("JailBase Arrest Bookings FREE", f"https://www.jailbase.com/search/?name_searched={name_plus}"),
-        ("CriminalWatchdog FREE", f"https://www.criminalwatchdog.com/faq/search-results?fname={first}&lname={last}&state={state}"),
-        ("BookingLogs FREE", f"https://bookinglogs.com/?s={name_plus}"),
-        ("OpenSanctions", f"https://www.opensanctions.org/search/?q={name_plus}"),
-        ("Sex Offender Registry NM", "https://www.nmsexoffender.dps.nm.gov/"),
-        ("Sex Offender Registry National", f"https://www.nsopw.gov/Search/Results?firstName={first}&lastName={last}"),
+        ("JudyRecords",                  f"https://www.judyrecords.com/search?q={name_plus}"),
+        ("Trellis.law state courts",     f"https://trellis.law/person/{first}-{last}"),
+        ("NM Courts CourtLook — MANUAL: enter name",  "https://caselookup.nmcourts.gov/caselookup/app"),
+        ("PACER Federal Courts — MANUAL: free acct",  "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
+        ("CourtListener Federal",        f"https://www.courtlistener.com/?q={name_plus}&type=p"),
+        ("VINE Offender NM — MANUAL: enter name",     "https://vinelink.vineapps.com/search/NM/Person"),
+        ("NM Corrections Inmate — MANUAL: enter name","https://www.cd.nm.gov/divisions/oid/offender-search/"),
+        ("JailBase arrest bookings",     f"https://www.jailbase.com/search/?name_searched={name_plus}"),
+        ("CriminalWatchdog",             f"https://www.criminalwatchdog.com/faq/search-results?fname={first}&lname={last}&state={state}"),
+        ("BookingLogs",                  f"https://bookinglogs.com/?s={name_plus}"),
+        ("OpenSanctions",                f"https://www.opensanctions.org/search/?q={name_plus}"),
+        ("NM Sex Offender Registry — MANUAL: enter name", "https://www.nmsexoffender.dps.nm.gov/"),
+        ("National Sex Offender",        f"https://www.nsopw.gov/Search/Results?firstName={first}&lastName={last}"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines.append("=" * 50); lines.append("VITAL RECORDS & GENEALOGY"); lines.append("=" * 50); lines.append("")
     for nm, url in [
-        ("FamilySearch Free", f"https://www.familysearch.org/search/record/results?q.givenName={first}&q.surname={last}"),
-        ("Ancestry limited free", f"https://www.ancestry.com/search/?name={first}_{last}"),
-        ("FindAGrave", f"https://www.findagrave.com/memorial/search?firstname={first}&lastname={last}"),
-        ("BillionGraves", f"https://billiongraves.com/search/results/#firstname={first}&lastname={last}"),
-        ("Legacy.com Obituaries", f"https://www.legacy.com/obituaries/search?keyword={name_plus}"),
-        ("NamUs Missing Persons", "https://www.namus.gov/MissingPersons/Search#/results"),
+        ("FamilySearch",   f"https://www.familysearch.org/search/record/results?q.givenName={first}&q.surname={last}"),
+        ("Ancestry",       f"https://www.ancestry.com/search/?name={first}_{last}"),
+        ("FindAGrave",     f"https://www.findagrave.com/memorial/search?firstname={first}&lastname={last}"),
+        ("BillionGraves",  f"https://billiongraves.com/search/results/#firstname={first}&lastname={last}"),
+        ("Legacy.com",     f"https://www.legacy.com/obituaries/search?keyword={name_plus}"),
+        ("NamUs Missing Persons — MANUAL: enter name", "https://www.namus.gov/MissingPersons/Search#/results"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines.append("=" * 50); lines.append("PROFESSIONAL LICENSES"); lines.append("=" * 50); lines.append("")
     for nm, url in [
-        ("NM License Lookup", "https://www.rld.nm.gov/licensing-and-regulation/"),
-        ("NM Medical Board", "https://www.nmmb.state.nm.us/"),
-        ("NM Bar Association", "https://www.nmbar.org/"),
-        ("NPPES Medical NPI", f"https://npiregistry.cms.hhs.gov/search?search_type=ind&first_name={first}&last_name={last}"),
-        ("BLS License Lookup", "https://www.careeronestop.org/Toolkit/Credentials/find-licenses.aspx"),
+        ("NM RLD License Search",   f"https://www.rld.nm.gov/licensing-and-regulation/licensee-search/?SearchName={quote_plus(name_part)}"),
+        ("NM Medical Board — MANUAL: enter name",       "https://www.nmmb.state.nm.us/"),
+        ("NM Bar Find a Lawyer",    f"https://nmbar.org/Nmbar/Find_A_Lawyer/NMBar/MembersClients/Find_a_Lawyer.aspx"),
+        ("NPPES Medical NPI",       f"https://npiregistry.cms.hhs.gov/search?search_type=ind&first_name={first}&last_name={last}"),
+        ("CareerOneStop License",   f"https://www.careeronestop.org/Toolkit/Credentials/find-licenses.aspx?keyword={quote_plus(name_part)}&location={state}"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     dorks = build_dorks(name_part, location_part, state, city, ids)
@@ -517,7 +515,7 @@ def module_public_records(target, job_id, ids=None):
         out, _, _ = run_cmd(f"curl -s 'https://www.courtlistener.com/api/rest/v3/people/?name_last={last}&name_first={first}&format=json' 2>/dev/null", timeout=10)
         data = json.loads(out); count = data.get("count",0)
         if count > 0:
-            lines += ["=" * 50, f"COURTLISTENER -- {count} RECORD(S) FOUND", "=" * 50, ""]
+            lines += ["=" * 50, f"COURTLISTENER — {count} RECORD(S) FOUND", "=" * 50, ""]
             for r in data.get("results",[])[:3]:
                 lines.append(f"  Name: {r.get('name_full','N/A')}"); lines.append(f"  URL:  https://www.courtlistener.com{r.get('absolute_url','')}"); lines.append("")
     except: pass
@@ -526,6 +524,9 @@ def module_public_records(target, job_id, ids=None):
     return result
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# MODULE: PROPERTY
+# ══════════════════════════════════════════════════════════════════════════════
 
 def module_property(target, job_id, ids=None):
     if ids is None: ids = {}
@@ -535,66 +536,71 @@ def module_property(target, job_id, ids=None):
     lines = [f"TARGET: {name_part}"]
     if location_part: lines.append(f"LOCATION: {location_part}")
     lines.append("")
-    lines += ["="*50, "NEW MEXICO PROPERTY RECORDS -- ALL 33 COUNTIES", "="*50, ""]
+    # PropWire first — only free national tool that searches by owner name with results
+    lines += ["=" * 50, "NATIONAL PROPERTY DATABASES — FREE", "=" * 50, ""]
     for nm, url in [
-        ("Bernalillo County Assessor","https://assessor.bernco.gov/public.access/search/commonsearch.aspx?mode=owner"),
-        ("Sandoval County Assessor","https://www.sandovalcountynm.gov/assessor/property-search/"),
-        ("Santa Fe County Assessor","https://www.santafecountynm.gov/assessor"),
-        ("Dona Ana County Assessor","https://assessor.donaanacounty.org/"),
-        ("Valencia County Assessor","https://www.co.valencia.nm.us/assessor"),
-        ("Chavez Roswell Assessor","https://www.chaves.nm.us/departments/assessor"),
-        ("Lea County Assessor","https://www.leacountynm.gov/departments/assessor"),
-        ("Otero County Assessor","https://www.oterocountynm.gov/county-offices/assessor"),
-        ("San Juan County Assessor","https://www.sjcounty.net/departments/assessor"),
-        ("McKinley County Assessor","https://www.co.mckinley.nm.us/assessor"),
-        ("Eddy County Assessor","https://www.co.eddy.nm.us/137/Assessor"),
-        ("Curry County Assessor","https://www.currycounty.org/assessor"),
-        ("Roosevelt County Assessor","https://www.rooseveltcounty.com/assessor"),
-        ("Sierra County Assessor","https://sierracountynm.gov/assessor/"),
-        ("Grant County Assessor","https://www.grantcountynm.gov/assessor"),
-        ("Luna County Assessor","https://www.lunacountynm.us/assessor"),
-        ("Hidalgo County Assessor","https://www.hidalgocountynm.gov/assessor"),
-        ("Socorro County Assessor","https://www.socorrocounty.org/assessor"),
-        ("Lincoln County Assessor","https://www.lincolncountynm.net/assessor"),
-        ("Torrance County Assessor","https://www.torrancecountynm.org/assessor"),
-        ("Taos County Assessor","https://www.taoscounty.org/assessor"),
-        ("Rio Arriba County Assessor","https://www.rio-arriba.org/assessor"),
-        ("San Miguel County Assessor","https://www.co.san-miguel.nm.us/assessor"),
-        ("Cibola County Assessor","https://www.cibolacounty.org/assessor"),
-        ("Los Alamos County Assessor","https://www.losalamosnm.us/assessor"),
-        ("NETR All NM Counties","https://publicrecords.netronline.com/state/NM"),
+        ("PropWire — owner name search",       f"https://propwire.com/search?q={name_plus}"),
+        ("County Office — owner search",       f"https://www.countyoffice.org/property-records-search/?q={name_plus}"),
+        ("FamilyTreeNow — address history",    f"https://www.familytreenow.com/search/people/results?first={first}&last={last}"),
+        ("NETR Online — all 50 states — MANUAL: select county", "https://publicrecords.netronline.com/state/NM"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "NATIONAL PROPERTY DATABASES -- FREE", "="*50, ""]
+    lines += ["=" * 50, "NEW MEXICO PROPERTY RECORDS — ALL 33 COUNTIES — MANUAL: enter owner name", "=" * 50, ""]
+    lines.append("⚑ All county assessor portals require manual name entry. Click link, search by owner.")
+    lines.append("")
     for nm, url in [
-        ("PropWire Free Owner Search", f"https://propwire.com/search?q={name_plus}"),
-        ("County Office", f"https://www.countyoffice.org/property-records-search/?q={name_plus}"),
-        ("FamilyTreeNow Address Hist", f"https://www.familytreenow.com/search/people/results?first={first}&last={last}"),
-        ("NETR Online All 50 States","https://publicrecords.netronline.com/"),
-        ("Realtor.com", f"https://www.realtor.com/realestateandhomes-search/{location_part.replace(' ','-') or 'new-mexico'}/"),
+        ("Bernalillo County Assessor",  "https://assessor.bernco.gov/public.access/search/commonsearch.aspx?mode=owner"),
+        ("Sandoval County Assessor",    "https://www.sandovalcountynm.gov/assessor/property-search/"),
+        ("Santa Fe County Assessor",    "https://www.santafecountynm.gov/assessor"),
+        ("Dona Ana County Assessor",    "https://assessor.donaanacounty.org/"),
+        ("Valencia County Assessor",    "https://www.co.valencia.nm.us/assessor"),
+        ("Chavez/Roswell Assessor",     "https://www.chaves.nm.us/departments/assessor"),
+        ("Lea County Assessor",         "https://www.leacountynm.gov/departments/assessor"),
+        ("Otero County Assessor",       "https://www.oterocountynm.gov/county-offices/assessor"),
+        ("San Juan County Assessor",    "https://www.sjcounty.net/departments/assessor"),
+        ("McKinley County Assessor",    "https://www.co.mckinley.nm.us/assessor"),
+        ("Eddy County Assessor",        "https://www.co.eddy.nm.us/137/Assessor"),
+        ("Curry County Assessor",       "https://www.currycounty.org/assessor"),
+        ("Roosevelt County Assessor",   "https://www.rooseveltcounty.com/assessor"),
+        ("Sierra County Assessor",      "https://sierracountynm.gov/assessor/"),
+        ("Grant County Assessor",       "https://www.grantcountynm.gov/assessor"),
+        ("Luna County Assessor",        "https://www.lunacountynm.us/assessor"),
+        ("Hidalgo County Assessor",     "https://www.hidalgocountynm.gov/assessor"),
+        ("Socorro County Assessor",     "https://www.socorrocounty.org/assessor"),
+        ("Lincoln County Assessor",     "https://www.lincolncountynm.net/assessor"),
+        ("Torrance County Assessor",    "https://www.torrancecountynm.org/assessor"),
+        ("Taos County Assessor",        "https://www.taoscounty.org/assessor"),
+        ("Rio Arriba County Assessor",  "https://www.rio-arriba.org/assessor"),
+        ("San Miguel County Assessor",  "https://www.co.san-miguel.nm.us/assessor"),
+        ("Cibola County Assessor",      "https://www.cibolacounty.org/assessor"),
+        ("Los Alamos County Assessor",  "https://www.losalamosnm.us/assessor"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "TAX & LIENS -- FREE", "="*50, ""]
+    lines += ["=" * 50, "TAX & LIENS — FREE", "=" * 50, ""]
     for nm, url in [
-        ("NM Taxation & Revenue","https://tap.state.nm.us/tap/_/"),
-        ("Federal Tax Liens PACER","https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
-        ("UCC Filings NM","https://portal.sos.state.nm.us/BFS/online/UCCFilings/SearchUCC"),
-        ("Bankruptcy Search","https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
+        ("NM Taxation & Revenue TAP — MANUAL: enter name/TIN",  "https://tap.state.nm.us/tap/_/"),
+        ("Federal Tax Liens PACER — MANUAL: free acct",          "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
+        ("UCC Filings NM",                                        f"https://portal.sos.state.nm.us/BFS/online/UCCFilings/SearchUCC?debtorName={name_plus}"),
+        ("Bankruptcy PACER — MANUAL: free acct",                  "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     prop_dorks = [
-        ("Property owner NM", f'"{name_part}" property owner New Mexico', ""),
-        ("Real estate deed", f'"{name_part}" real estate deed', ""),
-        ("Assessor parcel", f'"{name_part}" assessor parcel', ""),
-        ("Foreclosure lien", f'"{name_part}" foreclosure lien', ""),
+        ("Property owner NM",  f'"{name_part}" property owner New Mexico', ""),
+        ("Real estate deed",   f'"{name_part}" real estate deed', ""),
+        ("Assessor parcel",    f'"{name_part}" assessor parcel', ""),
+        ("Foreclosure lien",   f'"{name_part}" foreclosure lien', ""),
     ]
-    if ids.get("zip"): prop_dorks.append(("ZIP property", f'"{name_part}" "{ids["zip"]}" property', ""))
+    if ids.get("zip"):   prop_dorks.append(("ZIP property",   f'"{name_part}" "{ids["zip"]}" property', ""))
     if ids.get("street"): prop_dorks.append(("Street anchor", f'"{name_part}" "{ids["street"]}"', ""))
     lines.extend(render_dorks(prop_dorks, "PROPERTY"))
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "property", "result": result})
     return result
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MODULE: SKIP TRACE
+# ══════════════════════════════════════════════════════════════════════════════
 
 def module_skip_trace(target, job_id, ids=None):
     if ids is None: ids = {}
@@ -606,26 +612,25 @@ def module_skip_trace(target, job_id, ids=None):
     lines = [f"TARGET:   {name_part}"]
     if location_part: lines.append(f"LOCATION: {location_part}")
     lines += ["", "DPPA: Law firms qualify under 18 U.S.C. 2721(b) for litigation & process serving.", ""]
-    lines += ["="*50, "TIER 1 -- FREE SOURCES THAT SHOW FULL RESULTS", "="*50, ""]
+    lines += ["=" * 50, "TIER 1 — FREE SOURCES (pre-loaded results)", "=" * 50, ""]
     for nm, url in [
-        ("FamilyTreeNow BEST FREE", f"https://www.familytreenow.com/search/people/results?first={first}&last={last}&state={state}"),
-        ("TruePeopleSearch", f"https://www.truepeoplesearch.com/results?name={name_plus}&citystatezip={city_plus}+{state}"),
-        ("FastPeopleSearch", f"https://www.fastpeoplesearch.com/name/{name_url}"),
-        ("ThatsThem 100% FREE", f"https://thatsthem.com/name/{first}-{last}"),
-        ("IDCrawl social+records", f"https://www.idcrawl.com/name/{first}-{last}"),
-        ("ZabaSearch aliases+history", f"https://www.zabasearch.com/people/{first}+{last}/{state}/"),
-        ("411.com", f"https://www.411.com/name/{first}-{last}/{state}"),
-        ("USPhoneBook", f"https://www.usphonebook.com/{first}-{last}"),
-        ("Clustrmaps", f"https://clustrmaps.com/person/{last}-{first}/"),
-        ("SearchPeopleFree", f"https://www.searchpeoplefree.com/find/{first}-{last}"),
-        ("Nuwber", f"https://nuwber.com/search?firstName={first}&lastName={last}&city={city_plus}&state={state}"),
-        ("PublicRecords.Online", f"https://publicrecords.online/search/?first_name={first}&last_name={last}&state={state}"),
+        ("FamilyTreeNow",       f"https://www.familytreenow.com/search/people/results?first={first}&last={last}&state={state}"),
+        ("TruePeopleSearch",    f"https://www.truepeoplesearch.com/results?name={name_plus}&citystatezip={city_plus}+{state}"),
+        ("FastPeopleSearch",    f"https://www.fastpeoplesearch.com/name/{name_url}"),
+        ("ThatsThem",           f"https://thatsthem.com/name/{first}-{last}"),
+        ("IDCrawl",             f"https://www.idcrawl.com/name/{first}-{last}"),
+        ("ZabaSearch",          f"https://www.zabasearch.com/people/{first}+{last}/{state}/"),
+        ("411.com",             f"https://www.411.com/name/{first}-{last}/{state}"),
+        ("USPhoneBook",         f"https://www.usphonebook.com/{first}-{last}"),
+        ("ClustrMaps",          f"https://clustrmaps.com/person/{last}-{first}/"),
+        ("SearchPeopleFree",    f"https://www.searchpeoplefree.com/find/{first}-{last}"),
+        ("Nuwber",              f"https://nuwber.com/search?firstName={first}&lastName={last}&city={city_plus}&state={state}"),
+        ("PublicRecords.Online",f"https://publicrecords.online/search/?first_name={first}&last_name={last}&state={state}"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "TIER 2 -- VOTER REGISTRATION", "="*50, ""]
-    lines.append("Voter registration = most reliable free address source.")
-    lines.append("")
-    lines.append(f"FEC: https://www.fec.gov/data/receipts/individual-contributions/?contributor_name={name_plus}")
+    lines += ["=" * 50, "TIER 2 — VOTER REGISTRATION (best free address source)", "=" * 50, ""]
+    lines.append(f"[FEC Political Contributions]")
+    lines.append(f"  https://www.fec.gov/data/receipts/individual-contributions/?contributor_name={name_plus}")
     lines.append("")
     voter_portals = {
         "AL":("AL Voter Status","https://myinfo.alabamavotes.gov/VoterView/RegistrantSearch.do"),
@@ -649,49 +654,56 @@ def module_skip_trace(target, job_id, ids=None):
         "IN":("IN Voter Search","https://indianavoters.in.gov/"),
         "OH":("OH Voter Search","https://voterlookup.ohiosos.gov/voterlookup.aspx"),
     }
-    voter = [("VoterRecords.com ALL STATES", f"https://voterrecords.com/voters/{name_url}/1")]
+    lines.append(f"[VoterRecords.com — all states]")
+    lines.append(f"  https://voterrecords.com/voters/{name_url}/1")
+    lines.append("")
     sp = voter_portals.get(state.upper() if state else "NM")
-    if sp: voter.append((f"{sp[0]} STATE PORTAL", sp[1]))
-    else:  voter.append(("NVRA State Portal Finder","https://www.usa.gov/voter-registration-card"))
-    voter.append(("Google Voter Reg Search", f"https://www.google.com/search?q=%22{name_plus}%22+%22voter+registration%22+%22{quote_plus(location_part)}%22"))
-    for nm, url in voter:
-        lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "TIER 3 -- RELATIVES & ASSOCIATES", "="*50, ""]
+    if sp:
+        lines.append(f"[{sp[0]} — MANUAL: enter name + DOB]")
+        lines.append(f"  {sp[1]}")
+        lines.append("")
+    else:
+        lines.append(f"[State Voter Portal Finder]")
+        lines.append("  https://www.usa.gov/voter-registration-card")
+        lines.append("")
+    lines.append(f"[Google Voter Reg dork]")
+    lines.append(f"  https://www.google.com/search?q=%22{name_plus}%22+%22voter+registration%22+%22{quote_plus(location_part)}%22")
+    lines.append("")
+    lines += ["=" * 50, "TIER 3 — RELATIVES & ASSOCIATES", "=" * 50, ""]
     for nm, url in [
-        ("FamilyTreeNow Relatives", f"https://www.familytreenow.com/search/people/results?first={first}&last={last}"),
-        ("TruePeopleSearch Relatives", f"https://www.truepeoplesearch.com/results?name={name_plus}"),
-        ("ClustrMaps Address Cluster", f"https://clustrmaps.com/person/{last}-{first}/"),
-        ("ThatsThem Associates", f"https://thatsthem.com/name/{first}-{last}"),
-        ("IDCrawl Social Connections", f"https://www.idcrawl.com/name/{first}-{last}"),
+        ("FamilyTreeNow relatives",  f"https://www.familytreenow.com/search/people/results?first={first}&last={last}"),
+        ("TruePeopleSearch",         f"https://www.truepeoplesearch.com/results?name={name_plus}"),
+        ("ClustrMaps address cluster",f"https://clustrmaps.com/person/{last}-{first}/"),
+        ("ThatsThem associates",     f"https://thatsthem.com/name/{first}-{last}"),
+        ("IDCrawl connections",      f"https://www.idcrawl.com/name/{first}-{last}"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "TIER 4 -- ADDRESS VERIFICATION", "="*50, ""]
+    lines += ["=" * 50, "TIER 4 — ADDRESS VERIFICATION", "=" * 50, ""]
     for nm, url in [
-        ("USPS Address Lookup","https://tools.usps.com/zip-code-lookup.htm?byaddress"),
-        ("USPS ZIP+4 Lookup","https://tools.usps.com/zip-code-lookup.htm?byaddress"),
-        ("SmartyStreets Free Address Verify","https://www.smartystreets.com/products/single-address"),
-        ("Google Maps Verify", f"https://www.google.com/maps/search/{name_plus}+{city_plus}+{state}"),
-        ("Bernalillo County Assessor","https://assessor.bernco.gov/public.access/search/commonsearch.aspx?mode=owner"),
+        ("USPS ZIP+4 Lookup — MANUAL: enter address",       "https://tools.usps.com/zip-code-lookup.htm?byaddress"),
+        ("SmartyStreets — MANUAL: enter address",           "https://www.smartystreets.com/products/single-address"),
+        ("Google Maps street verify",                        f"https://www.google.com/maps/search/{name_plus}+{city_plus}+{state}"),
+        ("Bernalillo County Assessor — MANUAL: owner search","https://assessor.bernco.gov/public.access/search/commonsearch.aspx?mode=owner"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "TIER 5 -- WORKPLACE & EMPLOYMENT", "="*50, ""]
+    lines += ["=" * 50, "TIER 5 — WORKPLACE & EMPLOYMENT", "=" * 50, ""]
     for nm, url in [
-        ("LinkedIn People Search", f"https://www.linkedin.com/search/results/people/?keywords={name_plus}&origin=GLOBAL_SEARCH_HEADER"),
-        ("Google LinkedIn + State", f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22{state}%22"),
-        ("Google Employer Dork", f"https://www.google.com/search?q=%22{name_plus}%22+employer+OR+works+OR+%22employed+at%22"),
-        ("FEC Political Donations", f"https://www.fec.gov/data/receipts/individual-contributions/?contributor_name={name_plus}"),
-        ("OpenSecrets Donor Search", f"https://www.opensecrets.org/donor-lookup/results?name={name_plus}"),
-        ("NM Contractor License","https://www.rld.nm.gov/licensing-and-regulation/"),
-        ("NPPES Medical NPI", f"https://npiregistry.cms.hhs.gov/search?search_type=ind&first_name={first}&last_name={last}"),
-        ("NM Bar if attorney","https://www.nmbar.org/"),
-        ("NM SOS Business Search", f"https://portal.sos.state.nm.us/BFS/online/CorporationFormation/SearchBusinesses?SearchCriteria={name_plus}"),
+        ("LinkedIn",                   f"https://www.linkedin.com/search/results/people/?keywords={name_plus}&origin=GLOBAL_SEARCH_HEADER"),
+        ("Google LinkedIn + state",    f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22{state}%22"),
+        ("Google employer dork",       f"https://www.google.com/search?q=%22{name_plus}%22+employer+OR+works+OR+%22employed+at%22"),
+        ("FEC Political Donations",    f"https://www.fec.gov/data/receipts/individual-contributions/?contributor_name={name_plus}"),
+        ("OpenSecrets donor search",   f"https://www.opensecrets.org/donor-lookup/results?name={name_plus}"),
+        ("NM RLD Contractor License",  f"https://www.rld.nm.gov/licensing-and-regulation/licensee-search/?SearchName={quote_plus(name_part)}"),
+        ("NPPES Medical NPI",          f"https://npiregistry.cms.hhs.gov/search?search_type=ind&first_name={first}&last_name={last}"),
+        ("NM Bar attorney search",     f"https://nmbar.org/Nmbar/Find_A_Lawyer/NMBar/MembersClients/Find_a_Lawyer.aspx"),
+        ("NM SOS Business Search",     f"https://portal.sos.state.nm.us/BFS/online/CorporationFormation/SearchBusinesses?SearchCriteria={name_plus}"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines.extend(render_identifier_sources(ids, name_part, first, last))
     try:
         san_out, _, _ = run_cmd(f"curl -s 'https://api.opensanctions.org/search/default?q={name_plus}&schema=Person' 2>/dev/null", timeout=10)
         san_data = json.loads(san_out); results = san_data.get("results",[])
-        lines += ["="*50, "LIVE SANCTIONS / WATCHLIST CHECK", "="*50, ""]
+        lines += ["=" * 50, "LIVE SANCTIONS / WATCHLIST CHECK", "=" * 50, ""]
         if results:
             lines.append(f"WARNING: {len(results)} MATCH(ES) FOUND")
             for r in results[:5]: lines.append(f"  * {r.get('caption','?')} -- Score: {r.get('score','?')}")
@@ -708,8 +720,7 @@ def module_skip_trace(target, job_id, ids=None):
     lines.append("QUERY PACKAGE — paste directly into IDI search:")
     lines.append("")
     lines.append(f"  Full Name:   {name_part}")
-    if location_part:
-        lines.append(f"  Location:    {location_part}")
+    if location_part: lines.append(f"  Location:    {location_part}")
     dob_m  = ids.get("dob_month","")
     dob_d  = ids.get("dob_day","")
     dob_yr = ids.get("dob_year","")
@@ -723,17 +734,13 @@ def module_skip_trace(target, job_id, ids=None):
         lines.append(f"  SSN:         {ssn_disp}  ({ssn_type.upper() if ssn_type else 'ON FILE'})")
     oln = ids.get("oln_number","")
     oln_state = ids.get("oln_state","NM")
-    if oln:
-        lines.append(f"  OLN:         {oln}  State: {oln_state}")
+    if oln: lines.append(f"  OLN:         {oln}  State: {oln_state}")
     emp = ids.get("employer","")
-    if emp:
-        lines.append(f"  Employer:    {emp}")
+    if emp: lines.append(f"  Employer:    {emp}")
     street = ids.get("street","")
     zip_   = ids.get("zip","")
-    if street:
-        lines.append(f"  Street:      {street}")
-    if zip_:
-        lines.append(f"  ZIP:         {zip_}")
+    if street: lines.append(f"  Street:      {street}")
+    if zip_:   lines.append(f"  ZIP:         {zip_}")
     lines.append("")
     lines.append("IDI RECOMMENDED SEARCH SEQUENCE:")
     lines.append("  1. Person Search — confirm identity, harvest current address")
@@ -741,10 +748,8 @@ def module_skip_trace(target, job_id, ids=None):
     lines.append("  3. Associates / Relatives — develop alternate contact points")
     lines.append("  4. Phone Report — current + historical numbers")
     lines.append("  5. Employment — verify employer, develop service of process address")
-    if ssn_disp:
-        lines.append("  6. SSN Trace — confirm identity, address history anchored to SSN")
-    if oln:
-        lines.append("  6. MVR / Driver History — violations, license status, DUI flags")
+    if ssn_disp: lines.append("  6. SSN Trace — confirm identity, address history anchored to SSN")
+    if oln:      lines.append("  6. MVR / Driver History — violations, license status, DUI flags")
     lines.append("")
     lines.append("IDI ESCALATION TRIGGERS:")
     lines.append("  * Free-tier sources return stale/conflicting addresses")
@@ -761,6 +766,10 @@ def module_skip_trace(target, job_id, ids=None):
     return result
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# MODULE: SOCIAL MEDIA
+# ══════════════════════════════════════════════════════════════════════════════
+
 def module_social_media(target, job_id, ids=None):
     if ids is None: ids = {}
     emit(job_id, "module_start", {"module": "social_media"})
@@ -772,47 +781,47 @@ def module_social_media(target, job_id, ids=None):
     lines = [f"TARGET: {name_quoted}", ""]
     for section, items in [
         ("FACEBOOK INTELLIGENCE", [
-            ("People Search", f"https://www.facebook.com/search/people/?q={name_plus}"),
-            ("Posts mentioning", f"https://www.facebook.com/search/posts/?q={name_plus}"),
-            ("Photos tagged", f"https://www.facebook.com/search/photos/?q={name_plus}"),
-            ("Check-ins", f"https://www.facebook.com/search/places/?q={name_plus}"),
-            ("Groups", f"https://www.facebook.com/search/groups/?q={name_plus}"),
-            ("Events", f"https://www.facebook.com/search/events/?q={name_plus}"),
-            ("Marketplace", f"https://www.facebook.com/marketplace/search/?query={name_plus}"),
-            ("Sowsearch Deep", f"https://sowsearch.info/search?q={name_plus}"),
-            ("Google FB Search", f"https://www.google.com/search?q=site:facebook.com+%22{name_plus}%22"),
+            ("People Search",   f"https://www.facebook.com/search/people/?q={name_plus}"),
+            ("Posts mentioning",f"https://www.facebook.com/search/posts/?q={name_plus}"),
+            ("Photos tagged",   f"https://www.facebook.com/search/photos/?q={name_plus}"),
+            ("Check-ins",       f"https://www.facebook.com/search/places/?q={name_plus}"),
+            ("Groups",          f"https://www.facebook.com/search/groups/?q={name_plus}"),
+            ("Events",          f"https://www.facebook.com/search/events/?q={name_plus}"),
+            ("Marketplace",     f"https://www.facebook.com/marketplace/search/?query={name_plus}"),
+            ("Sowsearch deep",  f"https://sowsearch.info/search?q={name_plus}"),
+            ("Google FB dork",  f"https://www.google.com/search?q=site:facebook.com+%22{name_plus}%22"),
         ]),
         ("INSTAGRAM INTELLIGENCE", [
-            ("Profile Search", f"https://www.instagram.com/explore/search/keyword/?q={name_plus}"),
-            ("Hashtag Search", f"https://www.instagram.com/explore/tags/{name_plus.replace('+','')}/"),
-            ("Google IG Search", f"https://www.google.com/search?q=site:instagram.com+%22{name_plus}%22"),
+            ("Profile search",  f"https://www.instagram.com/explore/search/keyword/?q={name_plus}"),
+            ("Hashtag search",  f"https://www.instagram.com/explore/tags/{name_plus.replace('+','')}/"),
+            ("Google IG dork",  f"https://www.google.com/search?q=site:instagram.com+%22{name_plus}%22"),
         ]),
         ("TWITTER/X INTELLIGENCE", [
-            ("People Search", f"https://twitter.com/search?q=%22{name_plus}%22&f=user"),
-            ("Recent Posts", f"https://twitter.com/search?q=%22{name_plus}%22&f=live"),
-            ("Top Posts", f"https://twitter.com/search?q=%22{name_plus}%22&f=top"),
-            ("Near ABQ", f"https://twitter.com/search?q=%22{name_plus}%22+near%3A%22Albuquerque%22"),
+            ("People search",   f"https://twitter.com/search?q=%22{name_plus}%22&f=user"),
+            ("Recent posts",    f"https://twitter.com/search?q=%22{name_plus}%22&f=live"),
+            ("Top posts",       f"https://twitter.com/search?q=%22{name_plus}%22&f=top"),
+            ("Near ABQ",        f"https://twitter.com/search?q=%22{name_plus}%22+near%3A%22Albuquerque%22"),
         ]),
         ("LINKEDIN INTELLIGENCE", [
-            ("People Search", f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
-            ("Posts Search", f"https://www.linkedin.com/search/results/content/?keywords={name_plus}"),
-            ("Google LI Search", f"https://www.google.com/search?q=site:linkedin.com/in+%22{name_plus}%22"),
+            ("People search",   f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
+            ("Posts search",    f"https://www.linkedin.com/search/results/content/?keywords={name_plus}"),
+            ("Google LI dork",  f"https://www.google.com/search?q=site:linkedin.com/in+%22{name_plus}%22"),
         ]),
         ("TIKTOK / YOUTUBE / REDDIT", [
-            ("TikTok User", f"https://www.tiktok.com/search/user?q={name_plus}"),
-            ("YouTube Channel", f"https://www.youtube.com/results?search_query={name_plus}&sp=EgIQAg%253D%253D"),
-            ("Reddit User", f"https://www.reddit.com/search/?q=%22{name_quoted}%22&type=user"),
-            ("Reddit Posts", f"https://www.reddit.com/search/?q=%22{name_quoted}%22"),
+            ("TikTok user",     f"https://www.tiktok.com/search/user?q={name_plus}"),
+            ("YouTube channel", f"https://www.youtube.com/results?search_query={name_plus}&sp=EgIQAg%253D%253D"),
+            ("Reddit user",     f"https://www.reddit.com/search/?q=%22{name_quoted}%22&type=user"),
+            ("Reddit posts",    f"https://www.reddit.com/search/?q=%22{name_quoted}%22"),
         ]),
         ("OTHER PLATFORMS", [
-            ("Snapchat", f"https://www.snapchat.com/add/{first.lower()}{last.lower()}"),
-            ("Pinterest", f"https://www.pinterest.com/search/people/?q={name_plus}"),
-            ("Nextdoor","https://nextdoor.com/find-neighbors/"),
-            ("Venmo", f"https://venmo.com/{first.lower()}{last.lower()}"),
-            ("Cash App", f"https://cash.app/${first.lower()}{last.lower()}"),
+            ("Snapchat",        f"https://www.snapchat.com/add/{first.lower()}{last.lower()}"),
+            ("Pinterest",       f"https://www.pinterest.com/search/people/?q={name_plus}"),
+            ("Nextdoor — MANUAL: search local area", "https://nextdoor.com/find-neighbors/"),
+            ("Venmo",           f"https://venmo.com/{first.lower()}{last.lower()}"),
+            ("Cash App",        f"https://cash.app/${first.lower()}{last.lower()}"),
         ]),
     ]:
-        lines += ["="*50, section, "="*50, ""]
+        lines += ["=" * 50, section, "=" * 50, ""]
         for lbl, url in items:
             lines.append(f"[{lbl}]"); lines.append(f"  {url}"); lines.append("")
     dorks = build_dorks(name_quoted, location_part, state, city, ids)
@@ -822,6 +831,10 @@ def module_social_media(target, job_id, ids=None):
     return result
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# MODULE: SOCIAL FOOTPRINT
+# ══════════════════════════════════════════════════════════════════════════════
+
 def module_social_footprint(target, job_id, ids=None):
     if ids is None: ids = {}
     emit(job_id, "module_start", {"module": "social_footprint"})
@@ -830,40 +843,46 @@ def module_social_footprint(target, job_id, ids=None):
     uvars = [f"{first.lower()}{last.lower()}", f"{first.lower()}.{last.lower()}", f"{first.lower()}_{last.lower()}", f"{first.lower()}{last.lower()[:3]}", f"{first.lower()[0]}{last.lower()}"] if first and last else []
     lines = [f"TARGET:   {name_part}"]
     if location_part: lines.append(f"LOCATION: {location_part}")
-    lines += ["", "="*50, "DIRECT PROFILE ATTEMPTS -- USERNAME VARIATIONS", "="*50, ""]
+    lines += ["", "=" * 50, "DIRECT PROFILE ATTEMPTS — USERNAME VARIATIONS", "=" * 50, ""]
     for uname in uvars[:4]:
         lines.append(f"Username: {uname}")
-        for plat, url in [("Facebook",f"https://www.facebook.com/{uname}"),("Instagram",f"https://www.instagram.com/{uname}/"),("Twitter/X",f"https://twitter.com/{uname}"),("TikTok",f"https://www.tiktok.com/@{uname}"),("LinkedIn",f"https://www.linkedin.com/in/{uname}")]:
+        for plat, url in [
+            ("Facebook",  f"https://www.facebook.com/{uname}"),
+            ("Instagram", f"https://www.instagram.com/{uname}/"),
+            ("Twitter/X", f"https://twitter.com/{uname}"),
+            ("TikTok",    f"https://www.tiktok.com/@{uname}"),
+            ("LinkedIn",  f"https://www.linkedin.com/in/{uname}"),
+        ]:
             lines.append(f"  [{plat}]  {url}")
         lines.append("")
-    lines += ["="*50, "REAL-TIME SOCIAL SEARCH -- FREE TOOLS", "="*50, ""]
+    lines += ["=" * 50, "REAL-TIME SOCIAL SEARCH — FREE TOOLS", "=" * 50, ""]
     for nm, url in [
-        ("WhatsMyName username sweep", f"https://whatsmyname.app/?q={first.lower()}{last.lower()}"),
-        ("PeekYou social+records", f"https://www.peekyou.com/{first.lower()}_{last.lower()}"),
-        ("Sowsearch FB Deep", f"https://sowsearch.info/search?q={name_plus}"),
-        ("Google Forum Search", f"https://www.google.com/search?q=%22{name_plus}%22+forum+OR+community+OR+discussion"),
-        ("Google Groups Search", f"https://groups.google.com/search/groups?q={name_plus}"),
-        ("IDCrawl social+records", f"https://www.idcrawl.com/name/{first.lower()}-{last.lower()}"),
-        ("Epieos email-to-social", f"https://epieos.com/?q={name_plus}&t=name"),
-        ("GHunt Google account recon", "https://github.com/mxrch/GHunt"),
+        ("WhatsMyName username sweep",        f"https://whatsmyname.app/?q={first.lower()}{last.lower()}"),
+        ("PeekYou social+records",            f"https://www.peekyou.com/{first.lower()}_{last.lower()}"),
+        ("Sowsearch FB deep",                 f"https://sowsearch.info/search?q={name_plus}"),
+        ("Google forum/community search",     f"https://www.google.com/search?q=%22{name_plus}%22+forum+OR+community+OR+discussion"),
+        ("Google Groups",                     f"https://groups.google.com/search/groups?q={name_plus}"),
+        ("IDCrawl social+records",            f"https://www.idcrawl.com/name/{first.lower()}-{last.lower()}"),
+        ("Epieos email-to-social — MANUAL: enter email or name", f"https://epieos.com/?q={name_plus}&t=name"),
+        ("GHunt Google acct recon — MANUAL: run CLI with email", "https://github.com/mxrch/GHunt"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "LINKEDIN DEEP SEARCH", "="*50, ""]
+    lines += ["=" * 50, "LINKEDIN DEEP SEARCH", "=" * 50, ""]
     for nm, url in [
-        ("LinkedIn People Search", f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
-        ("LinkedIn + NM filter", f"https://www.linkedin.com/search/results/people/?keywords={name_plus}&geoUrn=%5B%22102095887%22%5D"),
-        ("Google LI Profile", f"https://www.google.com/search?q=site:linkedin.com/in+%22{name_plus}%22"),
-        ("Google LI + Location", f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22New+Mexico%22"),
+        ("LinkedIn people search",    f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
+        ("LinkedIn + NM geo filter",  f"https://www.linkedin.com/search/results/people/?keywords={name_plus}&geoUrn=%5B%22102095887%22%5D"),
+        ("Google LI profile dork",    f"https://www.google.com/search?q=site:linkedin.com/in+%22{name_plus}%22"),
+        ("Google LI + location",      f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22New+Mexico%22"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "REVERSE IMAGE & FACE SEARCH -- FREE", "="*50, "", "Upload subject photo to find additional profiles.", ""]
+    lines += ["=" * 50, "REVERSE IMAGE & FACE SEARCH — FREE", "=" * 50, "", "Upload subject photo to find additional profiles.", ""]
     for nm, url in [
-        ("Yandex BEST for faces","https://yandex.com/images/"),
-        ("PimEyes face search","https://pimeyes.com/en"),
-        ("Lenso.ai face search","https://lenso.ai/en"),
-        ("Google Reverse Image","https://images.google.com/"),
-        ("TinEye","https://tineye.com/"),
-        ("Bing Visual Search","https://www.bing.com/images/search?view=detailv2&iss=sbi"),
+        ("Yandex — best for faces — MANUAL: upload photo",  "https://yandex.com/images/"),
+        ("PimEyes face search — MANUAL: upload photo",      "https://pimeyes.com/en"),
+        ("Lenso.ai — MANUAL: upload photo",                 "https://lenso.ai/en"),
+        ("Google Reverse Image — MANUAL: upload photo",     "https://images.google.com/"),
+        ("TinEye — MANUAL: upload or paste URL",            "https://tineye.com/"),
+        ("Bing Visual Search — MANUAL: upload photo",       "https://www.bing.com/images/search?view=detailv2&iss=sbi"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     dorks = build_dorks(name_part, location_part, state, city, ids)
@@ -874,7 +893,7 @@ def module_social_footprint(target, job_id, ids=None):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# NON-PERSON MODULES — ids=None added, otherwise unchanged from v1
+# NON-PERSON MODULES
 # ══════════════════════════════════════════════════════════════════════════════
 
 def module_hit_and_run(target, job_id, ids=None):
@@ -891,63 +910,62 @@ def module_hit_and_run(target, job_id, ids=None):
     is_vin = len(plate) == 17
     lines = [f"TARGET:  {target}", f"PARSED:  {'VIN' if is_vin else 'Plate'}={plate}  State={state}", ""]
     lines += ["NOTE: Free tools return make/model/theft data only.", "  Owner name/address requires state MVD DPPA request.", ""]
-    lines += ["="*50, "STEP 1 -- IDENTIFY VEHICLE FROM PHOTO/VIDEO", "="*50, ""]
+    lines += ["=" * 50, "STEP 1 — IDENTIFY VEHICLE FROM PHOTO/VIDEO", "=" * 50, ""]
     for nm, url in [
-        ("Carnet.ai ID make/model from photo","https://carnet.ai/"),
-        ("Remini clean blurry images","https://app.remini.ai/"),
-        ("LetsEnhance upscale low-res","https://letsenhance.io/"),
-        ("Google Reverse Image","https://images.google.com/"),
-        ("Yandex Reverse Image better for vehicles","https://yandex.com/images/"),
-        ("TinEye find where image appears","https://tineye.com/"),
+        ("Carnet.ai — MANUAL: upload photo",        "https://carnet.ai/"),
+        ("Remini — MANUAL: upload to clean image",  "https://app.remini.ai/"),
+        ("LetsEnhance — MANUAL: upload to upscale", "https://letsenhance.io/"),
+        ("Google Reverse Image — MANUAL: upload",   "https://images.google.com/"),
+        ("Yandex — MANUAL: upload",                 "https://yandex.com/images/"),
+        ("TinEye — MANUAL: upload or URL",          "https://tineye.com/"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "STEP 2 -- VIN & PLATE LOOKUP", "="*50, ""]
+    lines += ["=" * 50, "STEP 2 — VIN & PLATE LOOKUP", "=" * 50, ""]
     if is_vin:
         vin_links = [
-            ("NHTSA VIN Decoder FREE specs/recalls", f"https://vpic.nhtsa.dot.gov/decoder/Car/{plate}/0"),
-            ("Driving-Tests.org VIN 100% free", f"https://driving-tests.org/vin-decoder/?vin={plate}"),
-            ("EpicVIN free basic decode", f"https://epicvin.com/vin-decoder?vin={plate}"),
-            ("VinFreeCheck free specs", f"https://www.vinfreecheck.com/?vin={plate}"),
-            ("NICB VINCheck FREE stolen/salvage","https://www.nicb.org/vincheck"),
-            ("NHTSA Recalls by VIN", f"https://www.nhtsa.gov/vehicle/{plate}///complaints"),
-            ("NMVTIS Title Check","https://www.vehiclehistory.gov/"),
+            ("NHTSA VIN Decoder",           f"https://vpic.nhtsa.dot.gov/decoder/Car/{plate}/0"),
+            ("Driving-Tests.org VIN",       f"https://driving-tests.org/vin-decoder/?vin={plate}"),
+            ("EpicVIN decode",              f"https://epicvin.com/vin-decoder?vin={plate}"),
+            ("VinFreeCheck",                f"https://www.vinfreecheck.com/?vin={plate}"),
+            ("NICB VINCheck stolen/salvage — MANUAL: enter VIN", "https://www.nicb.org/vincheck"),
+            ("NHTSA Recalls by VIN",        f"https://www.nhtsa.gov/vehicle/{plate}///complaints"),
+            ("NMVTIS Title Check — MANUAL: enter VIN", "https://www.vehiclehistory.gov/"),
         ]
     else:
         vin_links = [
-            ("NHTSA VIN Decoder FREE","https://vpic.nhtsa.dot.gov/decoder/"),
-            ("Driving-Tests.org VIN free","https://driving-tests.org/vin-decoder/"),
-            ("EpicVIN Plate Lookup", f"https://epicvin.com/license-plate-lookup?plate={plate}&state={state}"),
-            ("Faxvin Plate Search", f"https://www.faxvin.com/license-plate-lookup/{state.lower()}/{plate}"),
-            ("VehicleHistory.com Plate", f"https://www.vehiclehistory.com/license-plate-search?plate={plate}&state={state}"),
-            ("NICB VINCheck FREE","https://www.nicb.org/vincheck"),
-            ("NMVTIS Title Check","https://www.vehiclehistory.gov/"),
-            ("NHTSA Recalls","https://www.nhtsa.gov/recalls"),
+            ("EpicVIN plate lookup",        f"https://epicvin.com/license-plate-lookup?plate={plate}&state={state}"),
+            ("Faxvin plate search",         f"https://www.faxvin.com/license-plate-lookup/{state.lower()}/{plate}"),
+            ("VehicleHistory.com plate",    f"https://www.vehiclehistory.com/license-plate-search?plate={plate}&state={state}"),
+            ("NICB VINCheck stolen — MANUAL: enter VIN", "https://www.nicb.org/vincheck"),
+            ("NMVTIS Title Check — MANUAL: enter VIN",   "https://www.vehiclehistory.gov/"),
+            ("NHTSA VIN Decoder — MANUAL: enter VIN",    "https://vpic.nhtsa.dot.gov/decoder/"),
+            ("NHTSA Recalls — MANUAL: enter VIN",        "https://www.nhtsa.gov/recalls"),
         ]
     for nm, url in vin_links:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "STEP 3 -- SOCIAL MEDIA PLATE SEARCH", "="*50, ""]
+    lines += ["=" * 50, "STEP 3 — SOCIAL MEDIA PLATE SEARCH", "=" * 50, ""]
     for nm, url in [
-        ("Facebook Posts", f"https://www.facebook.com/search/posts/?q={plate}"),
-        ("Instagram", f"https://www.instagram.com/explore/search/keyword/?q={plate}"),
-        ("Twitter/X Live", f"https://twitter.com/search?q=%22{plate}%22&f=live"),
-        ("Reddit", f"https://www.reddit.com/search/?q=%22{plate}%22"),
-        ("YouTube", f"https://www.youtube.com/results?search_query=%22{plate}%22"),
-        ("Google Images", f"https://www.google.com/search?tbm=isch&q=%22{plate}%22+New+Mexico"),
-        ("Nextdoor local witness","https://nextdoor.com/"),
+        ("Facebook posts",  f"https://www.facebook.com/search/posts/?q={plate}"),
+        ("Instagram",       f"https://www.instagram.com/explore/search/keyword/?q={plate}"),
+        ("Twitter/X live",  f"https://twitter.com/search?q=%22{plate}%22&f=live"),
+        ("Reddit",          f"https://www.reddit.com/search/?q=%22{plate}%22"),
+        ("YouTube",         f"https://www.youtube.com/results?search_query=%22{plate}%22"),
+        ("Google Images",   f"https://www.google.com/search?tbm=isch&q=%22{plate}%22+New+Mexico"),
+        ("Nextdoor — MANUAL: search local area", "https://nextdoor.com/"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "STEP 4 -- WITNESS & DASHCAM", "="*50, ""]
+    lines += ["=" * 50, "STEP 4 — WITNESS & DASHCAM", "=" * 50, ""]
     for nm, url in [
-        ("r/NewMexico hit & run","https://www.reddit.com/r/newmexico/search/?q=hit+and+run&sort=new"),
-        ("r/Albuquerque","https://www.reddit.com/r/Albuquerque/search/?q=hit+and+run&sort=new"),
-        ("Google News ABQ hit and run","https://www.google.com/search?q=%22hit+and+run%22+%22albuquerque%22&tbm=nws"),
-        ("ABQ Journal","https://www.abqjournal.com/?s=hit+run"),
-        ("Waze Incident Map","https://www.waze.com/livemap"),
+        ("r/NewMexico hit & run",           "https://www.reddit.com/r/newmexico/search/?q=hit+and+run&sort=new"),
+        ("r/Albuquerque",                   "https://www.reddit.com/r/Albuquerque/search/?q=hit+and+run&sort=new"),
+        ("Google News ABQ",                 "https://www.google.com/search?q=%22hit+and+run%22+%22albuquerque%22&tbm=nws"),
+        ("ABQ Journal",                     "https://www.abqjournal.com/?s=hit+run"),
+        ("Waze Incident Map — MANUAL",      "https://www.waze.com/livemap"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "STEP 5 -- OWNER IDENTIFICATION", "="*50, ""]
-    lines += ["Once make/model/plate confirmed:","  -> NM MVD DPPA request for registered owner","  -> Run owner name through SKIP TRACE module","  -> NM Courts: https://caselookup.nmcourts.gov/caselookup/app",""]
-    lines += ["="*50, "GOOGLE DORKS", "="*50, ""]
+    lines += ["=" * 50, "STEP 5 — OWNER IDENTIFICATION", "=" * 50, ""]
+    lines += ["Once make/model/plate confirmed:", "  -> NM MVD DPPA request for registered owner", "  -> Run owner name through SKIP TRACE module", "  -> NM Courts: https://caselookup.nmcourts.gov/caselookup/app", ""]
+    lines += ["=" * 50, "GOOGLE DORKS", "=" * 50, ""]
     for dork in [f'"{plate}" New Mexico accident OR crash OR "hit and run"', f'"{plate}" NM plate dashcam OR witness OR footage', f'"{plate}" site:facebook.com', f'"{plate}" site:reddit.com']:
         lines.append(f"  {dork}"); lines.append(f"  https://www.google.com/search?q={quote_plus(dork)}"); lines.append("")
     result = "\n".join(lines)
@@ -961,23 +979,55 @@ def module_photo_forensics(target, job_id, ids=None):
     lines = [f"TARGET: {target}", ""]
     is_url = target.startswith("http")
     te = quote(target, safe='') if is_url else target
-    lines += ["="*50, "REVERSE IMAGE SEARCH -- FREE", "="*50, ""]
+    lines += ["=" * 50, "REVERSE IMAGE SEARCH — FREE", "=" * 50, ""]
     if is_url:
-        rev = [("Google Reverse Image",f"https://images.google.com/searchbyimage?image_url={te}"),("TinEye",f"https://tineye.com/search?url={te}"),("Yandex Best for faces",f"https://yandex.com/images/search?url={te}&rpt=imageview"),("Bing Visual Search",f"https://www.bing.com/images/search?view=detailv2&iss=sbi&q=imgurl:{te}"),("Lenso.ai",f"https://lenso.ai/en?url={te}"),("PimEyes","https://pimeyes.com/en")]
+        rev = [
+            ("Google Reverse Image",    f"https://images.google.com/searchbyimage?image_url={te}"),
+            ("TinEye",                  f"https://tineye.com/search?url={te}"),
+            ("Yandex best for faces",   f"https://yandex.com/images/search?url={te}&rpt=imageview"),
+            ("Bing Visual Search",      f"https://www.bing.com/images/search?view=detailv2&iss=sbi&q=imgurl:{te}"),
+            ("Lenso.ai",                f"https://lenso.ai/en?url={te}"),
+            ("PimEyes — MANUAL: upload","https://pimeyes.com/en"),
+        ]
     else:
-        rev = [("Google Reverse Image","https://images.google.com/"),("TinEye","https://tineye.com/"),("Yandex Best for faces","https://yandex.com/images/"),("Bing Visual Search","https://www.bing.com/images/search?view=detailv2&iss=sbi"),("Lenso.ai","https://lenso.ai/en"),("PimEyes","https://pimeyes.com/en")]
+        rev = [
+            ("Google Reverse Image — MANUAL: upload",   "https://images.google.com/"),
+            ("TinEye — MANUAL: upload",                 "https://tineye.com/"),
+            ("Yandex best for faces — MANUAL: upload",  "https://yandex.com/images/"),
+            ("Bing Visual Search — MANUAL: upload",     "https://www.bing.com/images/search?view=detailv2&iss=sbi"),
+            ("Lenso.ai — MANUAL: upload",               "https://lenso.ai/en"),
+            ("PimEyes — MANUAL: upload",                "https://pimeyes.com/en"),
+        ]
     for nm, url in rev: lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "PHOTO METADATA EXTRACTION -- FREE", "="*50, ""]
-    for nm, url in [("Jeffrey EXIF Viewer","http://exif.regex.info/exif.cgi"),("ExifTool Online","https://exiftool.org/"),("Metadata2Go","https://www.metadata2go.com/"),("FotoForensics","https://fotoforensics.com/"),("Forensically","https://29a.ch/photo-forensics/"),("ImageEdited","https://imageedited.com/")]:
+    lines += ["=" * 50, "PHOTO METADATA EXTRACTION — FREE", "=" * 50, ""]
+    for nm, url in [
+        ("Jeffrey EXIF Viewer — MANUAL: upload",  "http://exif.regex.info/exif.cgi"),
+        ("ExifTool Online — MANUAL: upload",      "https://exiftool.org/"),
+        ("Metadata2Go — MANUAL: upload",          "https://www.metadata2go.com/"),
+        ("FotoForensics — MANUAL: upload",        "https://fotoforensics.com/"),
+        ("Forensically — MANUAL: upload",         "https://29a.ch/photo-forensics/"),
+        ("ImageEdited — MANUAL: upload",          "https://imageedited.com/"),
+    ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "VIDEO FORENSICS -- FREE", "="*50, ""]
-    for nm, url in [("InVID WeVerify","https://www.invid-project.eu/tools-and-services/invid-verification-plugin/"),("YouTube DataViewer","https://citizenevidence.amnestyusa.org/"),("TrueMedia.org","https://www.truemedia.org/")]:
+    lines += ["=" * 50, "VIDEO FORENSICS — FREE", "=" * 50, ""]
+    for nm, url in [
+        ("InVID WeVerify — MANUAL: install browser plugin", "https://www.invid-project.eu/tools-and-services/invid-verification-plugin/"),
+        ("YouTube DataViewer",                              "https://citizenevidence.amnestyusa.org/"),
+        ("TrueMedia.org — MANUAL: upload",                  "https://www.truemedia.org/"),
+    ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "GEOLOCATION FROM PHOTOS -- FREE", "="*50, ""]
-    for nm, url in [("SunCalc shadow/time analysis","https://www.suncalc.org/"),("Google Maps Street View","https://www.google.com/maps"),("Bing Maps","https://www.bing.com/maps"),("Google Earth Web","https://earth.google.com/web/"),("Overpass Turbo","https://overpass-turbo.eu/"),("GeoHack","https://geohack.toolforge.org/")]:
+    lines += ["=" * 50, "GEOLOCATION FROM PHOTOS — FREE", "=" * 50, ""]
+    for nm, url in [
+        ("SunCalc shadow/time analysis — MANUAL: set location+time", "https://www.suncalc.org/"),
+        ("Google Maps Street View",                                   "https://www.google.com/maps"),
+        ("Bing Maps",                                                 "https://www.bing.com/maps"),
+        ("Google Earth Web",                                          "https://earth.google.com/web/"),
+        ("Overpass Turbo — MANUAL: query OSM features",               "https://overpass-turbo.eu/"),
+        ("GeoHack — MANUAL: enter coordinates",                       "https://geohack.toolforge.org/"),
+    ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     if is_url:
-        lines += ["="*50, "AUTOMATED METADATA EXTRACTION", "="*50, ""]
+        lines += ["=" * 50, "AUTOMATED METADATA EXTRACTION", "=" * 50, ""]
         try:
             out, _, _ = run_cmd(f'curl -s -L -o /tmp/fivet_img.jpg "{target}" 2>/dev/null && exiftool /tmp/fivet_img.jpg 2>/dev/null | head -40', timeout=15)
             lines.append(out if out else "No metadata extracted.")
@@ -994,17 +1044,35 @@ def module_geolocation(target, job_id, ids=None):
     lines = [f"TARGET: {target}", ""]
     lp = quote_plus(target)
     for section, items in [
-        ("MAP INTELLIGENCE -- FREE", [("Google Maps",f"https://www.google.com/maps/search/{lp}"),("Google Street View",f"https://www.google.com/maps?q={lp}&layer=c"),("Google Earth Web",f"https://earth.google.com/web/search/{lp}"),("Bing Maps",f"https://www.bing.com/maps?q={lp}"),("OpenStreetMap",f"https://www.openstreetmap.org/search?query={lp}"),("Apple Maps",f"https://maps.apple.com/?q={lp}")]),
-        ("SATELLITE & HISTORICAL -- FREE", [("Google Earth Historical",f"https://earth.google.com/web/search/{lp}"),("Sentinel Hub","https://www.sentinel-hub.com/explore/eobrowser/"),("USGS EarthExplorer","https://earthexplorer.usgs.gov/"),("NASA Worldview","https://worldview.earthdata.nasa.gov/"),("Bing Birds Eye",f"https://www.bing.com/maps?q={lp}&style=b")]),
-        ("SPECIALIZED TOOLS -- FREE", [("Wigle.net WiFi Networks","https://wigle.net/search#fullSearch"),("Overpass Turbo","https://overpass-turbo.eu/"),("SunCalc Sun Position","https://www.suncalc.org/"),("CalcMaps Distance/Area","https://www.calcmaps.com/map-distance/")]),
+        ("MAP INTELLIGENCE — FREE", [
+            ("Google Maps",         f"https://www.google.com/maps/search/{lp}"),
+            ("Google Street View",  f"https://www.google.com/maps?q={lp}&layer=c"),
+            ("Google Earth Web",    f"https://earth.google.com/web/search/{lp}"),
+            ("Bing Maps",           f"https://www.bing.com/maps?q={lp}"),
+            ("OpenStreetMap",       f"https://www.openstreetmap.org/search?query={lp}"),
+            ("Apple Maps",          f"https://maps.apple.com/?q={lp}"),
+        ]),
+        ("SATELLITE & HISTORICAL — FREE", [
+            ("Google Earth Historical",  f"https://earth.google.com/web/search/{lp}"),
+            ("Sentinel Hub — MANUAL: select area", "https://www.sentinel-hub.com/explore/eobrowser/"),
+            ("USGS EarthExplorer — MANUAL: draw AOI", "https://earthexplorer.usgs.gov/"),
+            ("NASA Worldview",           "https://worldview.earthdata.nasa.gov/"),
+            ("Bing Birds Eye",           f"https://www.bing.com/maps?q={lp}&style=b"),
+        ]),
+        ("SPECIALIZED TOOLS — FREE", [
+            ("Wigle.net WiFi networks — MANUAL: enter location", "https://wigle.net/search#fullSearch"),
+            ("Overpass Turbo — MANUAL: query OSM",               "https://overpass-turbo.eu/"),
+            ("SunCalc sun position — MANUAL: set location",      "https://www.suncalc.org/"),
+            ("CalcMaps distance/area",                            "https://www.calcmaps.com/map-distance/"),
+        ]),
     ]:
-        lines += ["="*50, section, "="*50, ""]
+        lines += ["=" * 50, section, "=" * 50, ""]
         for nm, url in items: lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     if _re.match(r'^\d+\.\d+\.\d+\.\d+$', target):
         try:
             out, _, _ = run_cmd(f"curl -s 'https://ipapi.co/{target}/json/' 2>/dev/null")
             data = json.loads(out)
-            lines += ["="*50, "IP GEOLOCATION (LIVE)", "="*50, ""]
+            lines += ["=" * 50, "IP GEOLOCATION (LIVE)", "=" * 50, ""]
             lines += [f"IP:       {data.get('ip',target)}", f"City:     {data.get('city','N/A')}", f"Region:   {data.get('region','N/A')}", f"Country:  {data.get('country_name','N/A')}", f"Org/ISP:  {data.get('org','N/A')}", f"Lat/Lon:  {data.get('latitude','N/A')}, {data.get('longitude','N/A')}"]
             lat = data.get('latitude',''); lon = data.get('longitude','')
             if lat and lon: lines.append(f"Maps:     https://www.google.com/maps?q={lat},{lon}")
@@ -1018,18 +1086,40 @@ def module_geolocation(target, job_id, ids=None):
 def module_username_search(target, job_id, ids=None):
     emit(job_id, "module_start", {"module": "username_search"})
     lines = [f"TARGET USERNAME: {target}", ""]
-    lines += ["="*50, "AUTOMATED SCANNER", "="*50, ""]
+    lines += ["=" * 50, "AUTOMATED SCANNER", "=" * 50, ""]
     out, _, _ = run_cmd(f"python3 -m sherlock {target} --timeout 8 2>/dev/null", timeout=120)
     if out and "not found" not in out.lower():
-        lines += ["[SHERLOCK -- 300+ PLATFORMS]", out, ""]
+        lines += ["[SHERLOCK — 300+ platforms]", out, ""]
     out2, _, rc2 = run_cmd(f"python3 -m maigret {target} --top-sites 50 2>/dev/null", timeout=120)
     if out2 and rc2 == 0:
-        lines += ["[MAIGRET -- FULL DOSSIER]", out2[:2000], ""]
-    lines += ["="*50, "MANUAL USERNAME SEARCH -- FREE", "="*50, ""]
-    for nm, url in [("WhatsMyName FREE",f"https://whatsmyname.app/?q={target}"),("IDCrawl FREE",f"https://www.idcrawl.com/{target}"),("UserSearch.org",f"https://usersearch.org/results_normal.php?q={target}"),("Namechk",f"https://namechk.com/{target}"),("Instant Username",f"https://instantusername.com/#/{target}"),("Sherlock Web","https://sherlock-project.github.io/")]:
+        lines += ["[MAIGRET — full dossier]", out2[:2000], ""]
+    lines += ["=" * 50, "MANUAL USERNAME SEARCH — FREE", "=" * 50, ""]
+    for nm, url in [
+        ("WhatsMyName",     f"https://whatsmyname.app/?q={target}"),
+        ("IDCrawl",         f"https://www.idcrawl.com/{target}"),
+        ("UserSearch.org",  f"https://usersearch.org/results_normal.php?q={target}"),
+        ("Namechk",         f"https://namechk.com/{target}"),
+        ("Instant Username",f"https://instantusername.com/#/{target}"),
+    ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "PLATFORM DIRECT CHECKS", "="*50, ""]
-    for nm, url in [("Twitter/X",f"https://twitter.com/{target}"),("Instagram",f"https://www.instagram.com/{target}/"),("TikTok",f"https://www.tiktok.com/@{target}"),("YouTube",f"https://www.youtube.com/@{target}"),("Reddit",f"https://www.reddit.com/user/{target}"),("GitHub",f"https://github.com/{target}"),("LinkedIn",f"https://www.linkedin.com/in/{target}"),("Pinterest",f"https://www.pinterest.com/{target}/"),("Twitch",f"https://www.twitch.tv/{target}"),("Snapchat",f"https://www.snapchat.com/add/{target}"),("Venmo",f"https://venmo.com/{target}"),("Cash App",f"https://cash.app/${target}"),("Telegram",f"https://t.me/{target}"),("Patreon",f"https://www.patreon.com/{target}"),("Linktree",f"https://linktr.ee/{target}")]:
+    lines += ["=" * 50, "PLATFORM DIRECT CHECKS", "=" * 50, ""]
+    for nm, url in [
+        ("Twitter/X",  f"https://twitter.com/{target}"),
+        ("Instagram",  f"https://www.instagram.com/{target}/"),
+        ("TikTok",     f"https://www.tiktok.com/@{target}"),
+        ("YouTube",    f"https://www.youtube.com/@{target}"),
+        ("Reddit",     f"https://www.reddit.com/user/{target}"),
+        ("GitHub",     f"https://github.com/{target}"),
+        ("LinkedIn",   f"https://www.linkedin.com/in/{target}"),
+        ("Pinterest",  f"https://www.pinterest.com/{target}/"),
+        ("Twitch",     f"https://www.twitch.tv/{target}"),
+        ("Snapchat",   f"https://www.snapchat.com/add/{target}"),
+        ("Venmo",      f"https://venmo.com/{target}"),
+        ("Cash App",   f"https://cash.app/${target}"),
+        ("Telegram",   f"https://t.me/{target}"),
+        ("Patreon",    f"https://www.patreon.com/{target}"),
+        ("Linktree",   f"https://linktr.ee/{target}"),
+    ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "username_search", "result": result})
@@ -1051,30 +1141,30 @@ def module_phone(target, job_id, ids=None):
         except: pass
     if not ipqs_key and not nv_key:
         lines += ["Add IPQS_API_KEY or NUMVERIFY_API_KEY to Render env vars for live carrier data.", ""]
-    lines += ["="*50, "FREE REVERSE LOOKUP SITES", "="*50, "", "NOTE: SpyDialer calls the number silently. Target may see missed call. Use intentionally.", ""]
+    lines += ["=" * 50, "FREE REVERSE LOOKUP SITES", "=" * 50, "", "NOTE: SpyDialer calls the number silently — target may see missed call. Use deliberately.", ""]
     for nm, url in [
-        ("SPYDIALER FREE name via voicemail",f"https://www.spydialer.com/default.aspx?phone={clean}"),
-        ("NUMLOOKUP FREE owner name carrier",f"https://www.numlookup.com/?number={clean}"),
-        ("ANYWHO free directory",f"https://www.anywho.com/reverse-lookup/{clean}"),
-        ("TRUEPEOPLESEARCH FREE",f"https://www.truepeoplesearch.com/results?phoneno={clean}"),
-        ("THATSTHEM FREE",f"https://thatsthem.com/phone/{clean}"),
-        ("FASTPEOPLESEARCH",f"https://www.fastpeoplesearch.com/phone/{clean}"),
-        ("FONEFINDER carrier lookup",f"https://fonefinder.net/findphone.php?areacode={clean[:3]}&exchange={clean[3:6]}&thenumber={clean[6:]}"),
-        ("USPHONEBOOK",f"https://www.usphonebook.com/{clean}"),
-        ("411.COM",f"https://www.411.com/phone/{clean}"),
-        ("TRUECALLER community ID",f"https://www.truecaller.com/search/us/{clean}"),
+        ("SpyDialer — name via voicemail",  f"https://www.spydialer.com/default.aspx?phone={clean}"),
+        ("NumLookup — owner name/carrier",  f"https://www.numlookup.com/?number={clean}"),
+        ("AnyWho — free directory",         f"https://www.anywho.com/reverse-lookup/{clean}"),
+        ("TruePeopleSearch",                f"https://www.truepeoplesearch.com/results?phoneno={clean}"),
+        ("ThatsThem",                       f"https://thatsthem.com/phone/{clean}"),
+        ("FastPeopleSearch",                f"https://www.fastpeoplesearch.com/phone/{clean}"),
+        ("FoneFinder — carrier/exchange",   f"https://fonefinder.net/findphone.php?areacode={clean[:3]}&exchange={clean[3:6]}&thenumber={clean[6:]}"),
+        ("USPhoneBook",                     f"https://www.usphonebook.com/{clean}"),
+        ("411.com",                         f"https://www.411.com/phone/{clean}"),
+        ("TrueCaller — community ID",       f"https://www.truecaller.com/search/us/{clean}"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "SPAM & REPORT DATABASES", "="*50, ""]
+    lines += ["=" * 50, "SPAM & REPORT DATABASES", "=" * 50, ""]
     for nm, url in [
-        ("800NOTES community reports",f"https://800notes.com/Phone.aspx/{clean}"),
-        ("NOMOROBO robocall check",f"https://www.nomorobo.com/lookup/{clean}"),
-        ("CALLTRUTH carrier+reports",f"https://calltruth.com/phone/{clean}"),
-        ("SHOULDIANSWER community DB",f"https://www.shouldianswer.com/phone-number/{clean}"),
-        ("CALLERR reports",f"https://www.callerr.com/phone-number/{clean}/"),
+        ("800Notes — community reports",    f"https://800notes.com/Phone.aspx/{clean}"),
+        ("Nomorobo — robocall check",       f"https://www.nomorobo.com/lookup/{clean}"),
+        ("CallTruth — carrier+reports",     f"https://calltruth.com/phone/{clean}"),
+        ("ShouldIAnswer — community DB",    f"https://www.shouldianswer.com/phone-number/{clean}"),
+        ("Callerr — reports",               f"https://www.callerr.com/phone-number/{clean}/"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "GOOGLE DORKS", "="*50, ""]
+    lines += ["=" * 50, "GOOGLE DORKS", "=" * 50, ""]
     for dork in [f'"{formatted}"', f'"{clean}"', f'"{phone_plus1}"', f'"{formatted}" name address', f'"{clean}" site:facebook.com', f'"{clean}" spam OR scam OR fraud']:
         lines.append(f"  {dork}"); lines.append(f"  https://www.google.com/search?q={quote_plus(dork)}"); lines.append("")
     result = "\n".join(lines)
@@ -1087,26 +1177,34 @@ def module_email_investigate(target, job_id, ids=None):
     lines = [f"TARGET EMAIL: {target}", ""]
     out, _, rc = run_cmd(f"python3 -m holehe {target} --only-used 2>/dev/null", timeout=120)
     if out and "holehe" not in out.lower() and "error" not in out.lower():
-        lines += ["="*50, "HOLEHE -- ACCOUNT DETECTION 120+ SITES", "="*50, "", out, ""]
+        lines += ["=" * 50, "HOLEHE — ACCOUNT DETECTION 120+ SITES", "=" * 50, "", out, ""]
     try:
         data = json.loads(run_cmd(f"curl -s 'https://emailrep.io/{target}' -H 'User-Agent: fivet-osint' 2>/dev/null", timeout=10)[0])
         details = data.get("details",{})
-        lines += ["="*50, "EMAIL REPUTATION -- FREE", "="*50, "", f"Reputation: {data.get('reputation','N/A')}", f"Suspicious: {data.get('suspicious',False)}", f"Blacklisted: {details.get('blacklisted',False)}", f"Data Breach: {details.get('data_breach',False)}", f"Disposable: {details.get('disposable',False)}", f"Profiles: {chr(44).join(details.get('profiles',[])) or 'None detected'}", ""]
+        lines += ["=" * 50, "EMAIL REPUTATION — FREE", "=" * 50, "", f"Reputation: {data.get('reputation','N/A')}", f"Suspicious: {data.get('suspicious',False)}", f"Blacklisted: {details.get('blacklisted',False)}", f"Data Breach: {details.get('data_breach',False)}", f"Disposable: {details.get('disposable',False)}", f"Profiles: {chr(44).join(details.get('profiles',[])) or 'None detected'}", ""]
     except: pass
     try:
         domain = target.split("@")[1]
         dns_out = run_cmd(f"dig +short A {domain} 2>/dev/null")[0]
-        mx_out = run_cmd(f"dig +short MX {domain} 2>/dev/null")[0]
+        mx_out  = run_cmd(f"dig +short MX {domain} 2>/dev/null")[0]
         if dns_out or mx_out:
-            lines += ["="*50, f"EMAIL DOMAIN INTEL: {domain}", "="*50, ""]
+            lines += ["=" * 50, f"EMAIL DOMAIN INTEL: {domain}", "=" * 50, ""]
             if dns_out: lines.append(f"Domain IP:   {dns_out.split()[0]}")
-            if mx_out: lines.append(f"Mail Server: {mx_out}")
+            if mx_out:  lines.append(f"Mail Server: {mx_out}")
             lines.append("")
     except: pass
-    lines += ["="*50, "FREE LOOKUP SITES", "="*50, ""]
-    for nm, url in [("TRUEPEOPLESEARCH FREE",f"https://www.truepeoplesearch.com/results?emailaddress={target}"),("THATSTHEM FREE",f"https://thatsthem.com/email/{target}"),("EMAILREP reputation",f"https://emailrep.io/{target}"),("HUNTER.IO verify",f"https://hunter.io/email-verifier/{target}"),("HAVEIBEENPWNED breaches",f"https://haveibeenpwned.com/account/{target}"),("DEHASHED breaches",f"https://www.dehashed.com/search?query={target}"),("EPIEOS social lookup",f"https://epieos.com/?q={target}&t=email")]:
+    lines += ["=" * 50, "FREE LOOKUP SITES", "=" * 50, ""]
+    for nm, url in [
+        ("TruePeopleSearch",    f"https://www.truepeoplesearch.com/results?emailaddress={target}"),
+        ("ThatsThem",           f"https://thatsthem.com/email/{target}"),
+        ("EmailRep reputation", f"https://emailrep.io/{target}"),
+        ("Hunter.io verify",    f"https://hunter.io/email-verifier/{target}"),
+        ("HaveIBeenPwned",      f"https://haveibeenpwned.com/account/{target}"),
+        ("Dehashed breaches",   f"https://www.dehashed.com/search?query={target}"),
+        ("Epieos social lookup",f"https://epieos.com/?q={target}&t=email"),
+    ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "GOOGLE DORKS", "="*50, ""]
+    lines += ["=" * 50, "GOOGLE DORKS", "=" * 50, ""]
     for dork in [f'"{target}"', f'"{target}" name address phone', f'"{target}" site:linkedin.com', f'"{target}" site:facebook.com', f'"{target}" site:pastebin.com', f'"{target}" leaked OR breach OR hacked']:
         lines.append(f"  {dork}"); lines.append(f"  https://www.google.com/search?q={quote_plus(dork)}"); lines.append("")
     result = "\n".join(lines)
@@ -1123,17 +1221,29 @@ def module_plate_lookup(target, job_id, ids=None):
     else:
         plate = tc.replace(" ","").replace("-","").replace(",","").strip(); state = "NM"
     lines = [f"TARGET PLATE: {plate}", f"STATE:        {state}", "NOTE: DPPA permissible purpose required. Law firms qualify.", ""]
-    lines += ["="*50, "FREE VEHICLE LOOKUP", "="*50, ""]
-    for nm, url in [("VehicleHistory.com",f"https://www.vehiclehistory.com/license-plate-search?plate={plate}&state={state}"),("Faxvin Plate Search",f"https://www.faxvin.com/license-plate-lookup/{state.lower()}/{plate}"),("NICB VINCheck stolen check","https://www.nicb.org/vincheck"),("NHTSA Recalls","https://www.nhtsa.gov/recalls"),("NMVTIS Vehicle History","https://www.vehiclehistory.gov/")]:
+    lines += ["=" * 50, "FREE VEHICLE LOOKUP", "=" * 50, ""]
+    for nm, url in [
+        ("VehicleHistory.com",          f"https://www.vehiclehistory.com/license-plate-search?plate={plate}&state={state}"),
+        ("Faxvin plate search",         f"https://www.faxvin.com/license-plate-lookup/{state.lower()}/{plate}"),
+        ("EpicVIN plate lookup",        f"https://epicvin.com/license-plate-lookup?plate={plate}&state={state}"),
+        ("NICB VINCheck stolen — MANUAL: enter VIN", "https://www.nicb.org/vincheck"),
+        ("NHTSA Recalls — MANUAL: enter VIN",        "https://www.nhtsa.gov/recalls"),
+        ("NMVTIS Title Check — MANUAL: enter VIN",   "https://www.vehiclehistory.gov/"),
+    ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, f"{state} MVD RECORDS REQUEST", "="*50, "", "Submit DPPA request to state MVD for registered owner info.", ""]
+    lines += ["=" * 50, f"{state} MVD RECORDS REQUEST", "=" * 50, "", "⚑ MANUAL: Submit DPPA form to state MVD for registered owner.", ""]
     mvd_links = {"NM":("NM MVD","https://www.mvd.newmexico.gov/","(888) 683-4636"),"AZ":("AZ MVD","https://www.azdot.gov/motor-vehicles","(602) 712-7355"),"TX":("TX DMV","https://www.txdmv.gov/","(888) 368-4689"),"CO":("CO DMV","https://dmv.colorado.gov/","(303) 205-5600"),"CA":("CA DMV","https://www.dmv.ca.gov/","(800) 777-0133")}
     mn, mu, mp = mvd_links.get(state,("State MVD","https://www.vehiclehistory.gov/","Check state DMV website"))
     lines += [f"[{mn} DPPA request]", f"  {mu}", f"  Phone: {mp}", ""]
-    lines += ["="*50, "SOCIAL MEDIA PLATE SEARCH", "="*50, ""]
-    for nm, url in [("Facebook",f"https://www.facebook.com/search/posts/?q={plate}"),("Instagram",f"https://www.instagram.com/explore/search/keyword/?q={plate}"),("Twitter/X",f"https://twitter.com/search?q=%22{plate}%22&f=live"),("Reddit",f"https://www.reddit.com/search/?q=%22{plate}%22")]:
+    lines += ["=" * 50, "SOCIAL MEDIA PLATE SEARCH", "=" * 50, ""]
+    for nm, url in [
+        ("Facebook",    f"https://www.facebook.com/search/posts/?q={plate}"),
+        ("Instagram",   f"https://www.instagram.com/explore/search/keyword/?q={plate}"),
+        ("Twitter/X",   f"https://twitter.com/search?q=%22{plate}%22&f=live"),
+        ("Reddit",      f"https://www.reddit.com/search/?q=%22{plate}%22"),
+    ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "DPPA PERMISSIBLE PURPOSES Law Firm", "="*50, "", "  * Litigation or investigation in anticipation of litigation", "  * Service of process", "  * Licensed private investigator research", "  * Insurance claims investigation", "  * Locating missing persons or witnesses", "", "Cite: 18 U.S.C. 2721(b)"]
+    lines += ["=" * 50, "DPPA PERMISSIBLE PURPOSES — Law Firm", "=" * 50, "", "  * Litigation or investigation in anticipation of litigation", "  * Service of process", "  * Licensed private investigator research", "  * Insurance claims investigation", "  * Locating missing persons or witnesses", "", "Cite: 18 U.S.C. 2721(b)"]
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "plate_lookup", "result": result})
     return result
@@ -1147,20 +1257,39 @@ def module_business(target, job_id, ids=None):
         data = json.loads(run_cmd(f"curl -s 'https://api.opencorporates.com/v0.4/companies/search?q={name_plus}&jurisdiction_code=us_nm&format=json' 2>/dev/null", timeout=10)[0])
         companies = data.get("results",{}).get("companies",[])
         if companies:
-            lines += ["="*50, "OPENCORPORATES -- NM RESULTS FREE", "="*50, ""]
+            lines += ["=" * 50, "OPENCORPORATES — NM RESULTS", "=" * 50, ""]
             for c in companies[:5]:
                 co = c.get("company",{})
                 lines += [f"  Name: {co.get('name','N/A')}", f"  Status: {co.get('current_status','N/A')}", f"  Registered: {co.get('incorporation_date','N/A')}", f"  URL: {co.get('opencorporates_url','N/A')}", ""]
         else: lines += ["No NM results from OpenCorporates.", ""]
     except Exception as e: lines += [f"OpenCorporates: {str(e)}", ""]
-    lines += ["="*50, "SECRETARY OF STATE -- FREE", "="*50, ""]
-    for nm, url in [("NM SOS Business Search",f"https://portal.sos.state.nm.us/BFS/online/CorporationFormation/SearchBusinesses?SearchCriteria={name_plus}"),("NM SOS alternate","https://businessportal.sos.nm.gov/"),("AZ SOS",f"https://ecorp.azcc.gov/BusinessSearch/BusinessSearch?SearchTerm={name_plus}"),("CO SOS",f"https://www.sos.state.co.us/biz/BusinessEntityCriteriaExt.do?nameTyp=ENT&entityName={name_plus}"),("TX SOS","https://mycpa.cpa.state.tx.us/coa/Index.html")]:
+    lines += ["=" * 50, "SECRETARY OF STATE — FREE", "=" * 50, ""]
+    for nm, url in [
+        ("NM SOS Business Search",  f"https://portal.sos.state.nm.us/BFS/online/CorporationFormation/SearchBusinesses?SearchCriteria={name_plus}"),
+        ("NM SOS alt portal",       "https://businessportal.sos.nm.gov/"),
+        ("AZ SOS",                  f"https://ecorp.azcc.gov/BusinessSearch/BusinessSearch?SearchTerm={name_plus}"),
+        ("CO SOS",                  f"https://www.sos.state.co.us/biz/BusinessEntityCriteriaExt.do?nameTyp=ENT&entityName={name_plus}"),
+        ("TX SOS — MANUAL: enter name", "https://mycpa.cpa.state.tx.us/coa/Index.html"),
+    ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "FEDERAL DATABASES -- FREE", "="*50, ""]
-    for nm, url in [("SAM.gov Federal Contractors",f"https://sam.gov/search/?keywords={name_plus}&sort=relevanceScore&index=ei&is_active=true&page=1"),("SEC EDGAR Public Companies",f"https://www.sec.gov/cgi-bin/browse-edgar?company={name_plus}&CIK=&type=&dateb=&owner=include&count=40&search_text=&action=getcompany"),("OpenCorporates All States",f"https://opencorporates.com/companies?q={name_plus}&jurisdiction_code=us"),("PACER Business Search","https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),("BBB Albuquerque",f"https://www.bbb.org/search?find_text={name_plus}&find_loc=Albuquerque%2C+NM")]:
+    lines += ["=" * 50, "FEDERAL DATABASES — FREE", "=" * 50, ""]
+    for nm, url in [
+        ("SAM.gov federal contractors",     f"https://sam.gov/search/?keywords={name_plus}&sort=relevanceScore&index=ei&is_active=true&page=1"),
+        ("SEC EDGAR public companies",      f"https://www.sec.gov/cgi-bin/browse-edgar?company={name_plus}&CIK=&type=&dateb=&owner=include&count=40&search_text=&action=getcompany"),
+        ("OpenCorporates all states",       f"https://opencorporates.com/companies?q={name_plus}&jurisdiction_code=us"),
+        ("PACER business search — MANUAL",  "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
+        ("BBB Albuquerque",                 f"https://www.bbb.org/search?find_text={name_plus}&find_loc=Albuquerque%2C+NM"),
+    ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-    lines += ["="*50, "BUSINESS INTELLIGENCE -- FREE", "="*50, ""]
-    for nm, url in [("LinkedIn Company",f"https://www.linkedin.com/search/results/companies/?keywords={name_plus}"),("Yelp Business",f"https://www.yelp.com/search?find_desc={name_plus}&find_loc=Albuquerque%2C+NM"),("Google Business",f"https://www.google.com/search?q={name_plus}+Albuquerque+NM+business"),("Bizapedia NM","https://www.bizapedia.com/nm/"),("Corporationwiki",f"https://www.corporationwiki.com/search/results?term={name_plus}"),("OpenCorporates Officers",f"https://opencorporates.com/officers?q={name_plus}")]:
+    lines += ["=" * 50, "BUSINESS INTELLIGENCE — FREE", "=" * 50, ""]
+    for nm, url in [
+        ("LinkedIn company",    f"https://www.linkedin.com/search/results/companies/?keywords={name_plus}"),
+        ("Yelp",                f"https://www.yelp.com/search?find_desc={name_plus}&find_loc=Albuquerque%2C+NM"),
+        ("Google business",     f"https://www.google.com/search?q={name_plus}+Albuquerque+NM+business"),
+        ("Bizapedia NM",        "https://www.bizapedia.com/nm/"),
+        ("CorporationWiki",     f"https://www.corporationwiki.com/search/results?term={name_plus}"),
+        ("OpenCorporates officers", f"https://opencorporates.com/officers?q={name_plus}"),
+    ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "business", "result": result})
@@ -1257,7 +1386,7 @@ def module_virustotal(target, job_id, ids=None):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MODULE REGISTRY — dorks tab retired, auto-integrated into PERSON modules
+# MODULE REGISTRY
 # ══════════════════════════════════════════════════════════════════════════════
 
 MODULE_MAP = {
