@@ -403,8 +403,7 @@ def module_people_search(target, job_id, ids=None):
         ("FASTPEOPLESEARCH",         f"https://www.fastpeoplesearch.com/name/{name_url}"),
         ("THATSTHEM 100% FREE",      f"https://thatsthem.com/name/{first}-{last}"),
         ("IDCRAWL social+records",   f"https://www.idcrawl.com/name/{first}-{last}"),
-        ("PEEKYOU social+arrests",   f"https://www.peekyou.com/{first}_{last}"),
-        ("SORTEDBYNAME.COM",         f"https://www.sortedbyname.com/search?q={name_plus}"),
+        ("PEEKYOU social+records",   f"https://www.peekyou.com/{first}_{last}"),
         ("ZABASEARCH",               f"https://www.zabasearch.com/people/{first}+{last}/{state}/"),
         ("411.COM",                  f"https://www.411.com/name/{first}-{last}/{state}"),
         ("USPHONEBOOK",              f"https://www.usphonebook.com/{first}-{last}"),
@@ -413,6 +412,7 @@ def module_people_search(target, job_id, ids=None):
         ("NUWBER",                   f"https://nuwber.com/search?firstName={first}&lastName={last}&city={quote_plus(city)}&state={state}"),
         ("VOTERRECORDS.COM",         f"https://voterrecords.com/voters/{name_url}/1"),
         ("PUBLICRECORDS.ONLINE",     f"https://publicrecords.online/search/?first_name={first}&last_name={last}&state={state}"),
+        ("INTELIUS preview free",    f"https://www.intelius.com/people-search/results/?fn={first}&ln={last}&state={state}"),
     ]
     for nm, url in sites:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
@@ -485,9 +485,8 @@ def module_public_records(target, job_id, ids=None):
         ("VINE Offender Search NM", "https://vinelink.vineapps.com/search/NM/Person"),
         ("NM Corrections Inmate", "https://www.cd.nm.gov/divisions/oid/offender-search/"),
         ("JailBase Arrest Bookings FREE", f"https://www.jailbase.com/search/?name_searched={name_plus}"),
-        ("ArrestFacts", f"https://arrestfacts.com/search?name={name_plus}"),
-        ("BustedMugshots", f"https://bustedmugshots.com/search?name={name_plus}"),
-        ("MugshotSearch", f"https://www.mugshots.com/search?q={name_plus}"),
+        ("CriminalWatchdog FREE", f"https://www.criminalwatchdog.com/faq/search-results?fname={first}&lname={last}&state={state}"),
+        ("BookingLogs FREE", f"https://bookinglogs.com/?s={name_plus}"),
         ("OpenSanctions", f"https://www.opensanctions.org/search/?q={name_plus}"),
         ("Sex Offender Registry NM", "https://www.nmsexoffender.dps.nm.gov/"),
         ("Sex Offender Registry National", f"https://www.nsopw.gov/Search/Results?firstName={first}&lastName={last}"),
@@ -669,7 +668,8 @@ def module_skip_trace(target, job_id, ids=None):
     lines += ["="*50, "TIER 4 -- ADDRESS VERIFICATION", "="*50, ""]
     for nm, url in [
         ("USPS Address Lookup","https://tools.usps.com/zip-code-lookup.htm?byaddress"),
-        ("Melissa Address Check","https://www.melissa.com/v2/lookups/addresscheck/"),
+        ("USPS ZIP+4 Lookup","https://tools.usps.com/zip-code-lookup.htm?byaddress"),
+        ("SmartyStreets Free Address Verify","https://www.smartystreets.com/products/single-address"),
         ("Google Maps Verify", f"https://www.google.com/maps/search/{name_plus}+{city_plus}+{state}"),
         ("Bernalillo County Assessor","https://assessor.bernco.gov/public.access/search/commonsearch.aspx?mode=owner"),
     ]:
@@ -700,6 +700,62 @@ def module_skip_trace(target, job_id, ids=None):
     except: pass
     dorks = build_dorks(name_part, location_part, state, city, ids)
     lines.extend(render_dorks(dorks["skip"], "SKIP TRACE"))
+    # ── IDI HANDOFF BLOCK ──────────────────────────────────────────────────────
+    lines += ["", "=" * 50, "IDI — INVESTIGATIVE DATA INTELLIGENCE HANDOFF", "=" * 50, ""]
+    lines.append("When free-tier results are exhausted, escalate to IDI.")
+    lines.append("IDI is a permissible-use commercial database — law firm access required.")
+    lines.append("")
+    lines.append("QUERY PACKAGE — paste directly into IDI search:")
+    lines.append("")
+    lines.append(f"  Full Name:   {name_part}")
+    if location_part:
+        lines.append(f"  Location:    {location_part}")
+    dob_m  = ids.get("dob_month","")
+    dob_d  = ids.get("dob_day","")
+    dob_yr = ids.get("dob_year","")
+    if dob_m and dob_d and dob_yr:
+        lines.append(f"  DOB:         {dob_m}/{dob_d}/{dob_yr}")
+    elif dob_yr:
+        lines.append(f"  DOB Year:    {dob_yr}")
+    ssn_disp = ids.get("ssn_display","")
+    ssn_type = ids.get("ssn_type","")
+    if ssn_disp:
+        lines.append(f"  SSN:         {ssn_disp}  ({ssn_type.upper() if ssn_type else 'ON FILE'})")
+    oln = ids.get("oln_number","")
+    oln_state = ids.get("oln_state","NM")
+    if oln:
+        lines.append(f"  OLN:         {oln}  State: {oln_state}")
+    emp = ids.get("employer","")
+    if emp:
+        lines.append(f"  Employer:    {emp}")
+    street = ids.get("street","")
+    zip_   = ids.get("zip","")
+    if street:
+        lines.append(f"  Street:      {street}")
+    if zip_:
+        lines.append(f"  ZIP:         {zip_}")
+    lines.append("")
+    lines.append("IDI RECOMMENDED SEARCH SEQUENCE:")
+    lines.append("  1. Person Search — confirm identity, harvest current address")
+    lines.append("  2. Address History — full address timeline with date ranges")
+    lines.append("  3. Associates / Relatives — develop alternate contact points")
+    lines.append("  4. Phone Report — current + historical numbers")
+    lines.append("  5. Employment — verify employer, develop service of process address")
+    if ssn_disp:
+        lines.append("  6. SSN Trace — confirm identity, address history anchored to SSN")
+    if oln:
+        lines.append("  6. MVR / Driver History — violations, license status, DUI flags")
+    lines.append("")
+    lines.append("IDI ESCALATION TRIGGERS:")
+    lines.append("  * Free-tier sources return stale/conflicting addresses")
+    lines.append("  * Subject has common name — need DOB/SSN disambiguation")
+    lines.append("  * Service of process failed — need current employer/alternate address")
+    lines.append("  * Litigation hold — comprehensive address history required for record")
+    lines.append("")
+    lines.append("⚠ DPPA: Document permissible use before IDI query.")
+    lines.append("  18 U.S.C. § 2721(b) — litigation support / service of process.")
+    lines.append("  Log: case number, attorney authorization, query date, investigator.")
+    lines.append("")
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "skip_trace", "result": result})
     return result
@@ -782,14 +838,14 @@ def module_social_footprint(target, job_id, ids=None):
         lines.append("")
     lines += ["="*50, "REAL-TIME SOCIAL SEARCH -- FREE TOOLS", "="*50, ""]
     for nm, url in [
-        ("Social Searcher FREE", f"https://www.social-searcher.com/social-buzz/?q={name_plus}"),
-        ("Social Catfish", f"https://socialcatfish.com/search/?q={name_plus}"),
-        ("PeekYou social+arrests", f"https://www.peekyou.com/{first.lower()}_{last.lower()}"),
+        ("WhatsMyName username sweep", f"https://whatsmyname.app/?q={first.lower()}{last.lower()}"),
+        ("PeekYou social+records", f"https://www.peekyou.com/{first.lower()}_{last.lower()}"),
         ("Sowsearch FB Deep", f"https://sowsearch.info/search?q={name_plus}"),
-        ("Boardreader forums", f"https://boardreader.com/s/{name_plus}.html"),
-        ("WhatsMyName usernames", f"https://whatsmyname.app/?q={first.lower()}{last.lower()}"),
+        ("Google Forum Search", f"https://www.google.com/search?q=%22{name_plus}%22+forum+OR+community+OR+discussion"),
+        ("Google Groups Search", f"https://groups.google.com/search/groups?q={name_plus}"),
         ("IDCrawl social+records", f"https://www.idcrawl.com/name/{first.lower()}-{last.lower()}"),
-        ("Epieos email->social", f"https://epieos.com/?q={name_plus}&t=name"),
+        ("Epieos email-to-social", f"https://epieos.com/?q={name_plus}&t=name"),
+        ("GHunt Google account recon", "https://github.com/mxrch/GHunt"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines += ["="*50, "LINKEDIN DEEP SEARCH", "="*50, ""]
@@ -996,10 +1052,27 @@ def module_phone(target, job_id, ids=None):
     if not ipqs_key and not nv_key:
         lines += ["Add IPQS_API_KEY or NUMVERIFY_API_KEY to Render env vars for live carrier data.", ""]
     lines += ["="*50, "FREE REVERSE LOOKUP SITES", "="*50, "", "NOTE: SpyDialer calls the number silently. Target may see missed call. Use intentionally.", ""]
-    for nm, url in [("SPYDIALER FREE name via voicemail",f"https://www.spydialer.com/default.aspx?phone={clean}"),("NUMLOOKUP FREE owner name carrier",f"https://www.numlookup.com/?number={clean}"),("ANYWHO free directory",f"https://www.anywho.com/reverse-lookup/{clean}"),("TRUEPEOPLESEARCH FREE",f"https://www.truepeoplesearch.com/results?phoneno={clean}"),("THATSTHEM FREE",f"https://thatsthem.com/phone/{clean}"),("FASTPEOPLESEARCH",f"https://www.fastpeoplesearch.com/phone/{clean}"),("FONEFINDER carrier lookup",f"https://fonefinder.net/findphone.php?areacode={clean[:3]}&exchange={clean[3:6]}&thenumber={clean[6:]}"),("USPHONEBOOK",f"https://www.usphonebook.com/{clean}"),("411.COM",f"https://www.411.com/phone/{clean}"),("TRUECALLER community ID",f"https://www.truecaller.com/search/us/{clean}")]:
+    for nm, url in [
+        ("SPYDIALER FREE name via voicemail",f"https://www.spydialer.com/default.aspx?phone={clean}"),
+        ("NUMLOOKUP FREE owner name carrier",f"https://www.numlookup.com/?number={clean}"),
+        ("ANYWHO free directory",f"https://www.anywho.com/reverse-lookup/{clean}"),
+        ("TRUEPEOPLESEARCH FREE",f"https://www.truepeoplesearch.com/results?phoneno={clean}"),
+        ("THATSTHEM FREE",f"https://thatsthem.com/phone/{clean}"),
+        ("FASTPEOPLESEARCH",f"https://www.fastpeoplesearch.com/phone/{clean}"),
+        ("FONEFINDER carrier lookup",f"https://fonefinder.net/findphone.php?areacode={clean[:3]}&exchange={clean[3:6]}&thenumber={clean[6:]}"),
+        ("USPHONEBOOK",f"https://www.usphonebook.com/{clean}"),
+        ("411.COM",f"https://www.411.com/phone/{clean}"),
+        ("TRUECALLER community ID",f"https://www.truecaller.com/search/us/{clean}"),
+    ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines += ["="*50, "SPAM & REPORT DATABASES", "="*50, ""]
-    for nm, url in [("800NOTES",f"https://800notes.com/Phone.aspx/{clean}"),("CALLERCENTER",f"https://callercenter.com/{clean}"),("NOMOROBO",f"https://www.nomorobo.com/lookup/{clean}"),("SPAMCALLS",f"https://spamcalls.net/en/search?n={clean}"),("WHOCALLEDUS",f"https://whocalledus.com/calls/{clean}/")]:
+    for nm, url in [
+        ("800NOTES community reports",f"https://800notes.com/Phone.aspx/{clean}"),
+        ("NOMOROBO robocall check",f"https://www.nomorobo.com/lookup/{clean}"),
+        ("CALLTRUTH carrier+reports",f"https://calltruth.com/phone/{clean}"),
+        ("SHOULDIANSWER community DB",f"https://www.shouldianswer.com/phone-number/{clean}"),
+        ("CALLERR reports",f"https://www.callerr.com/phone-number/{clean}/"),
+    ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines += ["="*50, "GOOGLE DORKS", "="*50, ""]
     for dork in [f'"{formatted}"', f'"{clean}"', f'"{phone_plus1}"', f'"{formatted}" name address', f'"{clean}" site:facebook.com', f'"{clean}" spam OR scam OR fraud']:
