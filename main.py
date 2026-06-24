@@ -1176,7 +1176,8 @@ def module_phone(target, job_id, ids=None):
     clean = target.replace("-","").replace("(","").replace(")","").replace(" ","").replace("+1","").strip()
     formatted = f"({clean[:3]}) {clean[3:6]}-{clean[6:]}" if len(clean)==10 else target
     phone_plus1 = f"+1{clean}" if len(clean)==10 else target
-    lines = [f"TARGET:    {formatted}", f"CLEANED:   {clean}", ""]
+    e164 = f"+1{clean}" if len(clean)==10 else target
+    lines = [f"TARGET:    {formatted}", f"CLEANED:   {clean}", f"E.164:     {e164}  (international format for tool submissions)", ""]
     ipqs_key = os.environ.get("IPQS_API_KEY",""); nv_key = os.environ.get("NUMVERIFY_API_KEY","")
     if ipqs_key:
         try:
@@ -1206,6 +1207,27 @@ def module_phone(target, job_id, ids=None):
         ("USPhoneBook",                     f"https://www.usphonebook.com/{clean}"),
         ("411.com",                         f"https://www.411.com/phone/{clean}"),
         ("TrueCaller — community ID",       f"https://www.truecaller.com/search/us/{clean}"),
+    ]:
+        lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
+    lines += ["=" * 50, "CROWDSOURCED CALLER ID", "=" * 50, ""]
+    lines.append("TIP: Cross-reference — if 2+ sources return same name, treat as confirmed lead.")
+    lines.append("")
+    for nm, url in [
+        ("Sync.ME — crowdsourced caller ID",    f"https://sync.me/search/?number={phone_plus1}"),
+        ("Hiya — spam/ID database",             f"https://hiya.com/phone-number/{clean}"),
+        ("HLR Lookup — carrier/line type free", f"https://www.hlrlookup.com/"),
+    ]:
+        lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
+    lines += ["=" * 50, "MESSAGING APP PRESENCE — MANUAL WORKFLOW", "=" * 50, ""]
+    lines.append("⚑ MANUAL: Save number as contact in phone, then check each app.")
+    lines.append("  WhatsApp: reveals profile photo + status to anyone with number saved.")
+    lines.append("  Telegram: reveals username, profile photo, last seen — HIGHEST VALUE.")
+    lines.append("  Signal:   reveals if registered — profile visible if privacy not locked.")
+    lines.append("")
+    for nm, url in [
+        ("WhatsApp — open chat with number",  f"https://wa.me/{phone_plus1.replace('+','')}"),
+        ("Telegram web — search number",      f"https://web.telegram.org/"),
+        ("Telegram t.me link attempt",        f"https://t.me/+{phone_plus1.replace('+','')}"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines += ["=" * 50, "SPAM & REPORT DATABASES", "=" * 50, ""]
@@ -1251,6 +1273,7 @@ def module_email_investigate(target, job_id, ids=None):
         ("ThatsThem",           f"https://thatsthem.com/email/{target}"),
         ("EmailRep reputation", f"https://emailrep.io/{target}"),
         ("HaveIBeenPwned",      f"https://haveibeenpwned.com/account/{target}"),
+        ("breach.vip — username/email breach search", f"https://breach.vip/"),
         ("Epieos social lookup",f"https://epieos.com/?q={target}&t=email"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
