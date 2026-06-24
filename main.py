@@ -211,6 +211,8 @@ def build_dorks(name_part, location_part, state, city, ids):
         ("PDF records",      f'{n} {loc} filetype:pdf'.strip(),                                          ""),
         ("Justia",           f'{n} site:justia.com',                                                     ""),
         ("CourtListener",    f'{n} site:courtlistener.com',                                              ""),
+        ("Google Scholar",   f'{n} site:scholar.google.com',                                            ""),
+        ("Caselaw Access",   f'{n} site:case.law',                                                      ""),
         ("NM courts",        f'{n} site:caselookup.nmcourts.gov',                                       ""),
         ("Arrest — county anchor",  f'{n} arrest OR booking OR "booked into" {loc if loc else st}'.strip(), ""),
         ("Arrest — DOB disambig",   f'{n} "{yr}" arrest OR booking OR charges New Mexico'.strip() if yr else f'{n} arrest OR booking OR charges "New Mexico"', "[DOB]" if yr else ""),
@@ -424,6 +426,12 @@ def module_people_search(target, job_id, ids=None):
         ("Reddit",    f"https://www.reddit.com/search/?q=%22{name_part}%22&type=user"),
     ]:
         lines.append(f"[{platform}]"); lines.append(f"  {url}"); lines.append("")
+    lines.append("=" * 50); lines.append("MULTI-PLATFORM LAUNCHERS"); lines.append("=" * 50); lines.append("")
+    for nm, url in [
+        ("OSINT Vault — 4,577 US public records sources", "https://theosintvault.io/"),
+        ("OSINT Vault multi-search launcher — 80+ platforms", f"https://theosintvault.io/multi-search?q={name_plus}"),
+    ]:
+        lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines.append("=" * 50); lines.append("COURT & PUBLIC RECORDS"); lines.append("=" * 50); lines.append("")
     for nm, url in [
         ("NM Courts CourtLook — MANUAL: enter name",  "https://caselookup.nmcourts.gov/caselookup/app"),
@@ -479,6 +487,8 @@ def module_public_records(target, job_id, ids=None):
         ("NM Courts CourtLook — MANUAL: enter name",  "https://caselookup.nmcourts.gov/caselookup/app"),
         ("PACER Federal Courts — MANUAL: free acct",  "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
         ("CourtListener Federal",        f"https://www.courtlistener.com/?q={name_plus}&type=p"),
+        ("Google Scholar Case Law",      f"https://scholar.google.com/scholar?q={name_plus}&as_sdt=4,32"),
+        ("Caselaw Access Project 1.7M+", f"https://www.case.law/search/#/search?q={name_plus}&jurisdiction=nm"),
         ("VINE Offender NM — MANUAL: enter name",     "https://vinelink.vineapps.com/search/NM/Person"),
         ("NM Corrections Inmate — MANUAL: enter name","https://www.cd.nm.gov/divisions/oid/offender-search/"),
         ("JailBase arrest bookings",     f"https://www.jailbase.com/search/?name_searched={name_plus}"),
@@ -613,6 +623,7 @@ def module_skip_trace(target, job_id, ids=None):
     lines += ["", "DPPA: Law firms qualify under 18 U.S.C. 2721(b) for litigation & process serving.", ""]
     lines += ["=" * 50, "TIER 1 — FREE SOURCES (pre-loaded results)", "=" * 50, ""]
     for nm, url in [
+        ("OSINT Vault multi-search — 80+ platforms", f"https://theosintvault.io/multi-search?q={name_plus}"),
         ("FamilyTreeNow",       f"https://www.familytreenow.com/search/people/results?first={first}&last={last}&state={state}"),
         ("TruePeopleSearch",    f"https://www.truepeoplesearch.com/results?name={name_plus}&citystatezip={city_plus}+{state}"),
         ("FastPeopleSearch",    f"https://www.fastpeoplesearch.com/name/{name_url}"),
@@ -1175,6 +1186,16 @@ def module_phone(target, job_id, ids=None):
         except: pass
     if not ipqs_key and not nv_key:
         lines += ["Add IPQS_API_KEY or NUMVERIFY_API_KEY to Render env vars for live carrier data.", ""]
+    lines += ["=" * 50, "CARRIER & LINE TYPE INTELLIGENCE", "=" * 50, ""]
+    lines.append("TIP: Confirm VoIP vs landline vs mobile before serve attempt — changes strategy.")
+    lines.append("")
+    for nm, url in [
+        ("CarrierLookup — free carrier/line type", f"https://www.carrierlookup.com/?number={clean}"),
+        ("PhoneScoop — carrier specs free",        f"https://www.phonescoop.com/phones/finder.php?ftr=&spec=3&sv={clean[:3]}"),
+        ("PhoneInfoga — MANUAL: install CLI",       "https://github.com/sundowndev/phoneinfoga"),
+        ("PhoneInfoga docs",                        "https://sundowndev.github.io/phoneinfoga/"),
+    ]:
+        lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines += ["=" * 50, "FREE REVERSE LOOKUP SITES", "=" * 50, "", "NOTE: SpyDialer calls the number silently — target may see missed call. Use deliberately.", ""]
     for nm, url in [
         ("SpyDialer — name via voicemail",  f"https://www.spydialer.com/default.aspx?phone={clean}"),
