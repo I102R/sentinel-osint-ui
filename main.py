@@ -282,7 +282,7 @@ def render_identifier_sources(ids, name_part, first, last):
         lines.append(f"DOB on file: {dob_str}")
         lines.append("")
         lines.append("[NM Voter Portal — DOB exact match]  ⚑ MANUAL: enter name + DOB on site")
-        lines.append("  https://voterportal.servis.sos.nm.gov/WhereToVote.aspx")
+        lines.append("  https://voterportal.sos.nm.gov/WhereToVote.aspx")
         lines.append("  TIP: Highest-confidence free address source — DOB exact match eliminates false hits")
         lines.append("")
         lines.append("[FamilyTreeNow — DOB filter]")
@@ -297,7 +297,7 @@ def render_identifier_sources(ids, name_part, first, last):
         lines.append("")
         if yr:
             lines.append("[SSN Issuance Validator — cross-check DOB/origin]  ⚑ MANUAL: enter SSN prefix on site  [DOB]")
-            lines.append("  https://www.ssnvalidator.com")
+            lines.append("  https://www.ssn-check.org")
             lines.append(f"  TIP: Birth year {yr} — confirm SSN issue state matches subject origin")
             lines.append("")
         lines.append("[FindAGrave — deceased check]  [DOB]")
@@ -314,7 +314,7 @@ def render_identifier_sources(ids, name_part, first, last):
         lines.append(f"Type: {ssn_type.upper() if ssn_type else 'UNKNOWN'}")
         lines.append("")
         lines.append("[SSN Issuance State Lookup — free]  ⚑ MANUAL: enter SSN prefix on site")
-        lines.append("  https://www.ssnvalidator.com")
+        lines.append("  https://www.ssn-check.org")
         lines.append("  TIP: Confirms state of issuance + approximate year — validates subject age/origin")
         lines.append("")
         if ssn_type == "full":
@@ -367,7 +367,6 @@ def render_identifier_sources(ids, name_part, first, last):
             lines.append("  TIP: CDL holders and serious traffic offenders")
             lines.append("")
             lines.append("[LexisNexis C.L.U.E. — prior insurance claims]  ⚑ MANUAL: firm account required  [OLN]")
-            lines.append("  https://personalreports.lexisnexis.com")
             lines.append(f"  TIP: OLN {oln} — prior claims history material to PI damages")
             lines.append("")
         lines.append("[NM CourtLook — traffic/DUI filter]  ⚑ MANUAL: enter OLN on site  [OLN]")
@@ -406,12 +405,14 @@ def module_people_search(target, job_id, ids=None):
         ("FASTPEOPLESEARCH",     f"https://www.fastpeoplesearch.com/name/{name_url}"),
         ("THATSTHEM",            f"https://thatsthem.com/name/{first}-{last}"),
         ("IDCRAWL",              f"https://www.idcrawl.com/name/{first}-{last}"),
-        ("PEEKYOU",              f"https://www.peekyou.com/{first}_{last}"),
         ("ZABASEARCH",           f"https://www.zabasearch.com/people/{first}+{last}/{state}/"),
         ("411.COM",              f"https://www.411.com/name/{first}-{last}/{state}"),
         ("USPHONEBOOK",          f"https://www.usphonebook.com/{first}-{last}"),
         ("VOTERRECORDS.COM",     f"https://voterrecords.com/voters/{name_url}/1"),
         ("PUBLICRECORDS.ONLINE", f"https://publicrecords.online/search/?first_name={first}&last_name={last}&state={state}"),
+        ("RADARIS — partial free",    f"https://radaris.com/p/{first}/{last}/"),
+        ("ADDRESSES.COM",             f"https://www.addresses.com/people/{first}-{last}"),
+        ("WHITEPAGES — partial free", f"https://www.whitepages.com/name/{first}-{last}/{state}"),
     ]
     for nm, url in sites:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
@@ -487,6 +488,8 @@ def module_public_records(target, job_id, ids=None):
         ("NM Courts CourtLook — MANUAL: enter name",  "https://caselookup.nmcourts.gov/caselookup/app"),
         ("PACER Federal Courts — MANUAL: free acct",  "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
         ("CourtListener Federal",        f"https://www.courtlistener.com/?q={name_plus}&type=p"),
+        ("UniCourt — 10 free/month",     f"https://unicourt.com/search#?q={name_plus}"),
+        ("PlainSite — federal + corp",   f"https://www.plainsite.org/search/?q={name_plus}"),
         ("Google Scholar Case Law",      f"https://scholar.google.com/scholar?q={name_plus}&as_sdt=4,32"),
         ("Caselaw Access Project 1.7M+", f"https://www.case.law/search/#/search?q={name_plus}&jurisdiction=nm"),
         ("VINE Offender NM — MANUAL: enter name",     "https://vinelink.vineapps.com/search/NM/Person"),
@@ -563,25 +566,25 @@ def module_property(target, job_id, ids=None):
         ("Santa Fe County Assessor",    "https://www.santafecountynm.gov/assessor"),
         ("Dona Ana County Assessor",    "https://assessor.donaanacounty.org/"),
         ("Valencia County Assessor",    "https://www.co.valencia.nm.us/assessor"),
-        ("Chavez/Roswell Assessor",     "https://www.chaves.nm.us/departments/assessor"),
-        ("Lea County Assessor",         "https://www.leacountynm.gov/departments/assessor"),
-        ("Otero County Assessor",       "https://www.oterocountynm.gov/county-offices/assessor"),
+        ("Chavez/Roswell Assessor",     "https://www.chavescounty.net/assessor/"),
+        ("Lea County Assessor",         "https://www.leacounty.net/assessor/"),
+        ("Otero County Assessor",       "https://www.co.otero.nm.us/assessor/"),
         ("San Juan County Assessor",    "https://www.sjcounty.net/departments/assessor"),
         ("McKinley County Assessor",    "https://www.co.mckinley.nm.us/assessor"),
         ("Eddy County Assessor",        "https://www.co.eddy.nm.us/137/Assessor"),
         ("Curry County Assessor",       "https://www.currycounty.org/assessor"),
         ("Roosevelt County Assessor",   "https://www.rooseveltcounty.com/assessor"),
-        ("Sierra County Assessor",      "https://sierracountynm.gov/assessor/"),
+        ("Sierra County Assessor",      "https://www.sierracountynm.org/assessor/"),
         ("Grant County Assessor",       "https://www.grantcountynm.gov/assessor"),
         ("Luna County Assessor",        "https://www.lunacountynm.us/assessor"),
-        ("Hidalgo County Assessor",     "https://www.hidalgocountynm.gov/assessor"),
+        ("Hidalgo County Assessor",     "https://www.hidalgocounty.org/assessor/"),
         ("Socorro County Assessor",     "https://www.socorrocounty.org/assessor"),
         ("Lincoln County Assessor",     "https://www.lincolncountynm.net/assessor"),
         ("Torrance County Assessor",    "https://www.torrancecountynm.org/assessor"),
         ("Taos County Assessor",        "https://www.taoscounty.org/assessor"),
         ("Rio Arriba County Assessor",  "https://www.rio-arriba.org/assessor"),
-        ("San Miguel County Assessor",  "https://www.co.san-miguel.nm.us/assessor"),
-        ("Cibola County Assessor",      "https://www.cibolacounty.org/assessor"),
+        ("San Miguel County Assessor",  "https://www.sanmiguelcounty.org/assessor/"),
+        ("Cibola County Assessor",      "https://www.co.cibola.nm.us/assessor/"),
         ("Los Alamos County Assessor",  "https://www.losalamosnm.us/assessor"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
@@ -633,6 +636,9 @@ def module_skip_trace(target, job_id, ids=None):
         ("411.com",             f"https://www.411.com/name/{first}-{last}/{state}"),
         ("USPhoneBook",         f"https://www.usphonebook.com/{first}-{last}"),
         ("PublicRecords.Online",f"https://publicrecords.online/search/?first_name={first}&last_name={last}&state={state}"),
+        ("Radaris — partial free",   f"https://radaris.com/p/{first}/{last}/"),
+        ("Whitepages — partial free",f"https://www.whitepages.com/name/{first}-{last}/{state}"),
+        ("Addresses.com",            f"https://www.addresses.com/people/{first}-{last}"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines += ["=" * 50, "TIER 2 — VOTER REGISTRATION (best free address source)", "=" * 50, ""]
@@ -647,7 +653,7 @@ def module_skip_trace(target, job_id, ids=None):
         "CO":("CO Voter Portal","https://www.sos.state.co.us/voter/pages/pub/olvr/findVoterReg.xhtml"),
         "FL":("FL Voter Lookup","https://registration.elections.myflorida.com/CheckVoterStatus"),
         "GA":("GA Voter Status","https://mvp.sos.ga.gov/s/"),
-        "NM":("NM Voter Portal","https://voterportal.servis.sos.nm.gov/WhereToVote.aspx"),
+        "NM":("NM Voter Portal","https://voterportal.sos.nm.gov/WhereToVote.aspx"),
         "NY":("NY Voter Status","https://voterlookup.elections.ny.gov/"),
         "TX":("TX Voter Search","https://teamrv-mvp.sos.texas.gov/MVP/mvp.do"),
         "NC":("NC Voter Lookup","https://vt.ncsbe.gov/RegLkup/"),
@@ -687,7 +693,6 @@ def module_skip_trace(target, job_id, ids=None):
     lines += ["=" * 50, "TIER 4 — ADDRESS VERIFICATION", "=" * 50, ""]
     for nm, url in [
         ("USPS ZIP+4 Lookup — MANUAL: enter address",       "https://tools.usps.com/zip-code-lookup.htm?byaddress"),
-        ("SmartyStreets — MANUAL: enter address",           "https://www.smartystreets.com/products/single-address"),
         ("Google Maps street verify",                        f"https://www.google.com/maps/search/{name_plus}+{city_plus}+{state}"),
         ("Bernalillo County Assessor — MANUAL: owner search","https://assessor.bernco.gov/public.access/search/commonsearch.aspx?mode=owner"),
     ]:
@@ -864,13 +869,14 @@ def module_social_footprint(target, job_id, ids=None):
     lines += ["=" * 50, "REAL-TIME SOCIAL SEARCH — FREE TOOLS", "=" * 50, ""]
     for nm, url in [
         ("WhatsMyName username sweep",        f"https://whatsmyname.app/?q={first.lower()}{last.lower()}"),
-        ("PeekYou social+records",            f"https://www.peekyou.com/{first.lower()}_{last.lower()}"),
         ("Sowsearch FB deep",                 f"https://sowsearch.info/search?q={name_plus}"),
         ("Google forum/community search",     f"https://www.google.com/search?q=%22{name_plus}%22+forum+OR+community+OR+discussion"),
         ("Google Groups",                     f"https://groups.google.com/search/groups?q={name_plus}"),
         ("IDCrawl social+records",            f"https://www.idcrawl.com/name/{first.lower()}-{last.lower()}"),
         ("Epieos email-to-social — MANUAL: enter email or name", f"https://epieos.com/?q={name_plus}&t=name"),
         ("GHunt Google acct recon — MANUAL: run CLI with email", "https://github.com/mxrch/GHunt"),
+        ("SocialBlade — account age/stats", f"https://socialblade.com/search?query={name_plus}"),
+        ("NM Politics — public figures NM", f"https://www.nmpolitics.net/?s={name_plus}"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines += ["=" * 50, "PAYMENT APP PROFILES", "=" * 50, ""]
@@ -905,7 +911,7 @@ def module_social_footprint(target, job_id, ids=None):
     lines += ["=" * 50, "REVERSE IMAGE & FACE SEARCH — FREE", "=" * 50, "", "Upload subject photo to find additional profiles.", ""]
     for nm, url in [
         ("Yandex — best for faces — MANUAL: upload photo",  "https://yandex.com/images/"),
-        ("PimEyes face search — MANUAL: upload photo",      "https://pimeyes.com/en"),
+        ("PimEyes — FREEMIUM: limited free — MANUAL: upload", "https://pimeyes.com/en"),
         ("Lenso.ai — MANUAL: upload photo",                 "https://lenso.ai/en"),
         ("Google Reverse Image — MANUAL: upload photo",     "https://images.google.com/"),
         ("TinEye — MANUAL: upload or paste URL",            "https://tineye.com/"),
@@ -940,8 +946,6 @@ def module_hit_and_run(target, job_id, ids=None):
     lines += ["=" * 50, "STEP 1 — IDENTIFY VEHICLE FROM PHOTO/VIDEO", "=" * 50, ""]
     for nm, url in [
         ("Carnet.ai — MANUAL: upload photo",        "https://carnet.ai/"),
-        ("Remini — MANUAL: upload to clean image",  "https://app.remini.ai/"),
-        ("LetsEnhance — MANUAL: upload to upscale", "https://letsenhance.io/"),
         ("Google Reverse Image — MANUAL: upload",   "https://images.google.com/"),
         ("Yandex — MANUAL: upload",                 "https://yandex.com/images/"),
         ("TinEye — MANUAL: upload or URL",          "https://tineye.com/"),
@@ -952,6 +956,8 @@ def module_hit_and_run(target, job_id, ids=None):
         vin_links = [
             ("NHTSA VIN Decoder",           f"https://vpic.nhtsa.dot.gov/decoder/Car/{plate}/0"),
             ("Driving-Tests.org VIN",       f"https://driving-tests.org/vin-decoder/?vin={plate}"),
+            ("VIN.report free decode",       f"https://www.vin.report/vin/{plate}"),
+            ("VINDecoderZ free",             f"https://www.vindecoderz.com/EN/check-lookup/{plate}"),
             ("EpicVIN decode",              f"https://epicvin.com/vin-decoder?vin={plate}"),
             ("VinFreeCheck",                f"https://www.vinfreecheck.com/?vin={plate}"),
             ("NICB VINCheck stolen/salvage — MANUAL: enter VIN", "https://www.nicb.org/vincheck"),
@@ -1042,12 +1048,13 @@ def module_photo_forensics(target, job_id, ids=None):
             ("Yandex best for faces — MANUAL: upload",  "https://yandex.com/images/"),
             ("Bing Visual Search — MANUAL: upload",     "https://www.bing.com/images/search?view=detailv2&iss=sbi"),
             ("Lenso.ai — MANUAL: upload",               "https://lenso.ai/en"),
-            ("PimEyes — MANUAL: upload",                "https://pimeyes.com/en"),
+            ("PimEyes — FREEMIUM: limited free — MANUAL: upload", "https://pimeyes.com/en"),
         ]
     for nm, url in rev: lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines += ["=" * 50, "PHOTO METADATA EXTRACTION — FREE", "=" * 50, ""]
     for nm, url in [
         ("Jeffrey EXIF Viewer — MANUAL: upload",  "http://exif.regex.info/exif.cgi"),
+        ("Izitru — photo authenticity verify — MANUAL: upload", "https://www.izitru.com/"),
         ("ExifTool Online — MANUAL: upload",      "https://exiftool.org/"),
         ("Metadata2Go — MANUAL: upload",          "https://www.metadata2go.com/"),
         ("FotoForensics — MANUAL: upload",        "https://fotoforensics.com/"),
@@ -1057,7 +1064,7 @@ def module_photo_forensics(target, job_id, ids=None):
     lines += ["=" * 50, "VIDEO FORENSICS — FREE", "=" * 50, ""]
     for nm, url in [
         ("InVID WeVerify — MANUAL: install browser plugin", "https://www.invid-project.eu/tools-and-services/invid-verification-plugin/"),
-        ("YouTube DataViewer",                              "https://citizenevidence.amnestyusa.org/"),
+        ("YouTube DataViewer",                              "https://citizenevidence.org/"),
         ("TrueMedia.org — MANUAL: upload",                  "https://www.truemedia.org/"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
@@ -1099,13 +1106,11 @@ def module_geolocation(target, job_id, ids=None):
         ]),
         ("SATELLITE & HISTORICAL — FREE", [
             ("Google Earth Historical",  f"https://earth.google.com/web/search/{lp}"),
-            ("Sentinel Hub — MANUAL: select area", "https://www.sentinel-hub.com/explore/eobrowser/"),
             ("USGS EarthExplorer — MANUAL: draw AOI", "https://earthexplorer.usgs.gov/"),
             ("NASA Worldview",           "https://worldview.earthdata.nasa.gov/"),
             ("Bing Birds Eye",           f"https://www.bing.com/maps?q={lp}&style=b"),
         ]),
         ("SPECIALIZED TOOLS — FREE", [
-            ("Wigle.net WiFi networks — MANUAL: enter location", "https://wigle.net/search#fullSearch"),
             ("Overpass Turbo — MANUAL: query OSM",               "https://overpass-turbo.eu/"),
             ("SunCalc sun position — MANUAL: set location",      "https://www.suncalc.org/"),
             ("CalcMaps distance/area",                            "https://www.calcmaps.com/map-distance/"),
@@ -1144,7 +1149,7 @@ def module_username_search(target, job_id, ids=None):
         ("IDCrawl",         f"https://www.idcrawl.com/{target}"),
         ("UserSearch.org",  f"https://usersearch.org/results_normal.php?q={target}"),
         ("Namechk",         f"https://namechk.com/{target}"),
-        ("Instant Username",f"https://instantusername.com/#/{target}"),
+
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines += ["=" * 50, "PLATFORM DIRECT CHECKS", "=" * 50, ""]
@@ -1157,13 +1162,10 @@ def module_username_search(target, job_id, ids=None):
         ("GitHub",     f"https://github.com/{target}"),
         ("LinkedIn",   f"https://www.linkedin.com/in/{target}"),
         ("Pinterest",  f"https://www.pinterest.com/{target}/"),
-        ("Twitch",     f"https://www.twitch.tv/{target}"),
         ("Snapchat",   f"https://www.snapchat.com/add/{target}"),
         ("Venmo",      f"https://venmo.com/{target}"),
         ("Cash App",   f"https://cash.app/${target}"),
         ("Telegram",   f"https://t.me/{target}"),
-        ("Patreon",    f"https://www.patreon.com/{target}"),
-        ("Linktree",   f"https://linktr.ee/{target}"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     result = "\n".join(lines)
@@ -1191,10 +1193,9 @@ def module_phone(target, job_id, ids=None):
     lines.append("TIP: Confirm VoIP vs landline vs mobile before serve attempt — changes strategy.")
     lines.append("")
     for nm, url in [
-        ("CarrierLookup — free carrier/line type", f"https://www.carrierlookup.com/?number={clean}"),
-        ("PhoneScoop — area code carrier lookup",  f"https://www.phonescoop.com/phones/finder.php?ftr=&spec=3&sv={clean[:3]}"),
-        ("PhoneInfoga — MANUAL: install CLI",       "https://github.com/sundowndev/phoneinfoga"),
-        ("PhoneInfoga docs",                        "https://sundowndev.github.io/phoneinfoga/"),
+        ("CarrierLookup — carrier/line type",      f"https://www.carrierlookup.com/?number={clean}"),
+        ("FreeCarrierLookup — carrier/line type",  f"https://www.freecarrierlookup.com/?phonenumber={clean}&api_key=demo"),
+        ("PhoneValidator — validate + carrier",    f"https://www.phonevalidator.com/index.aspx?phonenumber={clean}"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines += ["=" * 50, "FREE REVERSE LOOKUP SITES", "=" * 50, "", "NOTE: SpyDialer calls the number silently — target may see missed call. Use deliberately.", ""]
@@ -1207,6 +1208,8 @@ def module_phone(target, job_id, ids=None):
         ("USPhoneBook",                     f"https://www.usphonebook.com/{clean}"),
         ("411.com — partial free",           f"https://www.411.com/phone/{clean}"),
         ("TrueCaller — basic ID free",      f"https://www.truecaller.com/search/us/{clean}"),
+        ("Zlookup — free reverse lookup",    f"https://www.zlookup.com/results?phone_number={clean}"),
+        ("PhoneOwner.us — owner + address",  f"https://www.phoneowner.us/{clean}"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines += ["=" * 50, "CROWDSOURCED CALLER ID", "=" * 50, ""]
@@ -1237,8 +1240,24 @@ def module_phone(target, job_id, ids=None):
         ("ShouldIAnswer — community DB",    f"https://www.shouldianswer.com/phone-number/{clean}"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
+    # Build number format variations for reuse detection
+    dashed = f"{clean[:3]}-{clean[3:6]}-{clean[6:]}" if len(clean)==10 else clean
+    spaced  = f"{clean[:3]} {clean[3:6]} {clean[6:]}" if len(clean)==10 else clean
     lines += ["=" * 50, "GOOGLE DORKS", "=" * 50, ""]
-    for dork in [f'"{formatted}"', f'"{clean}"', f'"{phone_plus1}"', f'"{formatted}" name address', f'"{clean}" site:facebook.com', f'"{clean}" spam OR scam OR fraud']:
+    lines.append("TIP: Search all format variations — number reuse across platforms is your pivot point.")
+    lines.append("")
+    for dork in [
+        f'"{formatted}"',
+        f'"{dashed}"',
+        f'"{spaced}"',
+        f'"{clean}"',
+        f'"{phone_plus1}"',
+        f'"{formatted}" name address',
+        f'"{clean}" site:facebook.com',
+        f'"{clean}" site:linkedin.com',
+        f'"{formatted}" site:whitepages.com OR site:spokeo.com',
+        f'"{clean}" spam OR scam OR fraud',
+    ]:
         lines.append(f"  {dork}"); lines.append(f"  https://www.google.com/search?q={quote_plus(dork)}"); lines.append("")
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "phone", "result": result})
@@ -1271,6 +1290,8 @@ def module_email_investigate(target, job_id, ids=None):
         ("TruePeopleSearch",    f"https://www.truepeoplesearch.com/results?emailaddress={target}"),
         ("ThatsThem",           f"https://thatsthem.com/email/{target}"),
         ("EmailRep reputation", f"https://emailrep.io/{target}"),
+        ("Skymem — email in web archives", f"https://www.skymem.info/srp?q={target}"),
+        ("Verifalia — deliverability check", f"https://verifalia.com/validate-email"),
         ("HaveIBeenPwned",      f"https://haveibeenpwned.com/account/{target}"),
         ("breach.vip — username/email breach search", f"https://breach.vip/"),
         ("Epieos social lookup",f"https://epieos.com/?q={target}&t=email"),
@@ -1337,7 +1358,7 @@ def module_business(target, job_id, ids=None):
     lines += ["=" * 50, "SECRETARY OF STATE — FREE", "=" * 50, ""]
     for nm, url in [
         ("NM SOS Business Search",  f"https://sos.nm.gov/business/business-search?name={name_plus}"),
-        ("NM SOS alt portal",       "https://businessportal.sos.nm.gov/"),
+        ("NM SOS alt portal",       "https://sos.nm.gov/business/"),
         ("AZ SOS",                  f"https://ecorp.azcc.gov/BusinessSearch/BusinessSearch?SearchTerm={name_plus}"),
         ("CO SOS",                  f"https://www.sos.state.co.us/biz/BusinessEntityCriteriaExt.do?nameTyp=ENT&entityName={name_plus}"),
         ("TX SOS — MANUAL: enter name", "https://mycpa.cpa.state.tx.us/coa/Index.html"),
@@ -1350,6 +1371,9 @@ def module_business(target, job_id, ids=None):
         ("OpenCorporates all states",       f"https://opencorporates.com/companies?q={name_plus}&jurisdiction_code=us"),
         ("PACER business search — MANUAL",  "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
         ("BBB Albuquerque",                 f"https://www.bbb.org/search?find_text={name_plus}&find_loc=Albuquerque%2C+NM"),
+        ("SEC EDGAR full text search",      f"https://efts.sec.gov/LATEST/search-index?q=%22{name_plus}%22&dateRange=custom&startdt=2000-01-01"),
+        ("Manta business directory",        f"https://www.manta.com/search?search_source=nav&search={name_plus}"),
+        ("NM Legislature lobbyist/donor",   f"https://nmlegis.gov/Legislation/search?search={name_plus}"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines += ["=" * 50, "BUSINESS INTELLIGENCE — FREE", "=" * 50, ""]
@@ -1357,7 +1381,6 @@ def module_business(target, job_id, ids=None):
         ("LinkedIn company",    f"https://www.linkedin.com/search/results/companies/?keywords={name_plus}"),
         ("Yelp",                f"https://www.yelp.com/search?find_desc={name_plus}&find_loc=Albuquerque%2C+NM"),
         ("Google business",     f"https://www.google.com/search?q={name_plus}+Albuquerque+NM+business"),
-        ("CorporationWiki",     f"https://www.corporationwiki.com/search/results?term={name_plus}"),
         ("OpenCorporates officers", f"https://opencorporates.com/officers?q={name_plus}"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
@@ -1380,6 +1403,22 @@ def module_whois(target, job_id, ids=None):
         out, _, _ = run_cmd(f"whois {target} 2>/dev/null | head -40")
         result = out if out else f"WHOIS lookup failed for {target}"
     emit(job_id, "module_done", {"module": "whois", "result": result})
+    return result
+
+
+def module_urlscan(target, job_id, ids=None):
+    emit(job_id, "module_start", {"module": "urlscan"})
+    from urllib.parse import quote_plus as qp
+    lines = [f"TARGET: {target}", ""]
+    lines += ["=" * 50, "URLSCAN.IO — FREE DOMAIN ANALYSIS", "=" * 50, ""]
+    for nm, url in [
+        ("URLScan search",      f"https://urlscan.io/search/#page.domain:{target}"),
+        ("URLScan live scan",   f"https://urlscan.io/scan/"),
+        ("URLVoid reputation",  f"https://www.urlvoid.com/scan/{target}/"),
+    ]:
+        lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
+    result = "\n".join(lines)
+    emit(job_id, "module_done", {"module": "urlscan", "result": result})
     return result
 
 
@@ -1459,6 +1498,263 @@ def module_virustotal(target, job_id, ids=None):
 # MODULE REGISTRY
 # ══════════════════════════════════════════════════════════════════════════════
 
+
+def module_cmv(target, job_id, ids=None):
+    """CMV / Trucking Company Investigation Module.
+    Target: DOT number, MC number, or company name."""
+    emit(job_id, "module_start", {"module": "cmv"})
+    from urllib.parse import quote_plus as qp
+    t = target.strip()
+    t_plus = qp(t)
+
+    import re as _re
+
+    # ── Robust multi-format parser ────────────────────────────────────────
+    # Normalize: strip whitespace, remove # and - separators
+    t_clean = _re.sub(r'[\s\-#]+', ' ', t).strip()
+    t_upper = t_clean.upper()
+
+    # DOT patterns: "DOT 2033842", "USDOT2033842", "USDOT# 2033842", "2033842" (pure digits ≤8)
+    dot_match = _re.match(
+        r'^(?:US\s*DOT\s*#?\s*|DOT\s*#?\s*)?(\d{1,8})$',
+        t_upper.replace(' ','')
+    )
+    # MC/MX patterns: "MC 123456", "MC-123456", "MX123456", "MC#123456"
+    mc_match  = _re.match(
+        r'^(?:MC|MX)\s*#?\s*(\d+)$',
+        t_upper.replace(' ','')
+    )
+    # FF (Freight Forwarder) pattern
+    ff_match  = _re.match(r'^FF\s*#?\s*(\d+)$', t_upper.replace(' ',''))
+
+    if dot_match:
+        is_dot  = True;  is_mc = False
+        dot_num = dot_match.group(1)
+        mc_num  = ""
+        id_type = "USDOT"
+        id_display = f"USDOT #{dot_num}"
+    elif mc_match:
+        is_dot  = False; is_mc = True
+        mc_num  = mc_match.group(1)
+        mc_prefix = "MX" if t_upper.replace(' ','').startswith("MX") else "MC"
+        dot_num = ""
+        id_type = mc_prefix
+        id_display = f"{mc_prefix} #{mc_num}"
+    elif ff_match:
+        is_dot  = False; is_mc = True
+        mc_num  = ff_match.group(1)
+        mc_prefix = "FF"
+        dot_num = ""
+        id_type = "FF"
+        id_display = f"FF #{mc_num}"
+    else:
+        is_dot  = False; is_mc = False
+        dot_num = ""; mc_num = ""
+        id_type = "NAME"
+        id_display = t
+
+    lines = [f"TARGET:  {t}", ""]
+    if is_dot:
+        lines.append(f"TYPE:    USDOT Number — {id_display}")
+        lines.append(f"NOTE:    Accepted formats: 2033842 | DOT2033842 | USDOT 2033842 | USDOT#2033842")
+    elif is_mc:
+        lines.append(f"TYPE:    {id_type} Authority Number — {id_display}")
+        lines.append(f"NOTE:    Accepted formats: MC123456 | MC-123456 | MC #123456 | MX123456")
+    else:
+        lines.append(f"TYPE:    Company Name Search — {id_display}")
+        lines.append(f"NOTE:    For direct lookup enter DOT or MC number if known")
+    lines.append("")
+
+    # ── STEP 1: FMCSA SAFER COMPANY SNAPSHOT ─────────────────────────────
+    lines += ["=" * 50, "STEP 1 — FMCSA SAFER COMPANY SNAPSHOT", "=" * 50, ""]
+    lines.append("Returns: legal name, DBA, address, phone, fleet size, cargo type,")
+    lines.append("  safety rating, crash history (24 mo), inspection/OOS summary.")
+    lines.append("")
+
+    if is_dot:
+        safer_url = f"https://safer.fmcsa.dot.gov/query.asp?query_type=queryCarrierSnapshot&query_param=USDOT&query_string={dot_num}"
+        lines.append(f"[SAFER Snapshot — DOT {dot_num}]")
+        lines.append(f"  {safer_url}")
+    elif is_mc:
+        safer_url = f"https://safer.fmcsa.dot.gov/query.asp?query_type=queryCarrierSnapshot&query_param=MC_MX&query_string={mc_num}"
+        lines.append(f"[SAFER Snapshot — MC {mc_num}]")
+        lines.append(f"  {safer_url}")
+    else:
+        safer_url = f"https://safer.fmcsa.dot.gov/query.asp?query_type=queryCarrierSnapshot&query_param=NAME&query_string={t_plus}&searchtype=ANY"
+        lines.append(f"[SAFER Snapshot — Name Search]")
+        lines.append(f"  {safer_url}")
+    lines.append("")
+    lines.append("[SAFER General Search — MANUAL: enter DOT/MC/name]")
+    lines.append("  https://safer.fmcsa.dot.gov/CompanySnapshot.aspx")
+    lines.append("")
+
+    # ── STEP 2: FMCSA LICENSING & INSURANCE ──────────────────────────────
+    lines += ["=" * 50, "STEP 2 — FMCSA LICENSING & INSURANCE (L&I)", "=" * 50, ""]
+    lines.append("Returns: active authority status, insurance compliance, BOC-3 process")
+    lines.append("  agent, authority history since 1995, pending cancellations.")
+    lines.append("KEY: Is the carrier AUTHORIZED to operate? Is insurance ACTIVE?")
+    lines.append("")
+    if is_dot:
+        li_url = f"https://li-public.fmcsa.dot.gov/LIVIEW/pkg_carrquery.prc_carrlist?n_dotno={dot_num}&pv_vpath=LIVIEW"
+        lines.append(f"[L&I — DOT {dot_num}]")
+        lines.append(f"  {li_url}")
+    elif is_mc:
+        li_url = f"https://li-public.fmcsa.dot.gov/LIVIEW/pkg_carrquery.prc_carrlist?n_mcno={mc_num}&pv_vpath=LIVIEW"
+        lines.append(f"[L&I — MC {mc_num}]")
+        lines.append(f"  {li_url}")
+    else:
+        lines.append("[L&I — MANUAL: enter company name]")
+        lines.append("  https://li-public.fmcsa.dot.gov/LIVIEW/pkg_carrquery.prc_carrlist")
+    lines.append("")
+
+    # ── STEP 3: CSA SMS SCORES (BASIC) ───────────────────────────────────
+    lines += ["=" * 50, "STEP 3 — CSA SAFETY MEASUREMENT SYSTEM (SMS/BASIC SCORES)", "=" * 50, ""]
+    lines.append("Returns 7 BASIC category percentile scores (0-100, higher = worse):")
+    lines.append("  1. Unsafe Driving      — speeding, reckless, improper lane change")
+    lines.append("  2. HOS Compliance      — hours of service / fatigue violations")
+    lines.append("  3. Vehicle Maintenance — mechanical defects, OOS vehicle violations")
+    lines.append("  4. Driver Fitness      — CDL validity, medical cert, qualifications")
+    lines.append("  5. Controlled Substance/Alcohol")
+    lines.append("  6. Hazardous Materials compliance")
+    lines.append("  7. Crash Indicator     — crash frequency/severity pattern")
+    lines.append("NOTE: Crash Indicator only visible to carrier + law enforcement.")
+    lines.append("ALERT threshold: FMCSA may intervene when score exceeds 65-75th percentile.")
+    lines.append("")
+    if is_dot:
+        lines.append(f"[CSA SMS — DOT {dot_num}]")
+        lines.append(f"  https://ai.fmcsa.dot.gov/SMS/Carrier/{dot_num}/Overview.aspx")
+        lines.append("")
+        lines.append(f"[CSA SMS Inspections — DOT {dot_num}]")
+        lines.append(f"  https://ai.fmcsa.dot.gov/SMS/Carrier/{dot_num}/Inspections.aspx")
+        lines.append("")
+        lines.append(f"[CSA SMS Crashes — DOT {dot_num}]")
+        lines.append(f"  https://ai.fmcsa.dot.gov/SMS/Carrier/{dot_num}/Crashes.aspx")
+    else:
+        lines.append("[CSA SMS — MANUAL: enter DOT number after SAFER lookup]")
+        lines.append("  https://ai.fmcsa.dot.gov/SMS/")
+    lines.append("")
+
+    # ── STEP 4: CRASH DATA ───────────────────────────────────────────────
+    lines += ["=" * 50, "STEP 4 — CRASH HISTORY", "=" * 50, ""]
+    lines.append("FMCSA crash data = reported crashes meeting federal threshold:")
+    lines.append("  fatality, injury requiring offsite medical attention, or tow-away.")
+    lines.append("Does NOT include property-damage-only crashes below threshold.")
+    lines.append("")
+    for nm, url in [
+        ("FMCSA Crash Data — company search",     "https://www.fmcsa.dot.gov/safety/research-and-analysis/large-truck-and-bus-crash-facts"),
+        ("DOT Transportation Data — crash sets",  "https://data.transportation.gov/Trucking-and-Motorcoaches/"),
+        ("FMCSA DataQs — challenged crash records","https://dataqs.fmcsa.dot.gov/"),
+    ]:
+        lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
+
+    # ── STEP 5: DRIVER BACKGROUND ────────────────────────────────────────
+    lines += ["=" * 50, "STEP 5 — DRIVER BACKGROUND / PSP", "=" * 50, ""]
+    lines.append("PSP (Pre-Employment Screening Program) = 3yr inspection + 5yr crash history.")
+    lines.append("Available per-driver with permissible use. Small fee (~$10).")
+    lines.append("DPPA equivalent for CMV: FMCSA permissible use required.")
+    lines.append("")
+    for nm, url in [
+        ("FMCSA PSP — driver history report",     "https://www.fmcsa.dot.gov/registration/pre-employment-screening-program"),
+        ("FMCSA CDL Drug & Alcohol Clearinghouse","https://clearinghouse.fmcsa.dot.gov/"),
+        ("FMCSA CDL Downgrade Query — MANUAL",    "https://www.fmcsa.dot.gov/registration/commercial-drivers-license"),
+    ]:
+        lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
+
+    # ── STEP 6: THIRD PARTY VERIFICATION ────────────────────────────────
+    lines += ["=" * 50, "STEP 6 — THIRD PARTY CARRIER VERIFICATION", "=" * 50, ""]
+    lines.append("Cross-reference SAFER data with independent sources.")
+    lines.append("")
+    for nm, url in [
+        ("eCarrierCheck — free risk score",       f"https://www.ecarriercheck.com/CarrierSearch.aspx?q={t_plus}"),
+        ("TruckExit — DOT/MC lookup",             f"https://www.truckexit.com/carrier/{t_plus}"),
+        ("FreightGuard — complaint history",       "https://www.freightguard.com/"),
+        ("CVSA inspection standards reference",    "https://www.cvsa.org/programs/driver-vehicle-inspections/"),
+    ]:
+        lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
+
+    # ── STEP 7: NM STATE RECORDS ─────────────────────────────────────────
+    lines += ["=" * 50, "STEP 7 — NEW MEXICO STATE RECORDS", "=" * 50, ""]
+    for nm, url in [
+        ("NM DOT — CMV permits/oversize",          "https://dot.nm.gov/business-industry-it-services/planning-research-multimodal/transportation-planning/commercial-vehicles/"),
+        ("NM MVD — commercial vehicle records",    "https://www.mvd.newmexico.gov/"),
+        ("NM DPS — crash reports",                 "https://www.dps.nm.gov/"),
+        ("NM SOS — carrier business registration", f"https://sos.nm.gov/business/business-search?name={t_plus}"),
+        ("NM Courts — carrier litigation",          "https://caselookup.nmcourts.gov/caselookup/app"),
+    ]:
+        lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
+
+    # ── STEP 8: CORPORATE STRUCTURE ──────────────────────────────────────
+    lines += ["=" * 50, "STEP 8 — CORPORATE STRUCTURE & RELATED ENTITIES", "=" * 50, ""]
+    lines.append("Shell companies, alter egos, common ownership — critical for liability.")
+    lines.append("")
+    for nm, url in [
+        ("OpenCorporates — all 50 states",         f"https://opencorporates.com/companies?q={t_plus}&jurisdiction_code=us"),
+        ("NM SOS Business Search",                  f"https://sos.nm.gov/business/business-search?name={t_plus}"),
+        ("SAM.gov federal contractor check",        f"https://sam.gov/search/?keywords={t_plus}&sort=relevanceScore&index=ei&is_active=true&page=1"),
+        ("SEC EDGAR — public company filings",      f"https://efts.sec.gov/LATEST/search-index?q=%22{t_plus}%22"),
+        ("PACER — federal litigation history",      "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
+        ("PlainSite — corporate litigation",        f"https://www.plainsite.org/search/?q={t_plus}"),
+    ]:
+        lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
+
+    # ── STEP 9: GOOGLE DORKS ─────────────────────────────────────────────
+    lines += ["=" * 50, "GOOGLE DORKS — CMV INVESTIGATION", "=" * 50, ""]
+    for dork in [
+        f'"{t}" FMCSA OR DOT OR "motor carrier"',
+        f'"{t}" trucking accident OR crash OR collision',
+        f'"{t}" "out of service" OR "safety violation" OR "BASIC"',
+        f'"{t}" lawsuit OR litigation OR settlement OR verdict',
+        f'"{t}" site:safer.fmcsa.dot.gov',
+        f'"{t}" site:courtlistener.com OR site:pacer.gov',
+        f'"{t}" hours of service OR HOS OR fatigue',
+        f'"{t}" "drug test" OR "controlled substance" OR DUI',
+    ]:
+        lines.append(f"  {dork}")
+        lines.append(f"  https://www.google.com/search?q={qp(dork)}")
+        lines.append("")
+
+    # ── LIVE SAFER API CALL ───────────────────────────────────────────────
+    if is_dot and dot_num:
+        lines += ["=" * 50, "LIVE SAFER DATA — DOT LOOKUP", "=" * 50, ""]
+        try:
+            import json, subprocess
+            safer_api = f"https://safer.fmcsa.dot.gov/query.asp?query_type=queryCarrierSnapshot&query_param=USDOT&query_string={dot_num}"
+            out, _, _ = (lambda cmd: subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15))(
+                f"curl -s -L '{safer_api}' 2>/dev/null"
+            )
+            if out and len(out) > 100:
+                # Parse key fields from HTML response
+                import re
+                def extract(pattern, text, default="N/A"):
+                    m = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+                    return m.group(1).strip() if m else default
+                legal   = extract(r'Legal Name[^:]*?:\s*</td>\s*<td[^>]*>(.*?)</td>', out)
+                dba     = extract(r'DBA Name[^:]*?:\s*</td>\s*<td[^>]*>(.*?)</td>', out)
+                status  = extract(r'Operating Status[^:]*?:\s*</td>\s*<td[^>]*>(.*?)</td>', out)
+                rating  = extract(r'Safety Rating[^:]*?:\s*</td>\s*<td[^>]*>(.*?)</td>', out)
+                crashes = extract(r'Crashes[^<]*?Total\D*?(\d+)', out)
+                if legal != "N/A":
+                    lines.append(f"Legal Name:      {legal}")
+                    lines.append(f"DBA:             {dba}")
+                    lines.append(f"Status:          {status}")
+                    lines.append(f"Safety Rating:   {rating}")
+                    lines.append(f"Total Crashes:   {crashes}")
+                else:
+                    lines.append(f"SAFER link generated — open above URL for full snapshot.")
+            else:
+                lines.append("SAFER API response empty — use direct link above.")
+            lines.append("")
+        except Exception as e:
+            lines.append(f"Live SAFER call unavailable — use direct links above.")
+            lines.append("")
+
+    lines += ["", "⚠ DPPA/FMCSA: All carrier data is public federal record. No permissible use required.", "  Driver PSP records require permissible use documentation.", ""]
+
+    result = "\n".join(lines)
+    emit(job_id, "module_done", {"module": "cmv", "result": result})
+    return result
+
+
 MODULE_MAP = {
     "people":            module_people_search,
     "public_records":    module_public_records,
@@ -1480,9 +1776,11 @@ MODULE_MAP = {
     "geoip":             module_geoip,
     "shodan":            module_shodan,
     "virustotal":        module_virustotal,
+    "urlscan":           module_urlscan,
+    "cmv":               module_cmv,
 }
 
-DOMAIN_IP_MODULES = {"whois","dns","nmap","geoip","shodan","virustotal"}
+DOMAIN_IP_MODULES = {"whois","dns","nmap","geoip","shodan","virustotal","urlscan"}
 PERSON_ONLY_MODULES = {"people","public_records","property","skip_trace","social_media","social_footprint","photo_forensics"}
 
 
