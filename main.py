@@ -1192,7 +1192,7 @@ def module_phone(target, job_id, ids=None):
     lines.append("")
     for nm, url in [
         ("CarrierLookup — free carrier/line type", f"https://www.carrierlookup.com/?number={clean}"),
-        ("PhoneScoop — carrier specs free",        f"https://www.phonescoop.com/phones/finder.php?ftr=&spec=3&sv={clean[:3]}"),
+        ("PhoneScoop — area code carrier lookup",  f"https://www.phonescoop.com/phones/finder.php?ftr=&spec=3&sv={clean[:3]}"),
         ("PhoneInfoga — MANUAL: install CLI",       "https://github.com/sundowndev/phoneinfoga"),
         ("PhoneInfoga docs",                        "https://sundowndev.github.io/phoneinfoga/"),
     ]:
@@ -1205,17 +1205,16 @@ def module_phone(target, job_id, ids=None):
         ("ThatsThem",                       f"https://thatsthem.com/phone/{clean}"),
         ("FastPeopleSearch",                f"https://www.fastpeoplesearch.com/phone/{clean}"),
         ("USPhoneBook",                     f"https://www.usphonebook.com/{clean}"),
-        ("411.com",                         f"https://www.411.com/phone/{clean}"),
-        ("TrueCaller — community ID",       f"https://www.truecaller.com/search/us/{clean}"),
+        ("411.com — partial free",           f"https://www.411.com/phone/{clean}"),
+        ("TrueCaller — basic ID free",      f"https://www.truecaller.com/search/us/{clean}"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines += ["=" * 50, "CROWDSOURCED CALLER ID", "=" * 50, ""]
     lines.append("TIP: Cross-reference — if 2+ sources return same name, treat as confirmed lead.")
     lines.append("")
     for nm, url in [
-        ("Sync.ME — crowdsourced caller ID",    f"https://sync.me/search/?number={phone_plus1}"),
-        ("Hiya — spam/ID database",             f"https://hiya.com/phone-number/{clean}"),
-        ("HLR Lookup — carrier/line type free", f"https://www.hlrlookup.com/"),
+        ("Sync.ME — caller ID partial free",    f"https://sync.me/search/?number={phone_plus1}"),
+        ("Hiya — spam rating free/ID partial",  f"https://hiya.com/phone-number/{clean}"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines += ["=" * 50, "MESSAGING APP PRESENCE — MANUAL WORKFLOW", "=" * 50, ""]
