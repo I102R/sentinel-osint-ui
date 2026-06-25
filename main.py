@@ -512,6 +512,19 @@ def module_public_records(target, job_id, ids=None):
         ("NamUs Missing Persons — MANUAL: enter name", "https://www.namus.gov/MissingPersons/Search#/results"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
+    lines.append("=" * 50); lines.append("ASSET RECORDS — AIRCRAFT & VESSELS"); lines.append("=" * 50); lines.append("")
+    lines.append("FAA and USCG registrations are public federal records — no account, no cost.")
+    lines.append("")
+    for nm, url in [
+        ("FAA Aircraft Registry — owner name search",     f"https://registry.faa.gov/aircraftinquiry/Search/OwnerSearch?OwnerName={name_plus}"),
+        ("FAA Aircraft Registry — N-number lookup",       "https://registry.faa.gov/aircraftinquiry/Search/NNumberInquiry"),
+        ("FAA Airmen Certification — pilot license",      f"https://amsrvs.registry.faa.gov/airmeninquiry/Main.aspx"),
+        ("USCG Vessel Documentation — owner search",      f"https://cgmix.uscg.mil/vesselinfo/vesseldetails.aspx"),
+        ("USCG CGMIX vessel search",                      f"https://cgmix.uscg.mil/vesselinfo/Default.aspx"),
+        ("BoatInfoWorld — free vessel search",            f"https://www.boatinfoworld.com/searchvessel.asp?vesselname={name_plus}"),
+        ("NM Boating — state registration — MANUAL",     "https://www.wildlife.state.nm.us/boating/"),
+    ]:
+        lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines.append("=" * 50); lines.append("PROFESSIONAL LICENSES"); lines.append("=" * 50); lines.append("")
     for nm, url in [
         ("NM RLD License Search",   f"https://www.rld.nm.gov/licensing-and-regulation/licensee-search/?SearchName={quote_plus(name_part)}"),
@@ -708,6 +721,16 @@ def module_skip_trace(target, job_id, ids=None):
         ("NPPES Medical NPI",          f"https://npiregistry.cms.hhs.gov/search?search_type=ind&first_name={first}&last_name={last}"),
         ("NM Bar attorney search",     f"https://nmbar.org/Nmbar/Find_A_Lawyer/NMBar/MembersClients/Find_a_Lawyer.aspx"),
         ("NM SOS Business Search",     f"https://sos.nm.gov/business/business-search?name={name_plus}"),
+    ]:
+        lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
+    lines += ["=" * 50, "TIER 6 — ASSET RECORDS", "=" * 50, ""]
+    for nm, url in [
+        ("FAA Aircraft — owner name",    f"https://registry.faa.gov/aircraftinquiry/Search/OwnerSearch?OwnerName={name_plus}"),
+        ("FAA Airmen — pilot cert",      "https://amsrvs.registry.faa.gov/airmeninquiry/Main.aspx"),
+        ("USCG Vessel — owner search",   "https://cgmix.uscg.mil/vesselinfo/Default.aspx"),
+        ("BoatInfoWorld vessel search",  f"https://www.boatinfoworld.com/searchvessel.asp?vesselname={name_plus}"),
+        ("NM WCA — workers comp records","https://www.workerscomp.nm.gov/"),
+        ("USPS PO Box trace — 39 CFR 265.6 formal request", "https://postalinspectors.uspis.gov/"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
     lines.extend(render_identifier_sources(ids, name_part, first, last))
