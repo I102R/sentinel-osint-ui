@@ -188,7 +188,6 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
           <button class="run-btn" id="runBtn" onclick="runInvestigation()">&#9654; INVESTIGATE</button>
           <button class="clr-btn" onclick="clearAll()">CLR</button>
         </div>
-        <!-- ADDITIONAL IDENTIFIERS — collapsed by default -->
         <button class="id-toggle-btn" id="idToggleBtn" onclick="toggleIdentifiers()">
           <span>ADDITIONAL IDENTIFIERS (DOB / SSN / OLN)</span>
           <span id="idToggleArrow">&#9660;</span>
@@ -198,7 +197,6 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
             All fields optional and independent. Used to generate targeted query links only.<br>
             &#9888; SSN not stored &#8212; used for query generation only. DPPA: 18 U.S.C. &sect; 2721(b)
           </div>
-          <!-- DOB -->
           <div class="id-row">
             <span class="id-lbl">DOB</span>
             <select id="idDobMonth" class="id-select" style="flex:1;">
@@ -219,7 +217,6 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
             </select>
             <input id="idDobYear" class="id-field" type="text" placeholder="YYYY" maxlength="4" style="flex:1;" />
           </div>
-          <!-- SSN -->
           <div class="id-row">
             <span class="id-lbl">SSN</span>
             <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
@@ -229,7 +226,6 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
             </div>
             <input id="idSsnValue" class="id-field" type="password" placeholder="LAST 4 DIGITS" maxlength="4" autocomplete="off" style="flex:1;letter-spacing:3px;" />
           </div>
-          <!-- OLN -->
           <div class="id-row">
             <span class="id-lbl">OLN</span>
             <input id="idOlnNumber" class="id-field" type="text" placeholder="LICENSE NUMBER (partial ok)" style="flex:1;" />
@@ -241,12 +237,10 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
               <option value="PA">PA</option><option value="WA">WA</option><option value="OR">OR</option>
             </select>
           </div>
-          <!-- Employer -->
           <div class="id-row">
             <span class="id-lbl">EMP</span>
             <input id="idEmployer" class="id-field" type="text" placeholder="EMPLOYER (optional)" style="flex:1;" />
           </div>
-          <!-- Street / ZIP -->
           <div class="id-row" style="margin-bottom:0;">
             <span class="id-lbl">ADR</span>
             <input id="idStreet" class="id-field" type="text" placeholder="STREET (optional)" style="flex:1;" />
@@ -302,10 +296,13 @@ let running = false;
 let allResults = {};
 let history = JSON.parse(localStorage.getItem('fivet_history') || '[]');
 let stats = JSON.parse(localStorage.getItem('fivet_stats') || '{"queries":0,"findings":0}');
+let currentUser = null;
+let isAdmin = false;
+let auditLog = JSON.parse(localStorage.getItem('fivet_audit') || '[]');
+let failedLogins = {};
 
 const TARGET_TYPES = ['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','PLATE','LOCATION'];
 
-// NOTE: 'dorks' module removed — dorks are now auto-integrated into all PERSON modules
 const ALL_MODULES = [
   { id:'people',            name:'People Search',           tag:'PEOP',  types:['PERSON'] },
   { id:'public_records',    name:'Public Records',          tag:'PREC',  types:['PERSON'] },
@@ -329,7 +326,6 @@ const ALL_MODULES = [
   { id:'virustotal',        name:'VirusTotal',              tag:'VT',    types:['DOMAIN','IP','EMAIL'] },
 ];
 
-// ── Additional Identifiers ──────────────────────────────────────────────────
 function toggleIdentifiers() {
   const sec = document.getElementById('idSection');
   const arrow = document.getElementById('idToggleArrow');
@@ -467,7 +463,6 @@ async function runInvestigation() {
   const t0 = Date.now();
 
   try {
-    // POST with identifiers included
     const idParams = getIdentifierParams();
     const payload = { target: query, type: targetType, modules: mods.join(','), ...idParams };
     const res = await fetch(`${BACKEND}/api/investigate`, {
@@ -595,7 +590,7 @@ function addHistory(q) {
 function renderHistory() {
   const el = document.getElementById('historyList');
   if (!history.length) { el.innerHTML = '<div style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);">No searches yet</div>'; return; }
-  el.innerHTML = history.map(h => `<div class="history-item" onclick="document.getElementById('searchInput').value='${h.replace(/'/g,"\'")}'">${h}</div>`).join('');
+  el.innerHTML = history.map(h => `<div class="history-item" onclick="document.getElementById('searchInput').value='${h.replace(/'/g,"\\'")}'"> ${h}</div>`).join('');
 }
 
 function updateStats() {
@@ -676,6 +671,52 @@ ${resultsSummary}`;
   window.open(`https://claude.ai/new?q=${encodeURIComponent(prompt)}`, '_blank');
 }
 
+async function checkPw() {
+  const username = document.getElementById('pwUsername').value.trim().toLowerCase();
+  const password = document.getElementById('pwInput').value;
+  const now = new Date().toISOString();
+  if (failedLogins[username] && failedLogins[username].count >= 5) {
+    const diff = (new Date() - new Date(failedLogins[username].lastAttempt)) / 1000 / 60;
+    if (diff < 30) {
+      showPwErr(`Account locked. Try again in ${Math.ceil(30 - diff)} minutes.`);
+      return;
+    } else {
+      failedLogins[username] = { count: 0 };
+    }
+  }
+  try {
+    const res = await fetch(`${BACKEND}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (data.success) {
+      authToken = data.token;
+      currentUser = { username, role: data.role, name: data.name, token: data.token };
+      isAdmin = data.role === 'admin';
+      failedLogins[username] = { count: 0 };
+      if (isAdmin) {
+        const ab = document.getElementById('auditBtn');
+        if (ab) ab.style.display = 'inline-block';
+      }
+      sessionStorage.setItem('fivet_auth', JSON.stringify(currentUser));
+      document.getElementById('lockscreen').style.display = 'none';
+      logAudit(username, 'LOGIN_SUCCESS', `User ${data.name} logged in`);
+      updateUserDisplay();
+      init();
+    } else {
+      if (!failedLogins[username]) failedLogins[username] = { count: 0 };
+      failedLogins[username].count++;
+      failedLogins[username].lastAttempt = now;
+      showPwErr(`\u26A0 Invalid credentials (${failedLogins[username].count}/5 attempts)`);
+      document.getElementById('pwInput').value = '';
+    }
+  } catch(e) {
+    showPwErr('\u26A0 Cannot reach backend \u2014 check connection');
+  }
+}
+
 function showPwErr(msg) {
   const err = document.getElementById('pwErr');
   err.textContent = msg; err.style.display = 'block';
@@ -720,6 +761,8 @@ function showAuditLog() {
   });
   win.document.write('</table></body></html>');
 }
+
+document.getElementById('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') runInvestigation(); });
 
 window.addEventListener('load', async () => {
   const saved = sessionStorage.getItem('fivet_auth');
