@@ -301,7 +301,7 @@ let isAdmin = false;
 let auditLog = JSON.parse(localStorage.getItem('fivet_audit') || '[]');
 let failedLogins = {};
 
-const TARGET_TYPES = ['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','PLATE','LOCATION'];
+const TARGET_TYPES = ['PERSON','COMPANY','CMV','DOMAIN','IP','EMAIL','USERNAME','PHONE','PLATE','LOCATION'];
 
 const ALL_MODULES = [
   { id:'people',            name:'People Search',           tag:'PEOP',  types:['PERSON'] },
@@ -323,7 +323,8 @@ const ALL_MODULES = [
   { id:'nmap',              name:'Port Scan',               tag:'NMAP',  types:['DOMAIN','IP'] },
   { id:'geoip',             name:'GeoIP Location',          tag:'GEOIP', types:['IP','DOMAIN'] },
   { id:'shodan',            name:'Shodan',                  tag:'SHDN',  types:['IP','DOMAIN'] },
-  { id:'virustotal',        name:'VirusTotal',              tag:'VT',    types:['DOMAIN','IP','EMAIL'] },
+{ id:'virustotal', name:'VirusTotal',      tag:'VT',   types:['DOMAIN','IP','EMAIL'] },
+  { id:'cmv',        name:'CMV / Trucking',  tag:'CMV',  types:['CMV','COMPANY'] },
 ];
 
 function toggleIdentifiers() {
