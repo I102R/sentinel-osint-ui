@@ -619,66 +619,62 @@ function analyzeWithAI() {
   const target = document.getElementById('searchInput').value.trim();
   if (!Object.keys(allResults).length) return;
   let resultsSummary = '';
-  Object.entries(allResults).forEach(([mod, content]) => { resultsSummary += `\n\n=== ${mod.toUpperCase()} ===\n${content}`; });
+  Object.entries(allResults).forEach(([mod, content]) => {
+    resultsSummary += `\n\n=== ${mod.toUpperCase()} ===\n${content}`;
+  });
+
   const prompt = `You are an OSINT investigator assistant for Parnall Law Firm, a personal injury law firm in Albuquerque, New Mexico. You are assisting investigators Rick Anglada, T. Lopez, and C. McPherson.
 
 Analyze the following FIVE T OSINT investigation results for: ${target}
 Target Type: ${targetType}
 Investigation Date: ${new Date().toUTCString()}
 
-Based on the raw module output below, provide:
-1. MOST LIKELY CURRENT ADDRESS — with confidence level (High/Medium/Low) and which sources corroborate it
-2. PHONE NUMBERS FOUND — list each with carrier/type if available
-3. EMPLOYMENT LEADS — employer name, address if findable, source
-4. SOCIAL MEDIA PROFILES — which are most likely to match the subject and why
-5. RELATIVES & ASSOCIATES — names and locations useful for indirect contact or service of process
-6. RED FLAGS & INCONSISTENCIES — anything that contradicts across sources
-7. RECOMMENDED NEXT STEPS — specific actions ranked by priority
-8. DRAFT INVESTIGATIVE MEMO — formatted for the case file, ready to use
+Your response is a working investigative briefing — not a formal memo. Plain prose, no headers with pound signs, no bullet symbol walls. Write the way an experienced investigator briefs a colleague: direct, specific, actionable.
 
-Keep the memo concise and professional. Flag anything relevant to personal injury litigation, hit and run cases, or service of process.
+SECTION 1 — SITUATION SUMMARY
+Two to three sentences. Who is the subject, what was the run targeting, and what is the headline finding. If identity is unconfirmed, say so.
+
+SECTION 2 — CONFIRMED FINDINGS
+State only what the sources actually returned. For each finding give the source and confidence level.
+- Current address (High/Medium/Low confidence — specify which sources corroborate)
+- Phone numbers found (carrier and line type if returned)
+- Employer or employment leads (source and address if available)
+- Social media profiles confirmed or likely matched (explain why)
+- Relatives and associates useful for indirect contact or substitute service
+
+SECTION 3 — GAPS AND WHAT THEY MEAN
+What is missing and what that means operationally. Example: no current address returned = serve attempt not ready, escalate. No phone number = cannot attempt contact verification before serve. Do not list gaps that are irrelevant to the target type.
+
+SECTION 4 — RED FLAGS AND INCONSISTENCIES
+Anything that conflicts across sources — different addresses on different platforms, name variations, DOB mismatches, address history that suggests evasion, VoIP numbers, recently created social profiles. Flag anything relevant to personal injury litigation, damages assessment, or service of process.
+
+SECTION 5 — NEXT STEPS (PRIORITIZED)
+Specific actions in order. Do not say "consider" or "may want to" — say what to do. Example: "Run NM Voter Portal with DOB 04/06/1991 — highest confidence free address source." Maximum eight steps.
+
+SECTION 6 — PAID TOOL ESCALATION
+Only include this section if free-tier results are insufficient to support service of process or the investigative objective. Recommend the specific tool, what to query, and what it will return. Use this reference:
+
+IDI (idiCORE) — First escalation for any skip trace. Best for: current address confirmation, SSN trace, address history with date ranges, phone development, employment verification. Query with full name + DOB + last known address. Cost: moderate, firm account required.
+
+TLO (TransUnion) — Stronger than IDI on financial records and associate networks. Best for: bankruptcy, liens, judgments, deep relative/associate mapping, prior addresses going back further. Use when IDI returns stale addresses or subject has complex history.
+
+IRB Search — Best for: workers comp claim history, employment verification across states, insurance claims cross-reference. Critical for PI damages cases — confirms or undermines prior injury claims.
+
+CLEAR (Thomson Reuters) — Best for: corporate structure research, registered agent identification, CMV carrier cases, business litigation history. Use when the defendant is a company or carrier, not an individual.
+
+LexisNexis Accurint — Best for: comprehensive multi-state background, court records aggregation, professional license verification. Use when subject has out-of-state history IDI misses.
+
+Magellan Investigations (magellaninvestigations.com) — Best for: bank and brokerage account locates, utility traces, PO Box physical address, ISO claims reports, employment locate requiring days of research. Use for judgment enforcement and asset investigations after standard tools fail.
+
+Tracers — Last resort. Most expensive, most comprehensive. Use only when IDI and TLO both return insufficient results and the case value justifies the cost.
+
+If free-tier results are sufficient for the immediate objective, omit Section 6 entirely.
 
 INVESTIGATION RESULTS:
 ${resultsSummary}`;
+
   window.open(`https://claude.ai/new?q=${encodeURIComponent(prompt)}`, '_blank');
 }
-
-document.getElementById('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') runInvestigation(); });
-</script>
-
-<script>
-let currentUser = null;
-let isAdmin = false;
-let auditLog = JSON.parse(localStorage.getItem('fivet_audit') || '[]');
-let failedLogins = {};
-
-async function checkPw() {
-  const username = document.getElementById('pwUsername').value.trim().toLowerCase();
-  const password = document.getElementById('pwInput').value;
-  const now = new Date().toISOString();
-  if (failedLogins[username] && failedLogins[username].count >= 5) {
-    const diff = (new Date() - new Date(failedLogins[username].lastAttempt)) / 1000 / 60;
-    if (diff < 30) { showPwErr(`Account locked. Try again in ${Math.ceil(30-diff)} minutes.`); return; }
-    else { failedLogins[username] = { count: 0 }; }
-  }
-  try {
-    const res = await fetch(`${BACKEND}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
-    const data = await res.json();
-    if (data.success) {
-      authToken = data.token; currentUser = { username, role: data.role, name: data.name, token: data.token };
-      isAdmin = data.role === 'admin'; failedLogins[username] = { count: 0 };
-      if (isAdmin) { const ab = document.getElementById('auditBtn'); if (ab) ab.style.display = 'inline-block'; }
-      sessionStorage.setItem('fivet_auth', JSON.stringify(currentUser));
-      document.getElementById('lockscreen').style.display = 'none';
-      logAudit(username, 'LOGIN_SUCCESS', `User ${data.name} logged in`);
-      updateUserDisplay(); init();
-    } else {
-      if (!failedLogins[username]) failedLogins[username] = { count: 0 };
-      failedLogins[username].count++; failedLogins[username].lastAttempt = now;
-      showPwErr(`\u26A0 Invalid credentials (${failedLogins[username].count}/5 attempts)`);
-      document.getElementById('pwInput').value = '';
-    }
-  } catch(e) { showPwErr('\u26A0 Cannot reach backend \u2014 check connection'); }
 }
 
 function showPwErr(msg) {
