@@ -1522,260 +1522,208 @@ def module_virustotal(target, job_id, ids=None):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
+
 def module_cmv(target, job_id, ids=None):
-    """CMV / Trucking Company Investigation Module.
-    Target: DOT number, MC number, or company name."""
+    """CMV / Trucking Company Investigation Module."""
     emit(job_id, "module_start", {"module": "cmv"})
-    from urllib.parse import quote_plus as qp
-    t = target.strip()
-    t_plus = qp(t)
-
     import re as _re
+    from urllib.parse import quote_plus as qp
 
-    # ── Robust multi-format parser ────────────────────────────────────────
-    # Normalize: strip whitespace, remove # and - separators
+    t = target.strip()
     t_clean = _re.sub(r'[\s\-#]+', ' ', t).strip()
     t_upper = t_clean.upper()
 
-    # DOT patterns: "DOT 2033842", "USDOT2033842", "USDOT# 2033842", "2033842" (pure digits ≤8)
-    dot_match = _re.match(
-        r'^(?:US\s*DOT\s*#?\s*|DOT\s*#?\s*)?(\d{1,8})$',
-        t_upper.replace(' ','')
-    )
-    # MC/MX patterns: "MC 123456", "MC-123456", "MX123456", "MC#123456"
-    mc_match  = _re.match(
-        r'^(?:MC|MX)\s*#?\s*(\d+)$',
-        t_upper.replace(' ','')
-    )
-    # FF (Freight Forwarder) pattern
+    dot_match = _re.match(r'^(?:US\s*DOT\s*#?\s*|DOT\s*#?\s*)?(\d{1,8})$', t_upper.replace(' ',''))
+    mc_match  = _re.match(r'^(?:MC|MX)\s*#?\s*(\d+)$', t_upper.replace(' ',''))
     ff_match  = _re.match(r'^FF\s*#?\s*(\d+)$', t_upper.replace(' ',''))
 
     if dot_match:
-        is_dot  = True;  is_mc = False
-        dot_num = dot_match.group(1)
-        mc_num  = ""
-        id_type = "USDOT"
-        id_display = f"USDOT #{dot_num}"
+        is_dot = True; is_mc = False
+        dot_num = dot_match.group(1); mc_num = ""
+        id_type = "USDOT"; id_display = f"USDOT #{dot_num}"
     elif mc_match:
-        is_dot  = False; is_mc = True
-        mc_num  = mc_match.group(1)
+        is_dot = False; is_mc = True
+        mc_num = mc_match.group(1)
         mc_prefix = "MX" if t_upper.replace(' ','').startswith("MX") else "MC"
-        dot_num = ""
-        id_type = mc_prefix
-        id_display = f"{mc_prefix} #{mc_num}"
+        dot_num = ""; id_type = mc_prefix; id_display = f"{mc_prefix} #{mc_num}"
     elif ff_match:
-        is_dot  = False; is_mc = True
-        mc_num  = ff_match.group(1)
-        mc_prefix = "FF"
-        dot_num = ""
-        id_type = "FF"
-        id_display = f"FF #{mc_num}"
+        is_dot = False; is_mc = True
+        mc_num = ff_match.group(1); dot_num = ""
+        id_type = "FF"; id_display = f"FF #{mc_num}"
     else:
-        is_dot  = False; is_mc = False
-        dot_num = ""; mc_num = ""
-        id_type = "NAME"
-        id_display = t
+        is_dot = False; is_mc = False
+        dot_num = ""; mc_num = ""; id_type = "NAME"; id_display = t
 
+    t_plus = qp(t)
     lines = [f"TARGET:  {t}", ""]
     if is_dot:
-        lines.append(f"TYPE:    USDOT Number — {id_display}")
-        lines.append(f"NOTE:    Accepted formats: 2033842 | DOT2033842 | USDOT 2033842 | USDOT#2033842")
+        lines += [f"TYPE:    USDOT Number — {id_display}",
+                  "NOTE:    Accepted: 2033842 | DOT2033842 | USDOT 2033842 | USDOT#2033842"]
     elif is_mc:
-        lines.append(f"TYPE:    {id_type} Authority Number — {id_display}")
-        lines.append(f"NOTE:    Accepted formats: MC123456 | MC-123456 | MC #123456 | MX123456")
+        lines += [f"TYPE:    {id_type} Number — {id_display}",
+                  "NOTE:    Accepted: MC123456 | MC-123456 | MC #123456 | MX123456"]
     else:
-        lines.append(f"TYPE:    Company Name Search — {id_display}")
-        lines.append(f"NOTE:    For direct lookup enter DOT or MC number if known")
+        lines += [f"TYPE:    Company Name Search — {id_display}",
+                  "NOTE:    Enter DOT or MC number for direct parameterized links"]
     lines.append("")
 
-    # ── STEP 1: FMCSA SAFER COMPANY SNAPSHOT ─────────────────────────────
-    lines += ["=" * 50, "STEP 1 — FMCSA SAFER COMPANY SNAPSHOT", "=" * 50, ""]
+    # STEP 1 — SAFER SNAPSHOT — NO LOGIN, LOADS DIRECTLY
+    lines += ["=" * 50, "STEP 1 — FMCSA SAFER SNAPSHOT (no login required)", "=" * 50, ""]
     lines.append("Returns: legal name, DBA, address, phone, fleet size, cargo type,")
     lines.append("  safety rating, crash history (24 mo), inspection/OOS summary.")
     lines.append("")
-
     if is_dot:
-        safer_url = f"https://safer.fmcsa.dot.gov/query.asp?query_type=queryCarrierSnapshot&query_param=USDOT&query_string={dot_num}"
         lines.append(f"[SAFER Snapshot — DOT {dot_num}]")
-        lines.append(f"  {safer_url}")
+        lines.append(f"  https://safer.fmcsa.dot.gov/query.asp?query_type=queryCarrierSnapshot&query_param=USDOT&query_string={dot_num}")
     elif is_mc:
-        safer_url = f"https://safer.fmcsa.dot.gov/query.asp?query_type=queryCarrierSnapshot&query_param=MC_MX&query_string={mc_num}"
         lines.append(f"[SAFER Snapshot — MC {mc_num}]")
-        lines.append(f"  {safer_url}")
+        lines.append(f"  https://safer.fmcsa.dot.gov/query.asp?query_type=queryCarrierSnapshot&query_param=MC_MX&query_string={mc_num}")
     else:
-        safer_url = f"https://safer.fmcsa.dot.gov/query.asp?query_type=queryCarrierSnapshot&query_param=NAME&query_string={t_plus}&searchtype=ANY"
-        lines.append(f"[SAFER Snapshot — Name Search]")
-        lines.append(f"  {safer_url}")
-    lines.append("")
-    lines.append("[SAFER General Search — MANUAL: enter DOT/MC/name]")
-    lines.append("  https://safer.fmcsa.dot.gov/CompanySnapshot.aspx")
+        lines.append("[SAFER General Search — MANUAL: enter DOT/MC/name]")
+        lines.append("  https://safer.fmcsa.dot.gov/CompanySnapshot.aspx")
     lines.append("")
 
-    # ── STEP 2: FMCSA LICENSING & INSURANCE ──────────────────────────────
+    # STEP 2 — L&I — CAPTCHA ON FIRST LOAD THEN DATA SHOWS
     lines += ["=" * 50, "STEP 2 — FMCSA LICENSING & INSURANCE (L&I)", "=" * 50, ""]
-    lines.append("Returns: active authority status, insurance compliance, BOC-3 process")
-    lines.append("  agent, authority history since 1995, pending cancellations.")
-    lines.append("KEY: Is the carrier AUTHORIZED to operate? Is insurance ACTIVE?")
+    lines.append("Returns: active authority, insurance on file, BOC-3 agent,")
+    lines.append("  pending cancellations, authority history since 1995.")
+    lines.append("NOTE: Complete CAPTCHA on first load — data displays after.")
     lines.append("")
     if is_dot:
-        li_url = f"https://li-public.fmcsa.dot.gov/LIVIEW/pkg_carrquery.prc_carrlist?n_dotno={dot_num}&pv_vpath=LIVIEW"
         lines.append(f"[L&I — DOT {dot_num}]")
-        lines.append(f"  {li_url}")
+        lines.append(f"  https://li-public.fmcsa.dot.gov/LIVIEW/pkg_carrquery.prc_carrlist?n_dotno={dot_num}&pv_vpath=LIVIEW")
     elif is_mc:
-        li_url = f"https://li-public.fmcsa.dot.gov/LIVIEW/pkg_carrquery.prc_carrlist?n_mcno={mc_num}&pv_vpath=LIVIEW"
         lines.append(f"[L&I — MC {mc_num}]")
-        lines.append(f"  {li_url}")
+        lines.append(f"  https://li-public.fmcsa.dot.gov/LIVIEW/pkg_carrquery.prc_carrlist?n_mcno={mc_num}&pv_vpath=LIVIEW")
     else:
         lines.append("[L&I — MANUAL: enter company name]")
         lines.append("  https://li-public.fmcsa.dot.gov/LIVIEW/pkg_carrquery.prc_carrlist")
     lines.append("")
 
-    # ── STEP 3: CSA SMS SCORES (BASIC) ───────────────────────────────────
-    lines += ["=" * 50, "STEP 3 — CSA SAFETY MEASUREMENT SYSTEM (SMS/BASIC SCORES)", "=" * 50, ""]
-    lines.append("Returns 7 BASIC category percentile scores (0-100, higher = worse):")
-    lines.append("  1. Unsafe Driving      — speeding, reckless, improper lane change")
-    lines.append("  2. HOS Compliance      — hours of service / fatigue violations")
-    lines.append("  3. Vehicle Maintenance — mechanical defects, OOS vehicle violations")
-    lines.append("  4. Driver Fitness      — CDL validity, medical cert, qualifications")
-    lines.append("  5. Controlled Substance/Alcohol")
-    lines.append("  6. Hazardous Materials compliance")
-    lines.append("  7. Crash Indicator     — crash frequency/severity pattern")
-    lines.append("NOTE: Crash Indicator only visible to carrier + law enforcement.")
-    lines.append("NOTE: CSA SMS requires free FMCSA login — create account at ai.fmcsa.dot.gov")
-    lines.append("ALERT threshold: FMCSA may intervene when score exceeds 65-75th percentile.")
+    # STEP 3 — CSA SMS — REQUIRES FREE LOGIN
+    lines += ["=" * 50, "STEP 3 — CSA SAFETY MEASUREMENT SYSTEM (SMS / BASIC SCORES)", "=" * 50, ""]
+    lines.append("Returns 7 BASIC percentile scores (0-100, higher = worse):")
+    lines.append("  Unsafe Driving | HOS Compliance | Vehicle Maintenance | Driver Fitness")
+    lines.append("  Controlled Substance | Hazardous Materials | Crash Indicator")
+    lines.append("NOTE: Crash Indicator visible to law enforcement only.")
+    lines.append("REQUIRES FREE FMCSA ACCOUNT — register at ai.fmcsa.dot.gov")
+    lines.append("ALERT threshold: score above 65th-75th percentile = FMCSA may intervene.")
     lines.append("")
-    if is_dot:
-        lines.append(f"[CSA SMS — DOT {dot_num}]")
-        lines.append(f"  https://ai.fmcsa.dot.gov/SMS/Carrier/{dot_num}/Overview.aspx")
-        lines.append("")
-        lines.append(f"[CSA SMS Inspections — DOT {dot_num}]")
-        lines.append(f"  https://ai.fmcsa.dot.gov/SMS/Carrier/{dot_num}/Inspections.aspx")
-        lines.append("")
-        lines.append(f"[CSA SMS Crashes — DOT {dot_num}]")
-        lines.append(f"  https://ai.fmcsa.dot.gov/SMS/Carrier/{dot_num}/Crashes.aspx")
-    else:
-        lines.append("[CSA SMS — MANUAL: enter DOT number after SAFER lookup]")
-        lines.append("  https://ai.fmcsa.dot.gov/SMS/")
+    lines.append("[CSA SMS — MANUAL: login then enter DOT number]")
+    lines.append("  https://ai.fmcsa.dot.gov/SMS/")
     lines.append("")
 
-    # ── STEP 4: CRASH DATA ───────────────────────────────────────────────
+    # STEP 4 — CRASH DATA
     lines += ["=" * 50, "STEP 4 — CRASH HISTORY", "=" * 50, ""]
-    lines.append("FMCSA crash data = reported crashes meeting federal threshold:")
-    lines.append("  fatality, injury requiring offsite medical attention, or tow-away.")
-    lines.append("Does NOT include property-damage-only crashes below threshold.")
+    lines.append("FMCSA threshold: fatality, injury requiring offsite medical, or tow-away.")
+    lines.append("Property-damage-only crashes below threshold not included.")
     lines.append("")
     for nm, url in [
-        ("FMCSA Large Truck Crash Facts",          "https://www.fmcsa.dot.gov/safety/data-and-statistics/large-truck-and-bus-crash-facts"),
-        ("A&I Crash Statistics — carrier query",   "https://ai.fmcsa.dot.gov/CrashStatistics"),
-        ("DOT Transportation Data — crash sets",  "https://data.transportation.gov/Trucking-and-Motorcoaches/"),
-        ("FMCSA DataQs — challenged crash records","https://dataqs.fmcsa.dot.gov/"),
+        ("FMCSA Large Truck Crash Facts — annual statistics report",
+         "https://www.fmcsa.dot.gov/safety/data-and-statistics/large-truck-and-bus-crash-facts"),
+        ("A&I Crash Statistics — carrier-level query — MANUAL: enter DOT",
+         "https://ai.fmcsa.dot.gov/CrashStatistics"),
+        ("DataQs — challenged crash records — requires free login",
+         "https://dataqs.fmcsa.dot.gov/"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
 
-    # ── STEP 5: DRIVER BACKGROUND ────────────────────────────────────────
-    lines += ["=" * 50, "STEP 5 — DRIVER BACKGROUND / PSP", "=" * 50, ""]
-    lines.append("PSP (Pre-Employment Screening Program) = 3yr inspection + 5yr crash history.")
-    lines.append("Available per-driver with permissible use. Small fee (~$10).")
-    lines.append("DPPA equivalent for CMV: FMCSA permissible use required.")
+    # STEP 5 — DRIVER BACKGROUND
+    lines += ["=" * 50, "STEP 5 — DRIVER BACKGROUND", "=" * 50, ""]
+    lines.append("CDL Clearinghouse: drug/alcohol violations. Free limited query, account required.")
+    lines.append("PSP: 3yr inspection + 5yr crash per driver. Requires driver consent + ~$10 fee.")
     lines.append("")
     for nm, url in [
-        ("FMCSA PSP — driver history report",     "https://www.psp.fmcsa.dot.gov/"),
-        ("FMCSA CDL Drug & Alcohol Clearinghouse","https://clearinghouse.fmcsa.dot.gov/"),
-        ("FMCSA CDL Downgrade Query — MANUAL",    "https://www.fmcsa.dot.gov/registration/commercial-drivers-license/commercial-drivers-license-cdl"),
+        ("CDL Drug & Alcohol Clearinghouse — free limited query — account required",
+         "https://clearinghouse.fmcsa.dot.gov/"),
+        ("PSP Driver History — driver consent + fee required",
+         "https://www.psp.fmcsa.dot.gov/"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
 
-    # ── STEP 6: THIRD PARTY VERIFICATION ────────────────────────────────
-    lines += ["=" * 50, "STEP 6 — THIRD PARTY CARRIER VERIFICATION", "=" * 50, ""]
-    lines.append("Cross-reference SAFER data with independent sources.")
-    lines.append("")
+    # STEP 6 — THIRD PARTY TOOLS — ALL MANUAL ENTRY
+    lines += ["=" * 50, "STEP 6 — THIRD PARTY VERIFICATION (all manual entry)", "=" * 50, ""]
     for nm, url in [
-        ("eCarrierCheck — MANUAL: enter DOT/MC on site",       "https://lookup.ecarriercheck.com/"),
-        ("CarrierChk — MANUAL: enter DOT/MC on site",        "https://carrierchk.com/"),
-        ("FMCSA Out-of-Service orders",            f"https://ai.fmcsa.dot.gov/SMS/Carrier/{dot_num}/OOS.aspx" if dot_num else "https://ai.fmcsa.dot.gov/SMS/"),
-        ("CVSA inspection standards reference",    "https://cvsa.org/inspections/"),
+        ("CarrierChk — free, no login — authority/insurance/safety rating",
+         "https://carrierchk.com/"),
+        ("FMCSA National Consumer Complaint Database",
+         "https://nccdb.fmcsa.dot.gov/nccdb/home.aspx"),
+        ("CVSA Inspection Standards reference",
+         "https://cvsa.org/inspections/"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
 
-    # ── STEP 7: NM STATE RECORDS ─────────────────────────────────────────
-    lines += ["=" * 50, "STEP 7 — NEW MEXICO STATE RECORDS", "=" * 50, ""]
-    for nm, url in [
-        ("NM DPS — crash reports",                 "https://www.dps.nm.gov/"),
-        ("NM SOS — carrier business registration", f"https://sos.nm.gov/business/business-search?name={t_plus}"),
-        ("NM Courts — carrier litigation",          "https://caselookup.nmcourts.gov/caselookup/app"),
-    ]:
-        lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
-
-    # ── STEP 8: CORPORATE STRUCTURE ──────────────────────────────────────
-    lines += ["=" * 50, "STEP 8 — CORPORATE STRUCTURE & RELATED ENTITIES", "=" * 50, ""]
+    # STEP 7 — CORPORATE STRUCTURE
+    lines += ["=" * 50, "STEP 7 — CORPORATE STRUCTURE & LIABILITY CHAIN", "=" * 50, ""]
     lines.append("Shell companies, alter egos, common ownership — critical for liability.")
     lines.append("")
     for nm, url in [
-        ("OpenCorporates — all 50 states",         f"https://opencorporates.com/companies?q={t_plus}&jurisdiction_code=us"),
-        ("NM SOS Business Search",                  f"https://sos.nm.gov/business/business-search?name={t_plus}"),
-        ("SAM.gov federal contractor check",        f"https://sam.gov/search/?keywords={t_plus}&sort=relevanceScore&index=ei&is_active=true&page=1"),
-        ("SEC EDGAR — public company filings",      f"https://efts.sec.gov/LATEST/search-index?q=%22{t_plus}%22"),
-        ("PACER — federal litigation history",      "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
-        ("PlainSite — corporate litigation",        f"https://www.plainsite.org/search/?q={t_plus}"),
+        ("NM SOS Business Search",
+         f"https://sos.nm.gov/business/business-search?name={t_plus}"),
+        ("OpenCorporates — all 50 states",
+         f"https://opencorporates.com/companies?q={t_plus}&jurisdiction_code=us"),
+        ("SEC EDGAR full text search",
+         f"https://efts.sec.gov/LATEST/search-index?q=%22{t_plus}%22"),
+        ("PlainSite — federal + corporate litigation",
+         f"https://www.plainsite.org/search/?q={t_plus}"),
+        ("CourtListener — federal case search",
+         f"https://www.courtlistener.com/?q={t_plus}&type=r"),
+        ("PACER — federal litigation — MANUAL: free account required",
+         "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
 
-    # ── STEP 9: GOOGLE DORKS ─────────────────────────────────────────────
+    # STEP 8 — GOOGLE DORKS
     lines += ["=" * 50, "GOOGLE DORKS — CMV INVESTIGATION", "=" * 50, ""]
+    search_term = dot_num if is_dot else mc_num if is_mc else t
+    from urllib.parse import quote_plus
     for dork in [
-        f'"{t}" FMCSA OR DOT OR "motor carrier"',
-        f'"{t}" trucking accident OR crash OR collision',
-        f'"{t}" "out of service" OR "safety violation" OR "BASIC"',
-        f'"{t}" lawsuit OR litigation OR settlement OR verdict',
-        f'"{t}" site:safer.fmcsa.dot.gov',
-        f'"{t}" site:courtlistener.com OR site:pacer.gov',
-        f'"{t}" hours of service OR HOS OR fatigue',
-        f'"{t}" "drug test" OR "controlled substance" OR DUI',
+        f'"{search_term}" FMCSA OR DOT OR "motor carrier"',
+        f'"{search_term}" trucking accident OR crash OR collision',
+        f'"{search_term}" "out of service" OR "safety violation" OR "BASIC"',
+        f'"{search_term}" lawsuit OR litigation OR settlement OR verdict',
+        f'"{search_term}" "hours of service" OR HOS OR fatigue',
+        f'"{search_term}" "drug test" OR "controlled substance" OR DUI',
+        f'"{search_term}" site:courtlistener.com',
+        f'"{search_term}" site:plainsite.org',
     ]:
         lines.append(f"  {dork}")
-        lines.append(f"  https://www.google.com/search?q={qp(dork)}")
+        lines.append(f"  https://www.google.com/search?q={quote_plus(dork)}")
         lines.append("")
 
-    # ── LIVE SAFER API CALL ───────────────────────────────────────────────
+    # LIVE SAFER API CALL
     if is_dot and dot_num:
-        lines += ["=" * 50, "LIVE SAFER DATA — DOT LOOKUP", "=" * 50, ""]
+        lines += ["=" * 50, "LIVE SAFER DATA", "=" * 50, ""]
         try:
-            import json, subprocess
+            import json, subprocess, re
             safer_api = f"https://safer.fmcsa.dot.gov/query.asp?query_type=queryCarrierSnapshot&query_param=USDOT&query_string={dot_num}"
             out, _, _ = (lambda cmd: subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15))(
                 f"curl -s -L '{safer_api}' 2>/dev/null"
             )
-            if out and len(out) > 100:
-                # Parse key fields from HTML response
-                import re
+            if out and len(out) > 200:
                 def extract(pattern, text, default="N/A"):
                     m = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
                     return m.group(1).strip() if m else default
-                legal   = extract(r'Legal Name[^:]*?:\s*</td>\s*<td[^>]*>(.*?)</td>', out)
-                dba     = extract(r'DBA Name[^:]*?:\s*</td>\s*<td[^>]*>(.*?)</td>', out)
-                status  = extract(r'Operating Status[^:]*?:\s*</td>\s*<td[^>]*>(.*?)</td>', out)
-                rating  = extract(r'Safety Rating[^:]*?:\s*</td>\s*<td[^>]*>(.*?)</td>', out)
-                crashes = extract(r'Crashes[^<]*?Total\D*?(\d+)', out)
+                legal  = extract(r'Legal Name[^:]*?:\s*</td>\s*<td[^>]*>(.*?)</td>', out)
+                dba    = extract(r'DBA Name[^:]*?:\s*</td>\s*<td[^>]*>(.*?)</td>', out)
+                status = extract(r'Operating Status[^:]*?:\s*</td>\s*<td[^>]*>(.*?)</td>', out)
+                rating = extract(r'Safety Rating[^:]*?:\s*</td>\s*<td[^>]*>(.*?)</td>', out)
                 if legal != "N/A":
-                    lines.append(f"Legal Name:      {legal}")
-                    lines.append(f"DBA:             {dba}")
-                    lines.append(f"Status:          {status}")
-                    lines.append(f"Safety Rating:   {rating}")
-                    lines.append(f"Total Crashes:   {crashes}")
+                    lines += [f"Legal Name:    {legal}", f"DBA:           {dba}",
+                              f"Status:        {status}", f"Safety Rating: {rating}", ""]
                 else:
-                    lines.append(f"SAFER link generated — open above URL for full snapshot.")
+                    lines += ["SAFER data returned — open Step 1 link for full snapshot.", ""]
             else:
-                lines.append("SAFER API response empty — use direct link above.")
-            lines.append("")
-        except Exception as e:
-            lines.append(f"Live SAFER call unavailable — use direct links above.")
-            lines.append("")
+                lines += ["Open Step 1 link for SAFER snapshot.", ""]
+        except:
+            lines += ["Open Step 1 link for SAFER snapshot.", ""]
 
-    lines += ["", "⚠ DPPA/FMCSA: All carrier data is public federal record. No permissible use required.", "  Driver PSP records require permissible use documentation.", ""]
-
+    lines += ["", "NOTE: All FMCSA carrier data is public federal record.",
+              "  Driver PSP records require driver consent + permissible use documentation.", ""]
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "cmv", "result": result})
     return result
+
 
 
 MODULE_MAP = {
