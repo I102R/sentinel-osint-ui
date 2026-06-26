@@ -1641,6 +1641,7 @@ def module_cmv(target, job_id, ids=None):
     lines.append("  6. Hazardous Materials compliance")
     lines.append("  7. Crash Indicator     — crash frequency/severity pattern")
     lines.append("NOTE: Crash Indicator only visible to carrier + law enforcement.")
+    lines.append("NOTE: CSA SMS requires free FMCSA login — create account at ai.fmcsa.dot.gov")
     lines.append("ALERT threshold: FMCSA may intervene when score exceeds 65-75th percentile.")
     lines.append("")
     if is_dot:
@@ -1664,7 +1665,8 @@ def module_cmv(target, job_id, ids=None):
     lines.append("Does NOT include property-damage-only crashes below threshold.")
     lines.append("")
     for nm, url in [
-        ("FMCSA Crash Data — company search",     "https://www.fmcsa.dot.gov/safety/research-and-analysis/large-truck-and-bus-crash-facts"),
+        ("FMCSA Large Truck Crash Facts",          "https://www.fmcsa.dot.gov/safety/data-and-statistics/large-truck-and-bus-crash-facts"),
+        ("A&I Crash Statistics — carrier query",   "https://ai.fmcsa.dot.gov/CrashStatistics"),
         ("DOT Transportation Data — crash sets",  "https://data.transportation.gov/Trucking-and-Motorcoaches/"),
         ("FMCSA DataQs — challenged crash records","https://dataqs.fmcsa.dot.gov/"),
     ]:
@@ -1677,9 +1679,9 @@ def module_cmv(target, job_id, ids=None):
     lines.append("DPPA equivalent for CMV: FMCSA permissible use required.")
     lines.append("")
     for nm, url in [
-        ("FMCSA PSP — driver history report",     "https://www.fmcsa.dot.gov/registration/pre-employment-screening-program"),
+        ("FMCSA PSP — driver history report",     "https://www.psp.fmcsa.dot.gov/"),
         ("FMCSA CDL Drug & Alcohol Clearinghouse","https://clearinghouse.fmcsa.dot.gov/"),
-        ("FMCSA CDL Downgrade Query — MANUAL",    "https://www.fmcsa.dot.gov/registration/commercial-drivers-license"),
+        ("FMCSA CDL Downgrade Query — MANUAL",    "https://www.fmcsa.dot.gov/registration/commercial-drivers-license/commercial-drivers-license-cdl"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
 
@@ -1688,18 +1690,16 @@ def module_cmv(target, job_id, ids=None):
     lines.append("Cross-reference SAFER data with independent sources.")
     lines.append("")
     for nm, url in [
-        ("eCarrierCheck — free risk score",       f"https://www.ecarriercheck.com/CarrierSearch.aspx?q={t_plus}"),
-        ("TruckExit — DOT/MC lookup",             f"https://www.truckexit.com/carrier/{t_plus}"),
-        ("FreightGuard — complaint history",       "https://www.freightguard.com/"),
-        ("CVSA inspection standards reference",    "https://www.cvsa.org/programs/driver-vehicle-inspections/"),
+        ("eCarrierCheck — MANUAL: enter DOT/MC on site",       "https://lookup.ecarriercheck.com/"),
+        ("CarrierChk — MANUAL: enter DOT/MC on site",        "https://carrierchk.com/"),
+        ("FMCSA Out-of-Service orders",            f"https://ai.fmcsa.dot.gov/SMS/Carrier/{dot_num}/OOS.aspx" if dot_num else "https://ai.fmcsa.dot.gov/SMS/"),
+        ("CVSA inspection standards reference",    "https://cvsa.org/inspections/"),
     ]:
         lines.append(f"[{nm}]"); lines.append(f"  {url}"); lines.append("")
 
     # ── STEP 7: NM STATE RECORDS ─────────────────────────────────────────
     lines += ["=" * 50, "STEP 7 — NEW MEXICO STATE RECORDS", "=" * 50, ""]
     for nm, url in [
-        ("NM DOT — CMV permits/oversize",          "https://dot.nm.gov/business-industry-it-services/planning-research-multimodal/transportation-planning/commercial-vehicles/"),
-        ("NM MVD — commercial vehicle records",    "https://www.mvd.newmexico.gov/"),
         ("NM DPS — crash reports",                 "https://www.dps.nm.gov/"),
         ("NM SOS — carrier business registration", f"https://sos.nm.gov/business/business-search?name={t_plus}"),
         ("NM Courts — carrier litigation",          "https://caselookup.nmcourts.gov/caselookup/app"),
