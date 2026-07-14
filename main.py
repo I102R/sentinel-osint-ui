@@ -1394,6 +1394,142 @@ def module_username_search(target, job_id):
 # MODULE: PHONE LOOKUP
 # ══════════════════════════════════════════════════════════════════════════════
 
+def phone_pattern_analysis(number):
+    """
+    Telespot-inspired pattern analysis.
+    Runs 10 phone format variations through DuckDuckGo HTML endpoint,
+    parses results, extracts names/locations/usernames with frequency counts.
+    No API key required.
+    """
+    import re
+    from urllib.parse import quote
+
+    clean = number.replace("-","").replace("(","").replace(")","").replace(" ","").replace("+1","").strip()
+    if len(clean) != 10:
+        return None
+
+    # Generate 10 format variations
+    formats = [
+        f"{clean}",
+        f"{clean[:3]}-{clean[3:6]}-{clean[6:]}",
+        f"({clean[:3]}) {clean[3:6]}-{clean[6:]}",
+        f"({clean[:3]}){clean[3:6]}-{clean[6:]}",
+        f"+1{clean}",
+        f"+1-{clean[:3]}-{clean[3:6]}-{clean[6:]}",
+        f"1-{clean[:3]}-{clean[3:6]}-{clean[6:]}",
+        f"1{clean}",
+        f"{clean[:3]}.{clean[3:6]}.{clean[6:]}",
+        f"{clean[:3]} {clean[3:6]} {clean[6:]}",
+    ]
+
+    all_text = []
+    searched = 0
+
+    for fmt in formats[:6]:  # Cap at 6 to avoid rate limiting on Render
+        try:
+            q = quote(f'"{fmt}"')
+            ddg_url = f"https://html.duckduckgo.com/html/?q={q}"
+            out, _, rc = run_cmd(
+                f"curl -s -L -A 'Mozilla/5.0' --data 'q={q}' 'https://html.duckduckgo.com/html/' 2>/dev/null | python3 -c \"import sys,re; data=sys.stdin.read(); matches=re.findall(r'class=.result__snippet.[^>]*>([^<]+)<', data); print(' '.join(matches[:15]))\"",
+                timeout=12
+            )
+            if out:
+                all_text.append(out)
+                searched += 1
+        except:
+            pass
+
+    if not all_text:
+        return None
+
+    combined = " ".join(all_text).lower()
+
+    # Name extraction — capitalized word pairs common in name contexts
+    name_pattern = re.compile(r'([A-Z][a-z]{1,15})\s+([A-Z][a-z]{1,20})')
+    raw_names = {}
+    for chunk in all_text:
+        for match in name_pattern.finditer(chunk):
+            name = f"{match.group(1)} {match.group(2)}"
+            # Filter common false positives
+            skip = ['Search Results','Phone Number','White Pages','People Search',
+                    'Real People','Find People','Public Records','United States',
+                    'New Mexico','North America','South America','East Coast',
+                    'West Coast','Phone Book','Reverse Lookup','Free Search']
+            if name not in skip and len(name) > 6:
+                raw_names[name] = raw_names.get(name, 0) + 1
+
+    # Location extraction — city/state patterns
+    us_states = ['Alabama','Alaska','Arizona','Arkansas','California','Colorado',
+                 'Connecticut','Delaware','Florida','Georgia','Hawaii','Idaho',
+                 'Illinois','Indiana','Iowa','Kansas','Kentucky','Louisiana',
+                 'Maine','Maryland','Massachusetts','Michigan','Minnesota',
+                 'Mississippi','Missouri','Montana','Nebraska','Nevada',
+                 'New Hampshire','New Jersey','New Mexico','New York',
+                 'North Carolina','North Dakota','Ohio','Oklahoma','Oregon',
+                 'Pennsylvania','Rhode Island','South Carolina','South Dakota',
+                 'Tennessee','Texas','Utah','Vermont','Virginia','Washington',
+                 'West Virginia','Wisconsin','Wyoming','District of Columbia']
+    state_abbrevs = ['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID',
+                     'IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS',
+                     'MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK',
+                     'OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV',
+                     'WI','WY','DC']
+
+    raw_locs = {}
+    for state in us_states:
+        count = combined.count(state.lower())
+        if count > 0:
+            raw_locs[state] = count
+    for abbr in state_abbrevs:
+        count = len(re.findall(r'' + abbr + r'', " ".join(all_text)))
+        if count > 0:
+            existing = raw_locs.get(abbr, 0)
+            raw_locs[abbr] = existing + count
+
+    # City extraction — look for "city, ST" patterns
+    city_pattern = re.compile(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?),\s*([A-Z]{2})')
+    for chunk in all_text:
+        for match in city_pattern.finditer(chunk):
+            city_state = f"{match.group(1)}, {match.group(2)}"
+            raw_locs[city_state] = raw_locs.get(city_state, 0) + 2  # weight city+state higher
+
+    # Username extraction — @handle patterns
+    username_pattern = re.compile(r'@([a-zA-Z0-9_]{3,20})')
+    raw_usernames = {}
+    for chunk in all_text:
+        for match in username_pattern.finditer(chunk):
+            uname = f"@{match.group(1)}"
+            raw_usernames[uname] = raw_usernames.get(uname, 0) + 1
+
+    # Score confidence
+    top_names = sorted(raw_names.items(), key=lambda x: x[1], reverse=True)[:5]
+    top_locs = sorted(raw_locs.items(), key=lambda x: x[1], reverse=True)[:5]
+    top_users = sorted(raw_usernames.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    max_name_count = top_names[0][1] if top_names else 0
+    if max_name_count >= 8:
+        confidence = "HIGH"
+        conf_pct = min(95, 60 + max_name_count * 3)
+    elif max_name_count >= 4:
+        confidence = "MEDIUM"
+        conf_pct = 40 + max_name_count * 4
+    elif max_name_count >= 2:
+        confidence = "LOW"
+        conf_pct = 20 + max_name_count * 5
+    else:
+        confidence = "INSUFFICIENT DATA"
+        conf_pct = 0
+
+    return {
+        "confidence": confidence,
+        "confidence_pct": conf_pct,
+        "names": top_names,
+        "locations": top_locs,
+        "usernames": top_users,
+        "formats_searched": searched,
+    }
+
+
 def module_phone(target, job_id):
     emit(job_id, "module_start", {"module": "phone"})
     clean = target.replace("-","").replace("(","").replace(")","").replace(" ","").replace("+1","").strip()
@@ -1404,6 +1540,44 @@ def module_phone(target, job_id):
     lines.append(f"TARGET:    {formatted}")
     lines.append(f"CLEANED:   {clean}")
     lines.append("")
+
+    # Run Telespot-inspired pattern analysis
+    if len(clean) == 10:
+        try:
+            analysis = phone_pattern_analysis(clean)
+            if analysis and analysis["confidence"] != "INSUFFICIENT DATA":
+                lines.append("=" * 50)
+                lines.append("PATTERN ANALYSIS — LIVE CROSS-ENGINE CORRELATION")
+                lines.append("=" * 50)
+                lines.append("")
+                lines.append(f"Confidence:  {analysis['confidence']} ({analysis['confidence_pct']}%)")
+                lines.append(f"Formats searched: {analysis['formats_searched']} variations across DuckDuckGo")
+                lines.append("")
+                if analysis["names"]:
+                    lines.append("NAMES FOUND:")
+                    for name, count in analysis["names"]:
+                        star = " ★" if count == analysis["names"][0][1] else ""
+                        lines.append(f"  {name} — {count}x{star}")
+                    lines.append("")
+                if analysis["locations"]:
+                    lines.append("LOCATIONS:")
+                    for loc, count in analysis["locations"]:
+                        star = " ★" if count == analysis["locations"][0][1] else ""
+                        lines.append(f"  {loc} — {count}x{star}")
+                    lines.append("")
+                if analysis["usernames"]:
+                    lines.append("USERNAMES:")
+                    for uname, count in analysis["usernames"]:
+                        lines.append(f"  {uname} — {count}x")
+                    lines.append("")
+                lines.append("NOTE: Cross-reference top names through Skip Trace module.")
+                lines.append("")
+            else:
+                lines.append("Pattern analysis: insufficient public data for this number.")
+                lines.append("")
+        except Exception as e:
+            lines.append(f"Pattern analysis unavailable: {str(e)}")
+            lines.append("")
 
     ipqs_key = os.environ.get("IPQS_API_KEY", "")
     nv_key = os.environ.get("NUMVERIFY_API_KEY", "")
