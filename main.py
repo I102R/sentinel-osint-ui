@@ -2573,8 +2573,45 @@ def get_users():
                 }
     return users
 
-def log_auth_event(username, action, detail, ip="unknown"):
-    print(f"[AUTH] {action} | user={username} | {detail} | ip={ip} | time={datetime.utcnow().isoformat()}")
+# ── Persistent Audit Log (file-backed, survives across requests) ──────────────
+AUDIT_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fivet_audit_log.json")
+AUDIT_LOG_MAX_ENTRIES = 5000
+_audit_lock = threading.Lock()
+
+def load_audit_log():
+    try:
+        if os.path.exists(AUDIT_LOG_FILE):
+            with open(AUDIT_LOG_FILE, "r") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return []
+
+def save_audit_log(log_list):
+    try:
+        with open(AUDIT_LOG_FILE, "w") as f:
+            json.dump(log_list[-AUDIT_LOG_MAX_ENTRIES:], f)
+    except Exception as e:
+        print(f"[AUDIT WRITE ERROR] {e}")
+
+def append_audit_entry(entry):
+    with _audit_lock:
+        log_list = load_audit_log()
+        log_list.append(entry)
+        save_audit_log(log_list)
+
+def log_auth_event(username, action, detail, ip="unknown", name="", target=""):
+    entry = {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "username": username,
+        "name": name,
+        "action": action,
+        "detail": detail,
+        "target": target,
+        "ip": ip,
+    }
+    print(f"[AUTH] {action} | user={username} | {detail} | ip={ip} | time={entry['timestamp']}")
+    append_audit_entry(entry)
 
 @app.route("/api/auth/login", methods=["POST"])
 def login():
@@ -2593,7 +2630,7 @@ def login():
             "created": datetime.utcnow().isoformat(),
             "ip": ip
         }
-        log_auth_event(username, "LOGIN_SUCCESS", f"User {user['name']} authenticated", ip)
+        log_auth_event(username, "LOGIN_SUCCESS", f"User {user['name']} authenticated", ip, name=user["name"])
         return jsonify({"success": True, "token": token, "username": username,
                         "role": user["role"], "name": user["name"]})
     else:
@@ -2616,17 +2653,20 @@ def logout():
     token = data.get("token", "")
     session = active_sessions.pop(token, None)
     if session:
-        log_auth_event(session["username"], "LOGOUT", "User logged out")
+        log_auth_event(session["username"], "LOGOUT", "User logged out", name=session.get("name",""))
     return jsonify({"success": True})
 
 @app.route("/api/auth/audit", methods=["POST"])
 def get_audit():
-    data = request.json
+    data = request.json or {}
     token = data.get("token", "")
     session = active_sessions.get(token)
     if not session or session.get("role") != "admin":
-        return jsonify({"error": "Unauthorized"}), 403
-    return jsonify({"message": "Audit log is written to Render server logs. Check Render dashboard → Logs."})
+        return jsonify({"error": "Unauthorized — admin access required"}), 403
+    log_list = load_audit_log()
+    # Most recent first
+    log_list = list(reversed(log_list))
+    return jsonify({"success": True, "count": len(log_list), "entries": log_list})
 
 @app.route("/api/investigate", methods=["GET", "POST"])
 def investigate():
@@ -2640,6 +2680,7 @@ def investigate():
     dob = data.get("dob", "").strip()
     ssn = data.get("ssn", "").strip()
     oln = data.get("oln", "").strip()
+    token = data.get("token", "")
     if isinstance(modules_param, str) and modules_param:
         selected_modules = modules_param.split(",")
     elif isinstance(modules_param, list):
@@ -2648,6 +2689,18 @@ def investigate():
         selected_modules = list(MODULE_MAP.keys())
     if not target:
         return jsonify({"error": "No target provided"}), 400
+
+    # Attribute this search to the logged-in user for the audit log
+    session = active_sessions.get(token)
+    searcher_username = session["username"] if session else "unknown"
+    searcher_name = session["name"] if session else "Unknown User"
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    log_auth_event(
+        searcher_username, "SEARCH",
+        f"Type={target_type} | Modules={len(selected_modules)} | DOB={'yes' if dob else 'no'} | SSN={'yes' if ssn else 'no'} | OLN={'yes' if oln else 'no'}",
+        ip, name=searcher_name, target=target
+    )
+
     job_id = f"job_{int(time.time()*1000)}"
     new_job(job_id)
     threading.Thread(
