@@ -405,7 +405,7 @@ async function runInvestigation() {
     const dob = document.getElementById('dobInput')?.value.trim() || '';
     const ssn = document.getElementById('ssnInput')?.value.trim() || '';
     const oln = document.getElementById('olnInput')?.value.trim() || '';
-    const params = new URLSearchParams({ target: query, type: targetType, modules: mods.join(','), dob, ssn, oln });
+    const params = new URLSearchParams({ target: query, type: targetType, modules: mods.join(','), dob, ssn, oln, token: authToken || '' });
     const res = await fetch(`${BACKEND}/api/investigate?${params}`, { method: 'GET' });
     const { job_id } = await res.json();
 
@@ -732,19 +732,53 @@ async function logout() {
   location.reload();
 }
 
-function showAuditLog() {
+async function showAuditLog() {
   if (!isAdmin) return;
   const win = window.open('', '_blank');
   win.document.write('<html><head><title>FIVE T Audit Log</title>');
-  win.document.write('<style>body{background:#060a0f;color:#c8d8e8;font-family:monospace;padding:20px;}h1{color:#00a896;letter-spacing:3px;}table{width:100%;border-collapse:collapse;}th{background:#0b1118;color:#00a896;padding:8px;text-align:left;font-size:11px;}td{padding:6px 8px;font-size:11px;border-bottom:1px solid #1a2a3a;}.login{color:#39ff14}.logout{color:#4a6070}.search{color:#ffb300}.failed{color:#ff3b3b}</style></head><body>');
+  win.document.write('<style>body{background:#060a0f;color:#c8d8e8;font-family:monospace;padding:20px;}h1{color:#00a896;letter-spacing:3px;}table{width:100%;border-collapse:collapse;}th{background:#0b1118;color:#00a896;padding:8px;text-align:left;font-size:11px;position:sticky;top:0;}td{padding:6px 8px;font-size:11px;border-bottom:1px solid #1a2a3a;}.login{color:#39ff14}.logout{color:#4a6070}.search{color:#ffb300}.failed{color:#ff3b3b}.filterbar{margin-bottom:12px;display:flex;gap:8px;}.filterbar input,.filterbar select{background:#0b1118;border:1px solid #1a2a3a;color:#c8d8e8;padding:6px 10px;font-family:monospace;font-size:11px;}</style></head><body>');
   win.document.write('<h1>◎ FIVE T // AUDIT LOG</h1>');
-  win.document.write(`<p style="color:#4a6070;font-size:11px;margin-bottom:16px">Total: ${auditLog.length} | ${new Date().toISOString()}</p>`);
-  win.document.write('<table><tr><th>TIMESTAMP</th><th>USER</th><th>ACTION</th><th>DETAIL</th><th>TARGET</th></tr>');
-  auditLog.forEach(e => {
-    const cls = e.action.includes('SUCCESS') ? 'login' : e.action.includes('LOGOUT') ? 'logout' : e.action.includes('SEARCH') ? 'search' : 'failed';
-    win.document.write(`<tr><td>${e.timestamp}</td><td>${e.username}</td><td class="${cls}">${e.action}</td><td>${e.detail}</td><td>${e.target||''}</td></tr>`);
-  });
-  win.document.write('</table></body></html>');
+  win.document.write('<p style="color:#4a6070;font-size:11px;margin-bottom:16px" id="loadingMsg">Loading from server...</p>');
+  win.document.write('<div class="filterbar"><input id="userFilter" placeholder="Filter by user..." onkeyup="filterAuditTable()"/><select id="actionFilter" onchange="filterAuditTable()"><option value="">All Actions</option><option value="LOGIN_SUCCESS">Logins</option><option value="LOGOUT">Logouts</option><option value="SEARCH">Searches</option><option value="LOGIN_FAILED">Failed Logins</option></select></div>');
+  win.document.write('<table id="auditTable"><thead><tr><th>TIMESTAMP (UTC)</th><th>USER</th><th>ACTION</th><th>DETAIL</th><th>TARGET</th><th>IP</th></tr></thead><tbody id="auditBody"></tbody></table>');
+  win.document.write('</body></html>');
+  win.document.close();
+
+  try {
+    const res = await fetch(`${BACKEND}/api/auth/audit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: authToken })
+    });
+    const data = await res.json();
+    const loadingMsg = win.document.getElementById('loadingMsg');
+    if (!data.success) {
+      loadingMsg.textContent = `Error: ${data.error || 'Could not load audit log'}`;
+      return;
+    }
+    loadingMsg.textContent = `Total entries: ${data.count} | Server time: ${new Date().toISOString()} | Showing most recent first`;
+    const tbody = win.document.getElementById('auditBody');
+    win.fullAuditData = data.entries;
+    win.filterAuditTable = function() {
+      const userF = win.document.getElementById('userFilter').value.toLowerCase();
+      const actF = win.document.getElementById('actionFilter').value;
+      const filtered = win.fullAuditData.filter(e =>
+        (!userF || (e.username||'').toLowerCase().includes(userF) || (e.name||'').toLowerCase().includes(userF)) &&
+        (!actF || e.action === actF)
+      );
+      renderRows(filtered);
+    };
+    function renderRows(entries) {
+      const cls = (action) => action.includes('SUCCESS') ? 'login' : action === 'LOGOUT' ? 'logout' : action === 'SEARCH' ? 'search' : 'failed';
+      tbody.innerHTML = entries.map(e =>
+        `<tr><td>${e.timestamp}</td><td>${e.name || e.username}</td><td class="${cls(e.action)}">${e.action}</td><td>${e.detail||''}</td><td>${e.target||''}</td><td>${e.ip||''}</td></tr>`
+      ).join('');
+    }
+    renderRows(data.entries);
+  } catch (e) {
+    const loadingMsg = win.document.getElementById('loadingMsg');
+    if (loadingMsg) loadingMsg.textContent = `Failed to reach backend: ${e.message}`;
+  }
 }
 
 window.addEventListener('load', async () => {
