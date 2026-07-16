@@ -2573,12 +2573,51 @@ def get_users():
                 }
     return users
 
-# ── Persistent Audit Log (file-backed, survives across requests) ──────────────
+# ── Persistent Audit Log ────────────────────────────────────────────────────
+# Primary: Supabase (persistent, SOC 2 compliant, survives deploys)
+# Fallback: local file (used only if Supabase env vars are not set)
+import urllib.request
+import urllib.error
+
 AUDIT_LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fivet_audit_log.json")
 AUDIT_LOG_MAX_ENTRIES = 5000
 _audit_lock = threading.Lock()
 
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
+SUPABASE_ENABLED = bool(SUPABASE_URL and SUPABASE_SERVICE_KEY)
+
+
+def _supabase_request(method, path, body=None, params=None):
+    url = f"{SUPABASE_URL}/rest/v1/{path}"
+    if params:
+        qs = "&".join(f"{k}={v}" for k, v in params.items())
+        url += f"?{qs}"
+    headers = {
+        "apikey": SUPABASE_SERVICE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal" if method == "POST" else "return=representation",
+    }
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        raw = resp.read()
+        return json.loads(raw) if raw else []
+
+
 def load_audit_log():
+    if SUPABASE_ENABLED:
+        try:
+            entries = _supabase_request(
+                "GET", "audit_log",
+                params={"order": "timestamp.desc", "limit": AUDIT_LOG_MAX_ENTRIES}
+            )
+            # Normalize field name: Supabase uses 'timestamp', frontend expects it too
+            return list(reversed(entries))  # oldest first, matches old file-based ordering
+        except Exception as e:
+            print(f"[AUDIT] Supabase read failed, falling back to file: {e}")
+    # Fallback: local file
     try:
         if os.path.exists(AUDIT_LOG_FILE):
             with open(AUDIT_LOG_FILE, "r") as f:
@@ -2587,18 +2626,29 @@ def load_audit_log():
         pass
     return []
 
+
 def save_audit_log(log_list):
+    # Only used by file fallback path
     try:
         with open(AUDIT_LOG_FILE, "w") as f:
             json.dump(log_list[-AUDIT_LOG_MAX_ENTRIES:], f)
     except Exception as e:
         print(f"[AUDIT WRITE ERROR] {e}")
 
+
 def append_audit_entry(entry):
+    if SUPABASE_ENABLED:
+        try:
+            _supabase_request("POST", "audit_log", body=entry)
+            return
+        except Exception as e:
+            print(f"[AUDIT] Supabase write failed, falling back to file: {e}")
+    # Fallback: local file
     with _audit_lock:
         log_list = load_audit_log()
         log_list.append(entry)
         save_audit_log(log_list)
+
 
 def log_auth_event(username, action, detail, ip="unknown", name="", target=""):
     entry = {
@@ -2732,7 +2782,11 @@ def stream(job_id):
 @app.route("/api/health")
 def health():
     tools = {t: tool_available(t) for t in ["whois", "dig", "curl"]}
-    return jsonify({"status": "ok", "tools": tools})
+    return jsonify({
+        "status": "ok",
+        "tools": tools,
+        "audit_backend": "supabase" if SUPABASE_ENABLED else "local_file (not persistent across deploys)"
+    })
 
 @app.route("/")
 def index():
