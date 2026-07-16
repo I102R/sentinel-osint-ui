@@ -118,7 +118,7 @@ def parse_name_location(target):
 # All sources verified free June 2026
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_people_search(target, job_id):
+def module_people_search(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "people"})
     name_part, location_part, first, last, state, city = parse_name_location(target)
 
@@ -131,6 +131,13 @@ def module_people_search(target, job_id):
     lines.append(f"TARGET:   {name_part}")
     if location_part:
         lines.append(f"LOCATION: {location_part}")
+    if dob:
+        lines.append(f"DOB:      {dob}")
+    if ssn:
+        masked = ssn[:3] + "-**-****" if len(ssn) >= 9 else "***-**-****"
+        lines.append(f"SSN:      {masked}")
+    if oln:
+        lines.append(f"OLN:      {oln}")
     lines.append("")
 
     lines.append("=" * 50)
@@ -139,7 +146,7 @@ def module_people_search(target, job_id):
     lines.append("")
 
     sites = [
-        ("FAMILYTREENOW ★ BEST FREE",    f"https://www.familytreenow.com/search/people/results?first={first}&last={last}&state={state}"),
+        ("FAMILYTREENOW ★ BEST FREE",    f"https://www.familytreenow.com/search/people/results?first={first}&last={last}&state={state}" + (f"&dob={dob.replace('/','%2F')}" if dob else "")),
         ("TRUEPEOPLESEARCH",              f"https://www.truepeoplesearch.com/results?name={name_plus}&citystatezip={loc_plus}"),
         ("FASTPEOPLESEARCH",              f"https://www.fastpeoplesearch.com/name/{name_url}"),
         ("THATSTHEM ★ 100% FREE",         f"https://thatsthem.com/name/{first}-{last}"),
@@ -248,13 +255,20 @@ def module_people_search(target, job_id):
 # MODULE: PUBLIC RECORDS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_public_records(target, job_id):
+def module_public_records(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "public_records"})
     name_part, location_part, first, last, state, city = parse_name_location(target)
     name_plus = name_part.replace(" ", "+")
 
     lines = []
     lines.append(f"TARGET: {name_part}")
+    if dob:
+        lines.append(f"DOB:    {dob}")
+    if ssn:
+        masked = ssn[:3] + "-**-****" if len(ssn) >= 9 else "***-**-****"
+        lines.append(f"SSN:    {masked}")
+    if oln:
+        lines.append(f"OLN:    {oln}")
     lines.append("")
 
     lines.append("=" * 50)
@@ -368,7 +382,7 @@ def module_public_records(target, job_id):
 # MODULE: PROPERTY RECORDS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_property(target, job_id):
+def module_property(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "property"})
     name_part, location_part, first, last, state, city = parse_name_location(target)
     name_plus = name_part.replace(" ", "+")
@@ -463,7 +477,7 @@ def module_property(target, job_id):
 # All sources verified free June 2026 — paywall tools removed
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_skip_trace(target, job_id):
+def module_skip_trace(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "skip_trace"})
     name_part, location_part, first, last, state, city = parse_name_location(target)
     name_plus = name_part.replace(" ", "+")
@@ -474,6 +488,13 @@ def module_skip_trace(target, job_id):
     lines.append(f"TARGET:   {name_part}")
     if location_part:
         lines.append(f"LOCATION: {location_part}")
+    if dob:
+        lines.append(f"DOB:      {dob}")
+    if ssn:
+        masked = ssn[:3] + "-**-****" if len(ssn) >= 9 else "***-**-****"
+        lines.append(f"SSN:      {masked}")
+    if oln:
+        lines.append(f"OLN:      {oln}")
     lines.append("")
     lines.append("⚠ DPPA: Law firms qualify under 18 U.S.C. § 2721(b) for litigation & process serving.")
     lines.append("")
@@ -482,6 +503,13 @@ def module_skip_trace(target, job_id):
     lines.append("TIER 1 — FREE SOURCES THAT SHOW FULL RESULTS")
     lines.append("=" * 50)
     lines.append("")
+    if dob:
+        lines.append(f"★ DOB PROVIDED: {dob} — use to disambiguate same-name results.")
+        lines.append("  Filter results to subjects matching this date of birth.")
+        lines.append("")
+    if oln:
+        lines.append(f"★ OLN PROVIDED: {oln} — run through NM MVD and state DMV records.")
+        lines.append("")
 
     tier1 = [
         ("FamilyTreeNow ★ BEST FREE",     f"https://www.familytreenow.com/search/people/results?first={first}&last={last}&state={state}"),
@@ -508,6 +536,10 @@ def module_skip_trace(target, job_id):
     lines.append("")
     lines.append("Voter registration = most reliable free address source.")
     lines.append("")
+    if dob:
+        lines.append(f"★ DOB {dob} — use in NM Voter Portal to confirm identity match.")
+        lines.append("  NM voter portal accepts DOB for lookup — highest-confidence free source.")
+        lines.append("")
     lines.append("TIP: FEC political donations = free government database with name + address + employer.")
     lines.append(f"  https://www.fec.gov/data/receipts/individual-contributions/?contributor_name={name_plus}")
     lines.append("")
@@ -695,7 +727,7 @@ def module_skip_trace(target, job_id):
 # MODULE: SOCIAL MEDIA SEARCH
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_social_media(target, job_id):
+def module_social_media(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "social_media"})
 
     if "," in target:
@@ -833,7 +865,7 @@ def module_social_media(target, job_id):
 # MODULE: SOCIAL FOOTPRINT
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_social_footprint(target, job_id):
+def module_social_footprint(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "social_footprint"})
     name_part, location_part, first, last, state, city = parse_name_location(target)
     name_plus = name_part.replace(" ", "+")
@@ -900,11 +932,10 @@ def module_social_footprint(target, job_id):
     lines.append("=" * 50)
     lines.append("")
     li = [
-        ("LinkedIn People Search",   f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
+        ("LinkedIn People Search",     f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
         ("LinkedIn + Location filter", f"https://www.linkedin.com/search/results/people/?keywords={name_plus}&geoUrn=%5B%22102095887%22%5D"),
-        ("Google LI + Location",     f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22{location_part}%22" if location_part else f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22New+Mexico%22"),
-        ("Google LI Profile",        f"https://www.google.com/search?q=site:linkedin.com/in+%22{name_plus}%22"),
-        ("Google LI + Location",     f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22New+Mexico%22"),
+        ("Google LI Profile (exact)",  f"https://www.google.com/search?q=site:linkedin.com/in+%22{name_plus}%22"),
+        ("Google LI + Location",       f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22{location_part}%22" if location_part else f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22New+Mexico%22"),
     ]
     for name, url in li:
         lines.append(f"[{name}]")
@@ -958,7 +989,7 @@ def module_social_footprint(target, job_id):
 # PLATE and LOCATION types only — not PERSON
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_hit_and_run(target, job_id):
+def module_hit_and_run(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "hit_and_run"})
 
     target_clean = target.upper().strip()
@@ -1110,7 +1141,7 @@ def module_hit_and_run(target, job_id):
 # MODULE: PHOTO FORENSICS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_photo_forensics(target, job_id):
+def module_photo_forensics(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "photo_forensics"})
     from urllib.parse import quote
     lines = []
@@ -1222,7 +1253,7 @@ def module_photo_forensics(target, job_id):
 # MODULE: GEOLOCATION
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_geolocation(target, job_id):
+def module_geolocation(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "geolocation"})
     lines = []
     lines.append(f"TARGET: {target}")
@@ -1308,7 +1339,7 @@ def module_geolocation(target, job_id):
 # MODULE: USERNAME SEARCH
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_username_search(target, job_id):
+def module_username_search(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "username_search"})
     lines = []
     lines.append(f"TARGET USERNAME: {target}")
@@ -1530,7 +1561,7 @@ def phone_pattern_analysis(number):
     }
 
 
-def module_phone(target, job_id):
+def module_phone(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "phone"})
     clean = target.replace("-","").replace("(","").replace(")","").replace(" ","").replace("+1","").strip()
     formatted = f"({clean[:3]}) {clean[3:6]}-{clean[6:]}" if len(clean) == 10 else target
@@ -1690,7 +1721,7 @@ def module_phone(target, job_id):
 # MODULE: EMAIL INVESTIGATION
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_email_investigate(target, job_id):
+def module_email_investigate(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "email_investigate"})
     lines = []
     lines.append(f"TARGET EMAIL: {target}")
@@ -1763,11 +1794,12 @@ def module_email_investigate(target, job_id):
         ("THATSTHEM ★ FREE",                       f"https://thatsthem.com/email/{target}"),
         ("EMAILREP (reputation)",                  f"https://emailrep.io/{target}"),
         ("HUNTER.IO (verify)",                     f"https://hunter.io/email-verifier/{target}"),
-        ("HAVEIBEENPWNED (breaches)",              f"https://haveibeenpwned.com/account/{target}"),
-        ("DEHASHED (breaches)",                    f"https://www.dehashed.com/search?query={target}"),
         ("EPIEOS (social lookup)",                 f"https://epieos.com/?q={target}&t=email"),
         ("GHunt (Google account OSINT)",           f"https://www.google.com/search?q=%22{target}%22+site:accounts.google.com"),
     ]
+    lines.append("NOTE: Breach/leak data for this email is covered in the")
+    lines.append("      dedicated Breach & Leak module — run it alongside this one.")
+    lines.append("")
     for name, url in sites:
         lines.append(f"[{name}]")
         lines.append(f"  {url}")
@@ -1782,8 +1814,8 @@ def module_email_investigate(target, job_id):
         f'"{target}" name address phone',
         f'"{target}" site:linkedin.com',
         f'"{target}" site:facebook.com',
-        f'"{target}" site:pastebin.com',
-        f'"{target}" leaked OR breach OR hacked',
+        f'"{target}" resume OR CV OR "contact me"',
+        f'"{target}" inurl:profile OR inurl:account',
     ]
     for dork in dorks:
         encoded = dork.replace(" ", "+").replace('"', '%22')
@@ -1797,10 +1829,148 @@ def module_email_investigate(target, job_id):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# MODULE: BREACH & LEAK
+# Standalone breach intelligence — live XposedOrNot API (free, no key required)
+# plus verified free breach-checking resources and unique leak-focused dorks.
+# Available for PERSON, EMAIL, USERNAME target types.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def module_breach_leak(target, job_id, dob="", ssn="", oln=""):
+    emit(job_id, "module_start", {"module": "breach_leak"})
+    lines = []
+
+    # Determine if target looks like an email
+    is_email = "@" in target and "." in target.split("@")[-1]
+
+    lines.append(f"TARGET: {target}")
+    lines.append("")
+
+    # ── LIVE API CALL — XposedOrNot (genuinely free, no key, no signup) ──
+    if is_email:
+        try:
+            out, _, rc = run_cmd(
+                f"curl -s 'https://api.xposedornot.com/v1/check-email/{target}' "
+                f"-H 'User-Agent: fivet-osint' 2>/dev/null",
+                timeout=10
+            )
+            data = json.loads(out)
+            lines.append("=" * 50)
+            lines.append("LIVE BREACH CHECK — XPOSEDORNOT (FREE API)")
+            lines.append("=" * 50)
+            lines.append("")
+            if data.get("status") == "success" and data.get("breaches"):
+                breach_list = data["breaches"][0] if isinstance(data["breaches"][0], list) else data["breaches"]
+                lines.append(f"⚠ FOUND IN {len(breach_list)} BREACH(ES):")
+                for b in breach_list:
+                    lines.append(f"  • {b}")
+                lines.append("")
+                lines.append("This confirms the email is real and has been used to register")
+                lines.append("accounts on these specific platforms — useful for identity confirmation")
+                lines.append("and finding additional accounts tied to the same subject.")
+            elif data.get("Error") == "Not found":
+                lines.append("✓ No breaches found for this email in XposedOrNot's database.")
+            else:
+                lines.append("No conclusive result returned.")
+            lines.append("")
+        except Exception as e:
+            lines.append(f"XposedOrNot live check unavailable: {str(e)}")
+            lines.append("")
+    else:
+        lines.append("NOTE: Live XposedOrNot API check requires an email address.")
+        lines.append("If you have a suspected email for this subject, run it through")
+        lines.append("the Email Investigation module or re-run this module with the email.")
+        lines.append("")
+
+    # ── FREE BREACH CHECK SITES ──
+    lines.append("=" * 50)
+    lines.append("FREE BREACH CHECK SITES")
+    lines.append("=" * 50)
+    lines.append("")
+
+    if is_email:
+        breach_sites = [
+            ("XposedOrNot ★ FREE — no signup",       f"https://xposedornot.com/"),
+            ("Have I Been Pwned ★ FREE (site only)",  f"https://haveibeenpwned.com/account/{target}"),
+            ("Mozilla Monitor ★ FREE",                 f"https://monitor.mozilla.org/"),
+            ("BreachDirectory ★ FREE",                 f"https://breachdirectory.org/"),
+            ("LeakCheck.net (1 free lookup)",          f"https://leakcheck.net/"),
+        ]
+    else:
+        breach_sites = [
+            ("XposedOrNot ★ FREE — no signup",       "https://xposedornot.com/"),
+            ("Mozilla Monitor ★ FREE",                 "https://monitor.mozilla.org/"),
+            ("BreachDirectory ★ FREE",                 "https://breachdirectory.org/"),
+            ("LeakCheck.net (1 free lookup)",          "https://leakcheck.net/"),
+        ]
+
+    for name, url in breach_sites:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("PAID / PROFESSIONAL TOOLS (for reference — not verified free)")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("These require payment for full results — use only if free sources")
+    lines.append("are insufficient and the case justifies the cost:")
+    lines.append("")
+    paid_note = [
+        ("DeHashed — per-query pricing",   "https://www.dehashed.com/"),
+        ("Intelligence X — paid full results", "https://intelx.io/"),
+        ("LeakCheck Pro — subscription",   "https://leakcheck.io/"),
+    ]
+    for name, url in paid_note:
+        lines.append(f"[{name}]")
+        lines.append(f"  {url}")
+        lines.append("")
+
+    # ── UNIQUE BREACH-FOCUSED DORKS — not duplicated anywhere else in FIVE T ──
+    lines.append("=" * 50)
+    lines.append("BREACH & LEAK DORKS — UNIQUE TO THIS MODULE")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("These target leak/dump-specific patterns not covered by")
+    lines.append("People Search, Skip Trace, or the general Dorks module.")
+    lines.append("")
+
+    dorks = [
+        f'"{target}" "combolist" OR "combo list"',
+        f'"{target}" "database dump" OR "db dump"',
+        f'"{target}" intext:password site:pastebin.com',
+        f'"{target}" site:rentry.co OR site:controlc.com',
+        f'"{target}" "leaked" filetype:txt OR filetype:csv OR filetype:sql',
+        f'"{target}" site:scylla.sh OR site:snusbase.com',
+        f'"{target}" "stealer log" OR "stealer logs"',
+        f'"{target}" site:intelx.io',
+    ]
+    for dork in dorks:
+        encoded = dork.replace(" ", "+").replace('"', '%22')
+        lines.append(f"  {dork}")
+        lines.append(f"  https://www.google.com/search?q={encoded}")
+        lines.append("")
+
+    lines.append("=" * 50)
+    lines.append("HOW TO USE THIS MODULE")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append("1. If subject's email is known — confirms it's real and active")
+    lines.append("2. Breach names reveal OTHER platforms subject has accounts on")
+    lines.append("   (e.g. found in 'LinkedIn2021' breach = confirms LinkedIn account)")
+    lines.append("3. Cross-reference breach platform names with Social Footprint module")
+    lines.append("4. A subject with zero breaches across a common email is unusual —")
+    lines.append("   may indicate a newer or rarely-used address")
+
+    result = "\n".join(lines)
+    emit(job_id, "module_done", {"module": "breach_leak", "result": result})
+    return result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # MODULE: LICENSE PLATE LOOKUP
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_plate_lookup(target, job_id):
+def module_plate_lookup(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "plate_lookup"})
     target_clean = target.upper().strip()
     parts = target_clean.split()
@@ -1889,7 +2059,7 @@ def module_plate_lookup(target, job_id):
 # MODULE: BUSINESS SEARCH
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_business(target, job_id):
+def module_business(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "business"})
     name_plus = target.replace(" ", "+")
     name_url = target.replace(" ", "-").lower()
@@ -2002,7 +2172,7 @@ def module_business(target, job_id):
 # MODULE: WHOIS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_whois(target, job_id):
+def module_whois(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "whois"})
     api_key = os.environ.get("WHOIS_API_KEY", "at_free")
     try:
@@ -2037,7 +2207,7 @@ def module_whois(target, job_id):
 # MODULE: DNS RECORDS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_dns(target, job_id):
+def module_dns(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "dns"})
     lines = []
     for rtype in ["A", "AAAA", "MX", "NS", "TXT", "CNAME"]:
@@ -2053,7 +2223,7 @@ def module_dns(target, job_id):
 # MODULE: PORT SCAN
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_nmap(target, job_id):
+def module_nmap(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "nmap"})
     common_ports = {
         21:"FTP",22:"SSH",25:"SMTP",53:"DNS",80:"HTTP",
@@ -2083,7 +2253,7 @@ def module_nmap(target, job_id):
 # MODULE: GEOIP
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_geoip(target, job_id):
+def module_geoip(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "geoip"})
     try:
         ip = socket.gethostbyname(target)
@@ -2109,7 +2279,7 @@ def module_geoip(target, job_id):
 # MODULE: SHODAN
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_shodan(target, job_id):
+def module_shodan(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "shodan"})
     api_key = os.environ.get("SHODAN_API_KEY", "")
     if not api_key:
@@ -2145,7 +2315,7 @@ def module_shodan(target, job_id):
 # MODULE: VIRUSTOTAL
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_virustotal(target, job_id):
+def module_virustotal(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "virustotal"})
     api_key = os.environ.get("VT_API_KEY", "")
     if not api_key:
@@ -2178,7 +2348,7 @@ def module_virustotal(target, job_id):
 # MODULE: GOOGLE DORKS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_google_dorks(target, job_id):
+def module_google_dorks(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "dorks"})
 
     lines = []
@@ -2333,6 +2503,7 @@ MODULE_MAP = {
     "username_search":   module_username_search,
     "phone":             module_phone,
     "email_investigate": module_email_investigate,
+    "breach_leak":       module_breach_leak,
     "plate_lookup":      module_plate_lookup,
     "geolocation":       module_geolocation,
     "business":          module_business,
@@ -2348,9 +2519,11 @@ MODULE_MAP = {
 DOMAIN_IP_MODULES = {"whois", "dns", "nmap", "geoip", "shodan", "virustotal"}
 PERSON_ONLY_MODULES = {"people", "public_records", "property", "skip_trace",
                        "social_media", "social_footprint", "photo_forensics"}
+# breach_leak is intentionally NOT in PERSON_ONLY_MODULES since it also
+# serves EMAIL and USERNAME target types
 
 
-def run_investigation(job_id, target, target_type, selected_modules):
+def run_investigation(job_id, target, target_type, selected_modules, dob="", ssn="", oln=""):
     try:
         cutoff = time.time() - 3600
         stale = [jid for jid, j in list(jobs.items())
@@ -2369,7 +2542,7 @@ def run_investigation(job_id, target, target_type, selected_modules):
         for mod_id in selected_modules:
             fn = MODULE_MAP.get(mod_id)
             if fn:
-                t = threading.Thread(target=fn, args=(target, job_id), daemon=True)
+                t = threading.Thread(target=fn, args=(target, job_id, dob, ssn, oln), daemon=True)
                 threads.append(t)
                 t.start()
         for t in threads:
@@ -2464,6 +2637,9 @@ def investigate():
     target = data.get("target", "").strip()
     target_type = data.get("type", "PERSON")
     modules_param = data.get("modules", "")
+    dob = data.get("dob", "").strip()
+    ssn = data.get("ssn", "").strip()
+    oln = data.get("oln", "").strip()
     if isinstance(modules_param, str) and modules_param:
         selected_modules = modules_param.split(",")
     elif isinstance(modules_param, list):
@@ -2476,7 +2652,7 @@ def investigate():
     new_job(job_id)
     threading.Thread(
         target=run_investigation,
-        args=(job_id, target, target_type, selected_modules),
+        args=(job_id, target, target_type, selected_modules, dob, ssn, oln),
         daemon=True
     ).start()
     return jsonify({"job_id": job_id})
