@@ -53,14 +53,6 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
 .run-btn:disabled{background:#0d1720;color:#2a3a4a;cursor:not-allowed;}
 .clr-btn{padding:11px 12px;background:transparent;border:1px solid var(--border);color:var(--dim);font-family:'Share Tech Mono',monospace;font-size:10px;cursor:pointer;border-radius:4px;transition:all .2s;}
 .clr-btn:hover{border-color:var(--danger);color:var(--danger);}
-.id-toggle-btn{width:100%;padding:6px 12px;background:transparent;border:1px solid var(--border);border-radius:3px;color:var(--dim);font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:2px;cursor:pointer;text-align:left;display:flex;justify-content:space-between;align-items:center;margin-top:8px;transition:all .2s;}
-.id-toggle-btn.open{border-color:var(--accent);color:var(--accent);}
-.id-section{display:none;border:1px solid var(--border);border-top:none;border-radius:0 0 3px 3px;padding:12px 14px;background:rgba(0,0,0,0.15);}
-.id-row{display:flex;gap:6px;margin-bottom:8px;align-items:center;}
-.id-lbl{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--accent);letter-spacing:1px;width:34px;flex-shrink:0;}
-.id-field{flex:1;background:var(--panel);border:1px solid var(--border);border-radius:3px;padding:6px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:10px;outline:none;}
-.id-field:focus{border-color:var(--accent);}
-.id-select{background:var(--panel);border:1px solid var(--border);border-radius:3px;padding:6px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:10px;}
 .prog-area{padding:8px 18px 0;display:none;}
 .prog-area.show{display:block;}
 .prog-track{height:2px;background:var(--border);border-radius:2px;overflow:hidden;}
@@ -112,6 +104,8 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
 .exp-btn:disabled{border-color:var(--border);color:var(--dim);cursor:not-allowed;}
 .scanline{position:fixed;left:0;right:0;height:2px;background:linear-gradient(transparent,rgba(0,168,150,0.05),transparent);pointer-events:none;animation:scan 8s linear infinite;z-index:999;}
 @keyframes scan{0%{top:-2px}100%{top:100vh}}
+#identifierRow{display:flex!important;}
+#identifierRow input::placeholder{color:#2a3a4a;}
 </style>
 </head>
 <body>
@@ -143,17 +137,17 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
   <input id="pwUsername" type="text" placeholder="USERNAME" style="width:100%;background:#060a0f;border:1px solid #1a2a3a;border-radius:4px;padding:12px 14px;color:#c8d8e8;font-family:Share Tech Mono,monospace;font-size:14px;outline:none;text-align:center;letter-spacing:2px;" onkeydown="if(event.key==='Enter')document.getElementById('pwInput').focus()"/>
   <input id="pwInput" type="password" placeholder="PASSWORD" style="width:100%;background:#060a0f;border:1px solid #1a2a3a;border-radius:4px;padding:12px 14px;color:#c8d8e8;font-family:Share Tech Mono,monospace;font-size:14px;outline:none;text-align:center;letter-spacing:4px;" onkeydown="if(event.key==='Enter')checkPw()"/>
   <button onclick="checkPw()" style="width:100%;padding:12px;background:#00a896;color:#060a0f;border:none;border-radius:4px;font-family:Share Tech Mono,monospace;font-size:13px;font-weight:bold;letter-spacing:2px;cursor:pointer;">AUTHENTICATE</button>
-  <div id="pwErr" style="font-family:Share Tech Mono,monospace;font-size:11px;color:#ff3b3b;letter-spacing:1px;display:none;">&#9888; ACCESS DENIED &#8212; INVALID CODE</div>
+  <div id="pwErr" style="font-family:Share Tech Mono,monospace;font-size:11px;color:#ff3b3b;letter-spacing:1px;display:none;">&#9888; ACCESS DENIED — INVALID CODE</div>
 </div>
 </div>
 <div class="scanline"></div>
 <div class="app">
   <header>
-    <div class="logo"><div class="logo-ring">&#9678;</div>FIVE T // OSINT AGENT</div>
+    <div class="logo"><div class="logo-ring">◎</div>FIVE T // OSINT AGENT</div>
     <div class="hdr-right">
       <span id="userDisplay" style="font-size:10px;color:#00a896;letter-spacing:1px;"></span>
       <span><span class="dot-live"></span>LIVE</span>
-      <span id="backendStatus" style="color:var(--warn)">&#11044; BACKEND: NOT CONNECTED</span>
+      <span id="backendStatus" style="color:var(--warn)">⬤ BACKEND: NOT CONNECTED</span>
       <button onclick="showAuditLog()" id="auditBtn" style="display:none;padding:4px 10px;background:transparent;border:1px solid #00a896;color:#00a896;font-family:Share Tech Mono,monospace;font-size:9px;cursor:pointer;border-radius:2px;letter-spacing:1px;">AUDIT LOG</button>
       <button onclick="logout()" style="padding:4px 10px;background:transparent;border:1px solid #ff3b3b;color:#ff3b3b;font-family:Share Tech Mono,monospace;font-size:9px;cursor:pointer;border-radius:2px;letter-spacing:1px;">LOGOUT</button>
       <span id="clock"></span>
@@ -175,7 +169,7 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
           <div class="stat-box"><div class="stat-num" id="sQueries">0</div><div class="stat-lbl">Queries</div></div>
           <div class="stat-box"><div class="stat-num" id="sMods">0</div><div class="stat-lbl">Modules</div></div>
           <div class="stat-box"><div class="stat-num" id="sFindings">0</div><div class="stat-lbl">Findings</div></div>
-          <div class="stat-box"><div class="stat-num" id="sTime">&#8212;</div><div class="stat-lbl">Last Run</div></div>
+          <div class="stat-box"><div class="stat-num" id="sTime">—</div><div class="stat-lbl">Last Run</div></div>
         </div>
       </div>
     </aside>
@@ -183,80 +177,27 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
       <div class="search-area">
         <div class="search-row">
           <div class="input-wrap">
-            <input id="searchInput" type="text" placeholder="Target: name, domain, IP, email, username, phone, plate&hellip;"/>
+            <input id="searchInput" type="text" placeholder="Target: name, domain, IP, email, username, phone, plate…"/>
           </div>
-          <button class="run-btn" id="runBtn" onclick="runInvestigation()">&#9654; INVESTIGATE</button>
+          <button class="run-btn" id="runBtn" onclick="runInvestigation()">▶ INVESTIGATE</button>
           <button class="clr-btn" onclick="clearAll()">CLR</button>
         </div>
-        <button class="id-toggle-btn" id="idToggleBtn" onclick="toggleIdentifiers()">
-          <span>ADDITIONAL IDENTIFIERS (DOB / SSN / OLN)</span>
-          <span id="idToggleArrow">&#9660;</span>
-        </button>
-        <div class="id-section" id="idSection">
-          <div style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);margin-bottom:10px;line-height:1.6;">
-            All fields optional and independent. Used to generate targeted query links only.<br>
-            &#9888; SSN not stored &#8212; used for query generation only. DPPA: 18 U.S.C. &sect; 2721(b)
-          </div>
-          <div class="id-row">
-            <span class="id-lbl">DOB</span>
-            <select id="idDobMonth" class="id-select" style="flex:1;">
-              <option value="">MM</option>
-              <option value="01">01 Jan</option><option value="02">02 Feb</option><option value="03">03 Mar</option>
-              <option value="04">04 Apr</option><option value="05">05 May</option><option value="06">06 Jun</option>
-              <option value="07">07 Jul</option><option value="08">08 Aug</option><option value="09">09 Sep</option>
-              <option value="10">10 Oct</option><option value="11">11 Nov</option><option value="12">12 Dec</option>
-            </select>
-            <select id="idDobDay" class="id-select" style="flex:1;">
-              <option value="">DD</option>
-              <option value="01">01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option>
-              <option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option>
-              <option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15">15</option>
-              <option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option><option value="20">20</option>
-              <option value="21">21</option><option value="22">22</option><option value="23">23</option><option value="24">24</option><option value="25">25</option>
-              <option value="26">26</option><option value="27">27</option><option value="28">28</option><option value="29">29</option><option value="30">30</option><option value="31">31</option>
-            </select>
-            <input id="idDobYear" class="id-field" type="text" placeholder="YYYY" maxlength="4" style="flex:1;" />
-          </div>
-          <div class="id-row">
-            <span class="id-lbl">SSN</span>
-            <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
-              <label style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);cursor:pointer;white-space:nowrap;"><input type="radio" name="ssnType" value="last4" checked onchange="updateSsnField()" style="margin-right:3px;">LAST4</label>
-              <label style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);cursor:pointer;white-space:nowrap;"><input type="radio" name="ssnType" value="first5" onchange="updateSsnField()" style="margin-right:3px;">FIRST5</label>
-              <label style="font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);cursor:pointer;white-space:nowrap;"><input type="radio" name="ssnType" value="full" onchange="updateSsnField()" style="margin-right:3px;">FULL</label>
-            </div>
-            <input id="idSsnValue" class="id-field" type="password" placeholder="LAST 4 DIGITS" maxlength="4" autocomplete="off" style="flex:1;letter-spacing:3px;" />
-          </div>
-          <div class="id-row">
-            <span class="id-lbl">OLN</span>
-            <input id="idOlnNumber" class="id-field" type="text" placeholder="LICENSE NUMBER (partial ok)" style="flex:1;" />
-            <select id="idOlnState" class="id-select" style="width:64px;flex-shrink:0;">
-              <option value="NM">NM</option><option value="AZ">AZ</option><option value="TX">TX</option>
-              <option value="CO">CO</option><option value="CA">CA</option><option value="FL">FL</option>
-              <option value="NY">NY</option><option value="IL">IL</option><option value="OH">OH</option>
-              <option value="GA">GA</option><option value="NC">NC</option><option value="MI">MI</option>
-              <option value="PA">PA</option><option value="WA">WA</option><option value="OR">OR</option>
-            </select>
-          </div>
-          <div class="id-row">
-            <span class="id-lbl">EMP</span>
-            <input id="idEmployer" class="id-field" type="text" placeholder="EMPLOYER (optional)" style="flex:1;" />
-          </div>
-          <div class="id-row" style="margin-bottom:0;">
-            <span class="id-lbl">ADR</span>
-            <input id="idStreet" class="id-field" type="text" placeholder="STREET (optional)" style="flex:1;" />
-            <input id="idZip" class="id-field" type="text" placeholder="ZIP" maxlength="5" style="width:58px;flex-shrink:0;" />
-          </div>
+        <div id="identifierRow" style="display:none;margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+          <input id="dobInput" type="text" placeholder="DOB: MM/DD/YYYY" style="flex:1;min-width:130px;background:var(--panel);border:1px solid var(--border);border-radius:3px;padding:6px 10px;color:var(--text);font-family:Share Tech Mono,monospace;font-size:11px;outline:none;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'"/>
+          <input id="ssnInput" type="text" placeholder="SSN: XXX-XX-XXXX" maxlength="11" style="flex:1;min-width:130px;background:var(--panel);border:1px solid var(--border);border-radius:3px;padding:6px 10px;color:var(--text);font-family:Share Tech Mono,monospace;font-size:11px;outline:none;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" oninput="maskSSN(this)"/>
+          <input id="olnInput" type="text" placeholder="OLN / DL#" style="flex:1;min-width:130px;background:var(--panel);border:1px solid var(--border);border-radius:3px;padding:6px 10px;color:var(--text);font-family:Share Tech Mono,monospace;font-size:11px;outline:none;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'"/>
+          <button onclick="clearIdentifiers()" style="padding:6px 10px;background:transparent;border:1px solid var(--border);color:var(--dim);font-family:Share Tech Mono,monospace;font-size:9px;cursor:pointer;border-radius:3px;white-space:nowrap;" title="Clear identifiers">✕ CLR ID</button>
         </div>
       </div>
       <div class="prog-area" id="progArea">
         <div class="prog-track"><div class="prog-fill" id="progFill"></div></div>
-        <div class="prog-lbl" id="progLbl">INITIALIZING&hellip;</div>
+        <div class="prog-lbl" id="progLbl">INITIALIZING…</div>
       </div>
       <div class="results" id="results">
         <div class="empty" id="emptyState">
-          <div class="empty-icon">&#9678;</div>
+          <div class="empty-icon">◎</div>
           <div class="empty-title">AWAITING TARGET</div>
-          <div class="empty-sub">20 OSINT modules running in parallel. People Search, Skip Trace, Social Footprint, Hit &amp; Run, Public Records, Property, Photo Forensics, Username, Phone, Email, Plate, Business, Geolocation, WHOIS, DNS, Shodan, VirusTotal &amp; more. Google dorks auto-integrated.</div>
+          <div class="empty-sub">21 OSINT modules running in parallel. People Search, Skip Trace, Social Footprint, Hit & Run, Public Records, Property, Photo Forensics, Username, Phone, Email, Plate, Business, Geolocation, WHOIS, DNS, Shodan, VirusTotal & more.</div>
           <div class="backend-cfg" id="backendCfg">
             <div class="cfg-label">BACKEND URL</div>
             <div class="cfg-row">
@@ -274,12 +215,12 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
         <div id="historyList"><div style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);">No searches yet</div></div>
       </div>
       <div style="margin-top:auto;display:flex;flex-direction:column;gap:8px;">
-        <button class="ai-btn" id="aiBtn" onclick="analyzeWithAI()" disabled>&#9889; ANALYZE WITH AI</button>
-        <button class="exp-btn" id="expBtn" onclick="exportReport()" disabled>&#11015; EXPORT</button>
+        <button class="ai-btn" id="aiBtn" onclick="analyzeWithAI()" disabled>⚡ ANALYZE WITH AI</button>
+        <button class="exp-btn" id="expBtn" onclick="exportReport()" disabled>⬇ EXPORT</button>
         <div style="font-family:Share Tech Mono,monospace;font-size:9px;color:var(--dim);text-align:center;line-height:1.7;margin-top:4px;">
           Parallel execution<br>
-          20 OSINT modules<br>
-          Auto dorks integrated<br>
+          21 OSINT modules<br>
+          Verified free tools<br>
           Export to .txt
         </div>
       </div>
@@ -288,6 +229,7 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
 </div>
 
 <script>
+// ── Config ────────────────────────────────────────────────────────────────────
 let authToken = null;
 let BACKEND = 'https://sentinel-osint-ui.onrender.com';
 let targetType = 'PERSON';
@@ -296,14 +238,12 @@ let running = false;
 let allResults = {};
 let history = JSON.parse(localStorage.getItem('fivet_history') || '[]');
 let stats = JSON.parse(localStorage.getItem('fivet_stats') || '{"queries":0,"findings":0}');
-let currentUser = null;
-let isAdmin = false;
-let auditLog = JSON.parse(localStorage.getItem('fivet_audit') || '[]');
-let failedLogins = {};
 
-const TARGET_TYPES = ['PERSON','COMPANY','CMV','DOMAIN','IP','EMAIL','USERNAME','PHONE','PLATE','LOCATION'];
+const TARGET_TYPES = ['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','PLATE','LOCATION'];
 
+// ── Module definitions — all paywall tools removed, all sources verified free ──
 const ALL_MODULES = [
+  // PERSON
   { id:'people',            name:'People Search',           tag:'PEOP',  types:['PERSON'] },
   { id:'public_records',    name:'Public Records',          tag:'PREC',  types:['PERSON'] },
   { id:'property',          name:'Property Records',        tag:'PROP',  types:['PERSON','COMPANY'] },
@@ -311,61 +251,46 @@ const ALL_MODULES = [
   { id:'social_media',      name:'Social Media Search',     tag:'SOCL',  types:['PERSON','USERNAME'] },
   { id:'social_footprint',  name:'Social Footprint',        tag:'FOOT',  types:['PERSON'] },
   { id:'photo_forensics',   name:'Photo & Video Forensics', tag:'FOTO',  types:['PERSON','USERNAME'] },
+  // PLATE / LOCATION
   { id:'hit_and_run',       name:'Hit & Run / Vehicle',     tag:'H&R',   types:['PLATE','LOCATION'] },
   { id:'plate_lookup',      name:'License Plate Lookup',    tag:'PLATE', types:['PLATE'] },
+  // USERNAME
   { id:'username_search',   name:'Username Search',         tag:'USER',  types:['USERNAME'] },
+  // PHONE
   { id:'phone',             name:'Phone Lookup',            tag:'PHONE', types:['PHONE'] },
+  // EMAIL
   { id:'email_investigate', name:'Email Investigation',     tag:'EMAIL', types:['EMAIL'] },
+  { id:'breach_leak',       name:'Breach & Leak',           tag:'LEAK',  types:['PERSON','EMAIL','USERNAME'] },
+  // COMPANY
   { id:'business',          name:'Business Search',         tag:'BIZ',   types:['COMPANY'] },
+  // LOCATION / IP
   { id:'geolocation',       name:'Geolocation Intel',       tag:'GEO',   types:['LOCATION','IP'] },
+  // DOMAIN / IP
   { id:'whois',             name:'WHOIS Lookup',            tag:'WHOIS', types:['DOMAIN','IP'] },
   { id:'dns',               name:'DNS Records',             tag:'DNS',   types:['DOMAIN'] },
   { id:'nmap',              name:'Port Scan',               tag:'NMAP',  types:['DOMAIN','IP'] },
   { id:'geoip',             name:'GeoIP Location',          tag:'GEOIP', types:['IP','DOMAIN'] },
   { id:'shodan',            name:'Shodan',                  tag:'SHDN',  types:['IP','DOMAIN'] },
-{ id:'virustotal', name:'VirusTotal',      tag:'VT',   types:['DOMAIN','IP','EMAIL'] },
-  { id:'cmv',        name:'CMV / Trucking',  tag:'CMV',  types:['CMV','COMPANY'] },
+  { id:'virustotal',        name:'VirusTotal',              tag:'VT',    types:['DOMAIN','IP','EMAIL'] },
+  // DORKS — available all types, never auto-selected
+  { id:'dorks',             name:'Google Dorks',            tag:'DORK',  types:['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','PLATE','LOCATION'] },
 ];
-
-function toggleIdentifiers() {
-  const sec = document.getElementById('idSection');
-  const arrow = document.getElementById('idToggleArrow');
-  const btn = document.getElementById('idToggleBtn');
-  const isOpen = sec.style.display !== 'none';
-  sec.style.display = isOpen ? 'none' : 'block';
-  arrow.innerHTML = isOpen ? '&#9660;' : '&#9650;';
-  btn.classList.toggle('open', !isOpen);
-}
-
-function updateSsnField() {
-  const type = document.querySelector('input[name="ssnType"]:checked').value;
-  const field = document.getElementById('idSsnValue');
-  if (type === 'last4') { field.maxLength = 4; field.placeholder = 'LAST 4 DIGITS'; }
-  else if (type === 'first5') { field.maxLength = 5; field.placeholder = 'FIRST 5 DIGITS'; }
-  else { field.maxLength = 11; field.placeholder = 'XXX-XX-XXXX'; }
-  field.value = '';
-}
-
-function getIdentifierParams() {
-  return {
-    dob_month:  document.getElementById('idDobMonth')?.value  || '',
-    dob_day:    document.getElementById('idDobDay')?.value    || '',
-    dob_year:   document.getElementById('idDobYear')?.value   || '',
-    ssn_type:   document.querySelector('input[name="ssnType"]:checked')?.value || 'last4',
-    ssn_value:  document.getElementById('idSsnValue')?.value  || '',
-    oln_number: document.getElementById('idOlnNumber')?.value || '',
-    oln_state:  document.getElementById('idOlnState')?.value  || 'NM',
-    employer:   document.getElementById('idEmployer')?.value  || '',
-    street:     document.getElementById('idStreet')?.value    || '',
-    zip:        document.getElementById('idZip')?.value       || '',
-  };
-}
 
 function init() {
   if (BACKEND) document.getElementById('backendUrl').value = BACKEND;
-  renderTypes(); renderModules(); renderHistory(); updateStats();
+  renderTypes();
+  renderModules();
+  renderHistory();
+  updateStats();
   setInterval(() => { document.getElementById('clock').textContent = new Date().toLocaleTimeString(); }, 1000);
   if (BACKEND) testBackend(true);
+  const cfg = document.getElementById('backendCfg');
+  if (cfg) cfg.style.display = isAdmin ? 'block' : 'none';
+  const auditBtn = document.getElementById('auditBtn');
+  if (auditBtn) auditBtn.style.display = isAdmin ? 'inline-block' : 'none';
+  // Show identifier row on load since default type is PERSON
+  const row = document.getElementById('identifierRow');
+  if (row) row.style.display = 'flex';
 }
 
 function renderTypes() {
@@ -381,6 +306,9 @@ function setType(t, btn) {
   btn.classList.add('active');
   activeModIds = new Set();
   renderModules();
+  // Show identifier fields only for PERSON searches
+  const row = document.getElementById('identifierRow');
+  if (row) row.style.display = t === 'PERSON' ? 'flex' : 'none';
 }
 
 function renderModules() {
@@ -388,7 +316,11 @@ function renderModules() {
   list.innerHTML = '';
   ALL_MODULES.forEach(mod => {
     const relevant = mod.types && mod.types.includes(targetType);
-    if (relevant && !activeModIds.has(mod.id)) activeModIds.add(mod.id);
+    if (relevant && mod.id !== 'dorks' && !activeModIds.has(mod.id)) {
+      activeModIds.add(mod.id);
+    }
+    // Always ensure dorks starts unchecked
+    activeModIds.delete('dorks');
     if (!relevant) return;
     const active = activeModIds.has(mod.id);
     const el = document.createElement('div');
@@ -410,24 +342,27 @@ function renderModules() {
 async function testBackend(silent) {
   const url = document.getElementById('backendUrl').value.trim().replace(/\/$/, '');
   if (!url) { if (!silent) showCfgMsg('Enter your backend URL first.', 'warn'); return; }
-  BACKEND = url; localStorage.setItem('fivet_backend', url);
+  BACKEND = url;
+  localStorage.setItem('fivet_backend', url);
   const statusEl = document.getElementById('backendStatus');
   try {
-    statusEl.style.color = 'var(--warn)'; statusEl.textContent = '\u2B24 BACKEND: TESTING\u2026';
+    statusEl.style.color = 'var(--warn)';
+    statusEl.textContent = '⬤ BACKEND: TESTING…';
     const res = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(8000) });
     const data = await res.json();
-    statusEl.style.color = 'var(--accent3)'; statusEl.textContent = '\u2B24 BACKEND: CONNECTED';
-    const tools = Object.entries(data.tools || {}).map(([k,v]) => `${k}:${v?'\u2713':'\u2717'}`).join(' ');
+    statusEl.style.color = 'var(--accent3)';
+    statusEl.textContent = '⬤ BACKEND: CONNECTED';
+    const tools = Object.entries(data.tools || {}).map(([k,v]) => `${k}:${v?'✓':'✗'}`).join(' ');
     if (!silent) showCfgMsg(`Connected! Tools: ${tools}`, 'ok');
   } catch(e) {
-    statusEl.style.color = 'var(--danger)'; statusEl.textContent = '\u2B24 BACKEND: OFFLINE';
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = '⬤ BACKEND: OFFLINE';
     if (!silent) showCfgMsg(`Cannot reach backend: ${e.message}`, 'err');
   }
 }
 
 function showCfgMsg(msg, type) {
   const el = document.getElementById('cfgMsg');
-  if (!el) return;
   el.textContent = msg;
   el.style.color = type==='ok' ? 'var(--accent3)' : type==='err' ? 'var(--danger)' : 'var(--warn)';
 }
@@ -437,9 +372,10 @@ async function runInvestigation() {
   if (!query || running) return;
   if (!BACKEND) { showCfgMsg('Set your backend URL first!', 'err'); return; }
 
-  running = true; allResults = {};
+  running = true;
+  allResults = {};
   document.getElementById('runBtn').disabled = true;
-  document.getElementById('runBtn').textContent = '\u23F3 RUNNING';
+  document.getElementById('runBtn').textContent = '⏳ RUNNING';
   document.getElementById('expBtn').disabled = true;
   document.getElementById('aiBtn').disabled = true;
 
@@ -452,7 +388,9 @@ async function runInvestigation() {
   resultsEl.innerHTML = '';
   const mods = [...activeModIds];
   const modCards = {};
-  setProgress(true, 0, 'LAUNCHING MODULES\u2026');
+
+  setProgress(true, 0, 'LAUNCHING MODULES…');
+
   mods.forEach(id => {
     const mod = ALL_MODULES.find(m => m.id === id);
     if (!mod) return;
@@ -464,13 +402,11 @@ async function runInvestigation() {
   const t0 = Date.now();
 
   try {
-    const idParams = getIdentifierParams();
-    const payload = { target: query, type: targetType, modules: mods.join(','), ...idParams };
-    const res = await fetch(`${BACKEND}/api/investigate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    const dob = document.getElementById('dobInput')?.value.trim() || '';
+    const ssn = document.getElementById('ssnInput')?.value.trim() || '';
+    const oln = document.getElementById('olnInput')?.value.trim() || '';
+    const params = new URLSearchParams({ target: query, type: targetType, modules: mods.join(','), dob, ssn, oln });
+    const res = await fetch(`${BACKEND}/api/investigate?${params}`, { method: 'GET' });
     const { job_id } = await res.json();
 
     let done = 0;
@@ -483,7 +419,9 @@ async function runInvestigation() {
         } else if (event.type === 'module_done') {
           updateCard(modCards[event.data.module], 'done', event.data.result);
           allResults[event.data.module] = event.data.result;
-          stats.findings++; updateStats(); done++;
+          stats.findings++;
+          updateStats();
+          done++;
           setProgress(true, Math.round(done / mods.length * 100), `${done}/${mods.length} MODULES COMPLETE`);
         } else if (event.type === 'done') {
           es.close(); resolve();
@@ -505,10 +443,11 @@ async function runInvestigation() {
   stats.lastTime = elapsed + 's';
   document.getElementById('sTime').textContent = elapsed + 's';
   localStorage.setItem('fivet_stats', JSON.stringify(stats));
-  setProgress(true, 100, `\u2713 COMPLETE \u2014 ${mods.length} modules in ${elapsed}s`);
+  setProgress(true, 100, `✓ COMPLETE — ${mods.length} modules in ${elapsed}s`);
   setTimeout(() => setProgress(false), 3500);
+
   document.getElementById('runBtn').disabled = false;
-  document.getElementById('runBtn').textContent = '\u25BA INVESTIGATE';
+  document.getElementById('runBtn').textContent = '▶ INVESTIGATE';
   document.getElementById('expBtn').disabled = false;
   document.getElementById('aiBtn').disabled = false;
   running = false;
@@ -516,16 +455,17 @@ async function runInvestigation() {
 
 function createCard(id, name, tag) {
   const el = document.createElement('div');
-  el.className = 'card'; el.id = `card-${id}`;
+  el.className = 'card';
+  el.id = `card-${id}`;
   el.innerHTML = `
     <div class="card-hdr" onclick="toggleCard('${id}')">
       <span class="card-badge">${tag}</span>
       <span class="card-title">${name}</span>
       <span class="card-status running" id="cs-${id}"><span class="spinner"></span> PENDING</span>
-      <span class="card-toggle open" id="ct-${id}">&#9660;</span>
+      <span class="card-toggle open" id="ct-${id}">▼</span>
     </div>
     <div class="card-body open" id="cb-${id}">
-      <div class="card-content" id="cc-${id}">Waiting to start&hellip;</div>
+      <div class="card-content" id="cc-${id}">Waiting to start…</div>
     </div>`;
   return el;
 }
@@ -538,12 +478,12 @@ function updateCard(cardEl, state, content) {
   statusEl.className = `card-status ${state}`;
   if (state === 'running') {
     statusEl.innerHTML = '<span class="spinner"></span> SCANNING';
-    document.getElementById(`cc-${id}`).textContent = 'Running\u2026';
+    document.getElementById(`cc-${id}`).textContent = 'Running…';
   } else if (state === 'done') {
-    statusEl.innerHTML = '\u2713 DONE';
+    statusEl.innerHTML = '✓ DONE';
     document.getElementById(`cc-${id}`).textContent = content || 'No results.';
   } else if (state === 'error') {
-    statusEl.innerHTML = '\u2717 ERROR';
+    statusEl.innerHTML = '✗ ERROR';
     document.getElementById(`cc-${id}`).textContent = content || 'Module failed.';
   }
 }
@@ -561,12 +501,13 @@ function setProgress(show, pct, label) {
 }
 
 function clearAll() {
-  allResults = {}; activeModIds = new Set();
+  allResults = {};
+  activeModIds = new Set();
   document.getElementById('results').innerHTML = `
     <div class="empty" id="emptyState">
-      <div class="empty-icon">&#9678;</div>
+      <div class="empty-icon">◎</div>
       <div class="empty-title">AWAITING TARGET</div>
-      <div class="empty-sub">20 OSINT modules running in parallel. All sources verified free. Auto dorks integrated.</div>
+      <div class="empty-sub">21 OSINT modules running in parallel. All sources verified free.</div>
       <div class="backend-cfg" id="backendCfg">
         <div class="cfg-label">BACKEND URL</div>
         <div class="cfg-row">
@@ -590,8 +531,13 @@ function addHistory(q) {
 
 function renderHistory() {
   const el = document.getElementById('historyList');
-  if (!history.length) { el.innerHTML = '<div style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);">No searches yet</div>'; return; }
-  el.innerHTML = history.map(h => `<div class="history-item" onclick="document.getElementById('searchInput').value='${h.replace(/'/g,"\\'")}'"> ${h}</div>`).join('');
+  if (!history.length) {
+    el.innerHTML = '<div style="font-family:Share Tech Mono,monospace;font-size:10px;color:var(--dim);">No searches yet</div>';
+    return;
+  }
+  el.innerHTML = history.map(h =>
+    `<div class="history-item" onclick="document.getElementById('searchInput').value='${h.replace(/'/g,"\\'")}';">${h}</div>`
+  ).join('');
 }
 
 function updateStats() {
@@ -603,8 +549,17 @@ function updateStats() {
 function exportReport() {
   const target = document.getElementById('searchInput').value.trim();
   if (!Object.keys(allResults).length) return;
-  let r = `FIVE T OSINT REPORT\n${"=".repeat(50)}\nTarget: ${target}\nType: ${targetType}\nDate: ${new Date().toUTCString()}\n${"=".repeat(50)}\n`;
-  Object.entries(allResults).forEach(([mod, content]) => { r += `\n\n${mod.toUpperCase()}\n${"-".repeat(30)}\n${content}\n`; });
+  const expDob = document.getElementById('dobInput')?.value.trim() || '';
+  const expSsn = document.getElementById('ssnInput')?.value.trim() || '';
+  const expOln = document.getElementById('olnInput')?.value.trim() || '';
+  let r = `FIVE T OSINT REPORT\n${'='.repeat(50)}\nTarget: ${target}\nType: ${targetType}\nDate: ${new Date().toUTCString()}\n`;
+  if (expDob) r += `DOB: ${expDob}\n`;
+  if (expSsn) r += `SSN: ${expSsn.substring(0,3)}-**-****\n`;
+  if (expOln) r += `OLN: ${expOln}\n`;
+  r += `${'='.repeat(50)}\n`;
+  Object.entries(allResults).forEach(([mod, content]) => {
+    r += `\n\n${mod.toUpperCase()}\n${'-'.repeat(30)}\n${content}\n`;
+  });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([r], { type: 'text/plain' }));
   a.download = `fivet_${target.replace(/\s+/g,'_')}.txt`;
@@ -614,77 +569,101 @@ function exportReport() {
 function analyzeWithAI() {
   const target = document.getElementById('searchInput').value.trim();
   if (!Object.keys(allResults).length) return;
+
   let resultsSummary = '';
   Object.entries(allResults).forEach(([mod, content]) => {
     resultsSummary += `\n\n=== ${mod.toUpperCase()} ===\n${content}`;
   });
+
+  const dob = document.getElementById('dobInput')?.value.trim() || '';
+  const ssn = document.getElementById('ssnInput')?.value.trim() || '';
+  const oln = document.getElementById('olnInput')?.value.trim() || '';
+  const identifiers = [
+    dob ? `DOB: ${dob}` : '',
+    ssn ? `SSN: ${ssn.substring(0,3)}-**-****` : '',
+    oln ? `OLN/DL: ${oln}` : ''
+  ].filter(Boolean).join(' | ');
 
   const prompt = `You are an OSINT investigator assistant for Parnall Law Firm, a personal injury law firm in Albuquerque, New Mexico. You are assisting investigators Rick Anglada, T. Lopez, and C. McPherson.
 
 Analyze the following FIVE T OSINT investigation results for: ${target}
 Target Type: ${targetType}
 Investigation Date: ${new Date().toUTCString()}
+${identifiers ? `Known Identifiers: ${identifiers}` : 'No additional identifiers provided.'}
 
-Your response is a working investigative briefing — not a formal memo. Plain prose, no headers with pound signs, no bullet symbol walls. Write the way an experienced investigator briefs a colleague: direct, specific, actionable.
+Based on the raw module output below, provide:
 
-SECTION 1 — SITUATION SUMMARY
-Two to three sentences. Who is the subject, what was the run targeting, and what is the headline finding. If identity is unconfirmed, say so.
+1. MOST LIKELY CURRENT ADDRESS — with confidence level (High/Medium/Low) and which sources corroborate it
+2. PHONE NUMBERS FOUND — list each with carrier/type if available
+3. EMPLOYMENT LEADS — employer name, address if findable, source
+4. SOCIAL MEDIA PROFILES — which are most likely to match the subject and why
+5. RELATIVES & ASSOCIATES — names and locations useful for indirect contact or service of process
+6. RED FLAGS & INCONSISTENCIES — anything that contradicts across sources
+7. RECOMMENDED NEXT STEPS — specific actions ranked by priority
+8. DRAFT INVESTIGATIVE MEMO — formatted for the case file, ready to use
 
-SECTION 2 — CONFIRMED FINDINGS
-State only what the sources actually returned. For each finding give the source and confidence level.
-- Current address (High/Medium/Low confidence — specify which sources corroborate)
-- Phone numbers found (carrier and line type if returned)
-- Employer or employment leads (source and address if available)
-- Social media profiles confirmed or likely matched (explain why)
-- Relatives and associates useful for indirect contact or substitute service
-
-SECTION 3 — GAPS AND WHAT THEY MEAN
-What is missing and what that means operationally. Example: no current address returned = serve attempt not ready, escalate. No phone number = cannot attempt contact verification before serve. Do not list gaps that are irrelevant to the target type.
-
-SECTION 4 — RED FLAGS AND INCONSISTENCIES
-Anything that conflicts across sources — different addresses on different platforms, name variations, DOB mismatches, address history that suggests evasion, VoIP numbers, recently created social profiles. Flag anything relevant to personal injury litigation, damages assessment, or service of process.
-
-SECTION 5 — NEXT STEPS (PRIORITIZED)
-Specific actions in order. Do not say "consider" or "may want to" — say what to do. Example: "Run NM Voter Portal with DOB 04/06/1991 — highest confidence free address source." Maximum eight steps.
-
-SECTION 6 — PAID TOOL ESCALATION
-Only include this section if free-tier results are insufficient to support service of process or the investigative objective. Recommend the specific tool, what to query, and what it will return. Use this reference:
-
-IDI (idiCORE) — First escalation for any skip trace. Best for: current address confirmation, SSN trace, address history with date ranges, phone development, employment verification. Query with full name + DOB + last known address. Cost: moderate, firm account required.
-
-TLO (TransUnion) — Stronger than IDI on financial records and associate networks. Best for: bankruptcy, liens, judgments, deep relative/associate mapping, prior addresses going back further. Use when IDI returns stale addresses or subject has complex history.
-
-IRB Search — Best for: workers comp claim history, employment verification across states, insurance claims cross-reference. Critical for PI damages cases — confirms or undermines prior injury claims.
-
-CLEAR (Thomson Reuters) — Best for: corporate structure research, registered agent identification, CMV carrier cases, business litigation history. Use when the defendant is a company or carrier, not an individual.
-
-LexisNexis Accurint — Best for: comprehensive multi-state background, court records aggregation, professional license verification. Use when subject has out-of-state history IDI misses.
-
-Magellan Investigations (magellaninvestigations.com) — Best for: bank and brokerage account locates, utility traces, PO Box physical address, ISO claims reports, employment locate requiring days of research. Use for judgment enforcement and asset investigations after standard tools fail.
-
-Tracers — Last resort. Most expensive, most comprehensive. Use only when IDI and TLO both return insufficient results and the case value justifies the cost.
-
-If free-tier results are sufficient for the immediate objective, omit Section 6 entirely.
+Keep the memo concise and professional. Flag anything relevant to personal injury litigation, hit and run cases, or service of process.
 
 INVESTIGATION RESULTS:
 ${resultsSummary}`;
 
-  window.open(`https://claude.ai/new?q=${encodeURIComponent(prompt)}`, '_blank');
+  const encoded = encodeURIComponent(prompt);
+  window.open(`https://claude.ai/new?q=${encoded}`, '_blank');
 }
+
+document.getElementById('searchInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') runInvestigation();
+});
+
+function maskSSN(input) {
+  // Auto-format SSN as XXX-XX-XXXX, storing raw digits separately
+  let raw = input.value.replace(/\D/g, '').substring(0, 9);
+  let masked = '';
+  if (raw.length > 0) masked = raw.substring(0, 3);
+  if (raw.length > 3) masked += '-' + raw.substring(3, 5);
+  if (raw.length > 5) masked += '-' + raw.substring(5, 9);
+  input.value = masked;
+  // Store raw value for transmission
+  input.dataset.raw = raw;
+}
+
+function clearIdentifiers() {
+  const dob = document.getElementById('dobInput');
+  const ssn = document.getElementById('ssnInput');
+  const oln = document.getElementById('olnInput');
+  if (dob) dob.value = '';
+  if (ssn) { ssn.value = ''; ssn.dataset.raw = ''; }
+  if (oln) oln.value = '';
+}
+
+function showIdentifierRow() {
+  const row = document.getElementById('identifierRow');
+  if (row) row.style.display = 'flex';
+}
+</script>
+
+<script>
+// ── Authentication — passwords stored in Render env vars, NOT here ────────────
+let currentUser = null;
+let isAdmin = false;
+let auditLog = JSON.parse(localStorage.getItem('fivet_audit') || '[]');
+let failedLogins = {};
 
 async function checkPw() {
   const username = document.getElementById('pwUsername').value.trim().toLowerCase();
   const password = document.getElementById('pwInput').value;
   const now = new Date().toISOString();
+
   if (failedLogins[username] && failedLogins[username].count >= 5) {
     const diff = (new Date() - new Date(failedLogins[username].lastAttempt)) / 1000 / 60;
     if (diff < 30) {
-      showPwErr(`Account locked. Try again in ${Math.ceil(30 - diff)} minutes.`);
+      showPwErr(`Account locked. Try again in ${Math.ceil(30-diff)} minutes.`);
       return;
     } else {
       failedLogins[username] = { count: 0 };
     }
   }
+
   try {
     const res = await fetch(`${BACKEND}/api/auth/login`, {
       method: 'POST',
@@ -692,15 +671,12 @@ async function checkPw() {
       body: JSON.stringify({ username, password })
     });
     const data = await res.json();
+
     if (data.success) {
       authToken = data.token;
       currentUser = { username, role: data.role, name: data.name, token: data.token };
       isAdmin = data.role === 'admin';
       failedLogins[username] = { count: 0 };
-      if (isAdmin) {
-        const ab = document.getElementById('auditBtn');
-        if (ab) ab.style.display = 'inline-block';
-      }
       sessionStorage.setItem('fivet_auth', JSON.stringify(currentUser));
       document.getElementById('lockscreen').style.display = 'none';
       logAudit(username, 'LOGIN_SUCCESS', `User ${data.name} logged in`);
@@ -710,17 +686,18 @@ async function checkPw() {
       if (!failedLogins[username]) failedLogins[username] = { count: 0 };
       failedLogins[username].count++;
       failedLogins[username].lastAttempt = now;
-      showPwErr(`\u26A0 Invalid credentials (${failedLogins[username].count}/5 attempts)`);
+      showPwErr(`⚠ Invalid credentials (${failedLogins[username].count}/5 attempts)`);
       document.getElementById('pwInput').value = '';
     }
   } catch(e) {
-    showPwErr('\u26A0 Cannot reach backend \u2014 check connection');
+    showPwErr('⚠ Cannot reach backend — check connection');
   }
 }
 
 function showPwErr(msg) {
   const err = document.getElementById('pwErr');
-  err.textContent = msg; err.style.display = 'block';
+  err.textContent = msg;
+  err.style.display = 'block';
   setTimeout(() => err.style.display = 'none', 4000);
 }
 
@@ -735,16 +712,23 @@ function updateUserDisplay() {
   if (currentUser) {
     const hdr = document.getElementById('userDisplay');
     if (hdr) hdr.textContent = `${currentUser.name} (${currentUser.role.toUpperCase()})`;
-    const ab = document.getElementById('auditBtn');
-    if (ab) ab.style.display = isAdmin ? 'inline-block' : 'none';
   }
 }
 
 async function logout() {
   try {
-    if (authToken) await fetch(`${BACKEND}/api/auth/logout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: authToken }) });
+    if (authToken) {
+      await fetch(`${BACKEND}/api/auth/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: authToken })
+      });
+    }
   } catch(e) {}
-  sessionStorage.removeItem('fivet_auth'); currentUser = null; isAdmin = false; authToken = null;
+  sessionStorage.removeItem('fivet_auth');
+  currentUser = null;
+  isAdmin = false;
+  authToken = null;
   location.reload();
 }
 
@@ -753,7 +737,7 @@ function showAuditLog() {
   const win = window.open('', '_blank');
   win.document.write('<html><head><title>FIVE T Audit Log</title>');
   win.document.write('<style>body{background:#060a0f;color:#c8d8e8;font-family:monospace;padding:20px;}h1{color:#00a896;letter-spacing:3px;}table{width:100%;border-collapse:collapse;}th{background:#0b1118;color:#00a896;padding:8px;text-align:left;font-size:11px;}td{padding:6px 8px;font-size:11px;border-bottom:1px solid #1a2a3a;}.login{color:#39ff14}.logout{color:#4a6070}.search{color:#ffb300}.failed{color:#ff3b3b}</style></head><body>');
-  win.document.write('<h1>&#9678; FIVE T // AUDIT LOG</h1>');
+  win.document.write('<h1>◎ FIVE T // AUDIT LOG</h1>');
   win.document.write(`<p style="color:#4a6070;font-size:11px;margin-bottom:16px">Total: ${auditLog.length} | ${new Date().toISOString()}</p>`);
   win.document.write('<table><tr><th>TIMESTAMP</th><th>USER</th><th>ACTION</th><th>DETAIL</th><th>TARGET</th></tr>');
   auditLog.forEach(e => {
@@ -763,28 +747,34 @@ function showAuditLog() {
   win.document.write('</table></body></html>');
 }
 
-document.getElementById('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') runInvestigation(); });
-
 window.addEventListener('load', async () => {
   const saved = sessionStorage.getItem('fivet_auth');
   if (saved) {
     try {
-      const parsed = JSON.parse(saved); authToken = parsed.token;
-      const res = await fetch(`${BACKEND}/api/auth/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: authToken }) });
+      const parsed = JSON.parse(saved);
+      authToken = parsed.token;
+      const res = await fetch(`${BACKEND}/api/auth/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: authToken })
+      });
       const data = await res.json();
       if (data.valid) {
         currentUser = { username: data.username, role: data.role, name: data.name };
         isAdmin = data.role === 'admin';
-        if (isAdmin) { const ab = document.getElementById('auditBtn'); if (ab) ab.style.display = 'inline-block'; }
         document.getElementById('lockscreen').style.display = 'none';
-        updateUserDisplay(); init();
-      } else { sessionStorage.removeItem('fivet_auth'); }
+        updateUserDisplay();
+        init();
+      } else {
+        sessionStorage.removeItem('fivet_auth');
+      }
     } catch(e) {
       try {
-        currentUser = JSON.parse(saved); isAdmin = currentUser.role === 'admin';
-        if (isAdmin) { const ab = document.getElementById('auditBtn'); if (ab) ab.style.display = 'inline-block'; }
+        currentUser = JSON.parse(saved);
+        isAdmin = currentUser.role === 'admin';
         document.getElementById('lockscreen').style.display = 'none';
-        updateUserDisplay(); init();
+        updateUserDisplay();
+        init();
       } catch(e2) { sessionStorage.removeItem('fivet_auth'); }
     }
   }
