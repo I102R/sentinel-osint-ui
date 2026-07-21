@@ -7,6 +7,8 @@ All modules audited June 2026 — paywall tools removed, free tools verified.
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 import subprocess, threading, json, os, time, queue, socket, re
+import urllib.request, urllib.parse, urllib.error
+import tempfile, shutil
 from datetime import datetime
 
 app = Flask(__name__)
@@ -22,32 +24,19 @@ except:
     pass
 
 CORS(app)
-
-@app.after_request
-def after_request(response):
-    # Do not add CORS headers here — Flask-CORS handles it above
-    # Adding them here causes duplicate headers which breaks login
-    return response
-
-@app.before_request
-def handle_options():
-    from flask import request as req
-    if req.method == 'OPTIONS':
-        from flask import make_response
-        response = make_response()
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-        response.headers.add('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-        return response
+# Flask-CORS handles CORS headers and OPTIONS preflight on its own. A manual
+# after_request/before_request handler previously duplicated the
+# Access-Control-Allow-Origin header, which broke login — removed.
 
 jobs = {}
 
-def new_job(job_id):
+def new_job(job_id, owner=""):
     jobs[job_id] = {
         "status": "running",
         "started": datetime.utcnow().isoformat(),
         "results": {},
         "events": queue.Queue(),
+        "owner": owner,
     }
 
 def emit(job_id, event_type, data):
@@ -55,17 +44,71 @@ def emit(job_id, event_type, data):
         jobs[job_id]["events"].put({"type": event_type, "data": data})
 
 def run_cmd(cmd, timeout=60):
+    # cmd MUST be a list of arguments (no shell). This avoids shell-injection
+    # and quoting bugs (e.g. names with apostrophes).
     try:
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(cmd, shell=False, capture_output=True, text=True, timeout=timeout)
         return r.stdout.strip(), r.stderr.strip(), r.returncode
+    except FileNotFoundError:
+        prog = cmd[0] if isinstance(cmd, (list, tuple)) and cmd else str(cmd)
+        return "", f"Command not found: {prog}", 1
     except subprocess.TimeoutExpired:
         return "", "Timed out", 1
     except Exception as e:
         return "", str(e), 1
 
 def tool_available(name):
-    out, _, rc = run_cmd(f"which {name}")
-    return rc == 0
+    return shutil.which(name) is not None
+
+# ── HTTP Helpers (stdlib urllib — no shell, no curl) ──────────────────────────
+DEFAULT_UA = "fivet-osint"
+
+def http_get(url, headers=None, timeout=10):
+    """GET a URL and return the body as text. Mirrors `curl -s`: on an HTTP
+    error status the response body is still returned (many APIs return useful
+    JSON on 4xx), rather than raising."""
+    hdrs = {"User-Agent": DEFAULT_UA}
+    if headers:
+        hdrs.update(headers)
+    req = urllib.request.Request(url, headers=hdrs, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.read().decode("utf-8", "replace")
+        except Exception:
+            raise
+
+def http_get_json(url, headers=None, timeout=10):
+    return json.loads(http_get(url, headers=headers, timeout=timeout))
+
+def log_err(source, exc):
+    """Log a non-fatal live-fetch error (source + exception) and continue.
+    Replaces the old bare `except: pass` blocks so failures aren't silent."""
+    print(f"[FETCH-ERR] {source}: {exc}")
+
+def http_post(url, data=None, headers=None, timeout=12):
+    """POST to a URL and return the body as text. `data` may be a dict (form-
+    urlencoded) or bytes/str. Mirrors `curl -s` error-body behavior."""
+    hdrs = {"User-Agent": "Mozilla/5.0"}
+    if headers:
+        hdrs.update(headers)
+    if isinstance(data, dict):
+        body = urllib.parse.urlencode(data).encode()
+    elif isinstance(data, str):
+        body = data.encode()
+    else:
+        body = data
+    req = urllib.request.Request(url, data=body, headers=hdrs, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.read().decode("utf-8", "replace")
+        except Exception:
+            raise
 
 # ── Name Parser Helper ────────────────────────────────────────────────────────
 def parse_name_location(target):
@@ -75,42 +118,43 @@ def parse_name_location(target):
         'NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN',
         'TX','UT','VT','VA','WA','WV','WI','WY','DC'
     }
+    target = (target or "").strip()
+    state = ""
+    city = ""
+
     if "," in target:
-        name_part = target.split(",")[0].strip()
-        location_part = target.split(",")[1].strip()
-    else:
-        parts = target.split()
-        if len(parts) >= 3 and parts[-1].upper() in US_STATES:
-            if len(parts) >= 4:
-                name_part = " ".join(parts[:-2])
-                location_part = " ".join(parts[-2:])
-            else:
-                name_part = " ".join(parts[:-1])
-                location_part = parts[-1]
-        elif len(parts) <= 2:
-            name_part = target
-            location_part = ""
-        elif len(parts) == 3:
-            if len(parts[1].replace('.','')) <= 2:
-                name_part = target
-                location_part = ""
-            else:
-                name_part = target
-                location_part = ""
+        # Trust the comma form: "Name, City ST" (or "Name, City", or "Name, ST").
+        name_part, _, rest = target.partition(",")
+        name_part = name_part.strip()
+        location_part = rest.strip()
+        loc_tokens = location_part.split()
+        if loc_tokens and loc_tokens[-1].upper() in US_STATES:
+            state = loc_tokens[-1].upper()
+            city = " ".join(loc_tokens[:-1]).strip()
         else:
-            if len(parts[1].replace('.','')) <= 2:
-                name_part = " ".join(parts[:3])
-                location_part = " ".join(parts[3:])
+            city = location_part
+    else:
+        tokens = target.split()
+        # Only peel a trailing token when it is a real 2-letter state code.
+        if len(tokens) >= 2 and tokens[-1].upper() in US_STATES:
+            state = tokens[-1].upper()
+            remainder = tokens[:-1]
+            # A state code was present, so a further trailing token MAY be a
+            # city — but only if doing so still leaves a first + last name.
+            # This prevents "John Smith TX" from treating "Smith" as the city.
+            if len(remainder) >= 3:
+                city = remainder[-1]
+                name_part = " ".join(remainder[:-1]).strip()
             else:
-                name_part = " ".join(parts[:2])
-                location_part = " ".join(parts[2:])
+                name_part = " ".join(remainder).strip()
+        else:
+            # No trailing state code: keep the whole remainder as the name.
+            name_part = target
+        location_part = (city + " " + state).strip()
 
     name_words = name_part.split()
     first = name_words[0] if name_words else ""
     last = name_words[-1] if len(name_words) > 1 else ""
-    loc_words = location_part.split() if location_part else []
-    state = loc_words[-1].upper() if loc_words else ""
-    city = " ".join(loc_words[:-1]) if len(loc_words) > 1 else loc_words[0] if loc_words else ""
     return name_part, location_part, first, last, state, city
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -226,11 +270,9 @@ def module_people_search(target, job_id, dob="", ssn="", oln=""):
         lines.append("")
 
     try:
-        san_out, _, _ = run_cmd(
-            f"curl -s 'https://api.opensanctions.org/search/default?q={name_plus}&schema=Person' 2>/dev/null",
-            timeout=10
-        )
-        san_data = json.loads(san_out)
+        san_url = ("https://api.opensanctions.org/search/default?q="
+                   + urllib.parse.quote_plus(name_part) + "&schema=Person")
+        san_data = http_get_json(san_url, timeout=10)
         results = san_data.get("results", [])
         lines.append("=" * 50)
         lines.append("LIVE SANCTIONS / WATCHLIST CHECK")
@@ -243,8 +285,8 @@ def module_people_search(target, job_id, dob="", ssn="", oln=""):
         else:
             lines.append("✓ No matches found on sanctions/watchlists")
         lines.append("")
-    except:
-        pass
+    except Exception as e:
+        log_err("OpenSanctions live check", e)
 
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "people", "result": result})
@@ -355,11 +397,10 @@ def module_public_records(target, job_id, dob="", ssn="", oln=""):
         lines.append("")
 
     try:
-        out, _, _ = run_cmd(
-            f"curl -s 'https://www.courtlistener.com/api/rest/v3/people/?name_last={last}&name_first={first}&format=json' 2>/dev/null",
-            timeout=10
-        )
-        data = json.loads(out)
+        cl_url = ("https://www.courtlistener.com/api/rest/v3/people/?name_last="
+                  + urllib.parse.quote_plus(last) + "&name_first="
+                  + urllib.parse.quote_plus(first) + "&format=json")
+        data = http_get_json(cl_url, timeout=10)
         count = data.get("count", 0)
         if count > 0:
             lines.append("=" * 50)
@@ -370,8 +411,8 @@ def module_public_records(target, job_id, dob="", ssn="", oln=""):
                 lines.append(f"  Name: {r.get('name_full','N/A')}")
                 lines.append(f"  URL:  https://www.courtlistener.com{r.get('absolute_url','')}")
                 lines.append("")
-    except:
-        pass
+    except Exception as e:
+        log_err("CourtListener live check", e)
 
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "public_records", "result": result})
@@ -423,7 +464,6 @@ def module_property(target, job_id, dob="", ssn="", oln=""):
 
     national = [
         ("PropWire ★ FREE Owner Search",  f"https://propwire.com/search?q={name_plus}"),
-        ("Regrid ★ FREE Parcel Search",   f"https://regrid.com/people/{name_plus.replace('+','/')}"),
         ("County Office — Owner Search",  f"https://www.countyoffice.org/property-records-search/?q={name_plus}"),
         ("NETR — All 50 States Router",   "https://publicrecords.netronline.com/"),
         ("FamilyTreeNow — Address Hist",  f"https://www.familytreenow.com/search/people/results?first={first}&last={last}"),
@@ -520,7 +560,6 @@ def module_skip_trace(target, job_id, dob="", ssn="", oln=""):
         ("ZabaSearch (aliases+history)",   f"https://www.zabasearch.com/people/{first}+{last}/{state}/"),
         ("411.com",                        f"https://www.411.com/name/{first}-{last}/{state}"),
         ("USPhoneBook",                    f"https://www.usphonebook.com/{first}-{last}"),
-        ("Clustrmaps",                     f"https://clustrmaps.com/person/{last}-{first}/"),
         ("SearchPeopleFree",               f"https://www.searchpeoplefree.com/find/{first}-{last}"),
         ("Nuwber",                         f"https://nuwber.com/search?firstName={first}&lastName={last}&city={city_plus}&state={state}"),
         ("PublicRecords.Online",           f"https://publicrecords.online/search/?first_name={first}&last_name={last}&state={state}"),
@@ -625,7 +664,6 @@ def module_skip_trace(target, job_id, dob="", ssn="", oln=""):
     relatives = [
         ("FamilyTreeNow Relatives",       f"https://www.familytreenow.com/search/people/results?first={first}&last={last}"),
         ("TruePeopleSearch Relatives",    f"https://www.truepeoplesearch.com/results?name={name_plus}"),
-        ("ClustrMaps (Address Cluster)",  f"https://clustrmaps.com/person/{last}-{first}/"),
         ("ThatsThem Associates",          f"https://thatsthem.com/name/{first}-{last}"),
         ("IDCrawl Social Connections",    f"https://www.idcrawl.com/name/{first}-{last}"),
     ]
@@ -677,11 +715,9 @@ def module_skip_trace(target, job_id, dob="", ssn="", oln=""):
         lines.append("")
 
     try:
-        san_out, _, _ = run_cmd(
-            f"curl -s 'https://api.opensanctions.org/search/default?q={name_plus}&schema=Person' 2>/dev/null",
-            timeout=10
-        )
-        san_data = json.loads(san_out)
+        san_url = ("https://api.opensanctions.org/search/default?q="
+                   + urllib.parse.quote_plus(name_part) + "&schema=Person")
+        san_data = http_get_json(san_url, timeout=10)
         results = san_data.get("results", [])
         lines.append("=" * 50)
         lines.append("LIVE SANCTIONS / WATCHLIST CHECK")
@@ -694,8 +730,8 @@ def module_skip_trace(target, job_id, dob="", ssn="", oln=""):
         else:
             lines.append("✓ No matches found on sanctions/watchlists")
         lines.append("")
-    except:
-        pass
+    except Exception as e:
+        log_err("OpenSanctions live check", e)
 
     lines.append("=" * 50)
     lines.append("SKIP TRACE GOOGLE DORKS")
@@ -738,6 +774,11 @@ def module_social_media(target, job_id, dob="", ssn="", oln=""):
     parts = name_quoted.split()
     first = parts[0] if parts else target
     last = parts[-1] if len(parts) > 1 else ""
+
+    # Derive city for location-scoped searches (fixes prior NameError on `city`)
+    _, _, _, _, _, city = parse_name_location(target)
+    if not city:
+        city = "Albuquerque"
 
     lines = []
     lines.append(f"TARGET: {name_quoted}")
@@ -839,11 +880,10 @@ def module_social_media(target, job_id, dob="", ssn="", oln=""):
         lines.append("")
 
     try:
-        ddg_out, _, _ = run_cmd(
-            f"curl -s 'https://api.duckduckgo.com/?q={name_plus}+social+media&format=json&no_html=1' 2>/dev/null",
-            timeout=10
-        )
-        ddg_data = json.loads(ddg_out)
+        ddg_url = ("https://api.duckduckgo.com/?q="
+                   + urllib.parse.quote_plus(f"{name_quoted} social media")
+                   + "&format=json&no_html=1")
+        ddg_data = http_get_json(ddg_url, timeout=10)
         if ddg_data.get("Abstract"):
             lines.append("=" * 50)
             lines.append("PUBLIC PROFILE SUMMARY")
@@ -853,8 +893,8 @@ def module_social_media(target, job_id, dob="", ssn="", oln=""):
             if ddg_data.get("AbstractURL"):
                 lines.append(f"Source: {ddg_data['AbstractURL']}")
             lines.append("")
-    except:
-        pass
+    except Exception as e:
+        log_err("DuckDuckGo social lookup", e)
 
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "social_media", "result": result})
@@ -1231,16 +1271,21 @@ def module_photo_forensics(target, job_id, dob="", ssn="", oln=""):
         lines.append("AUTOMATED METADATA EXTRACTION")
         lines.append("=" * 50)
         lines.append("")
+        img_path = os.path.join(tempfile.gettempdir(), "fivet_img.jpg")
         try:
-            out, _, _ = run_cmd(
-                f"curl -s -L -o /tmp/fivet_img.jpg \"{target}\" 2>/dev/null && exiftool /tmp/fivet_img.jpg 2>/dev/null | head -40",
-                timeout=15
-            )
+            dl_req = urllib.request.Request(target, headers={"User-Agent": DEFAULT_UA})
+            with urllib.request.urlopen(dl_req, timeout=15) as r:
+                img_bytes = r.read(10 * 1024 * 1024)  # cap at 10 MB
+            with open(img_path, "wb") as f:
+                f.write(img_bytes)
+            out, _, _ = run_cmd(["exiftool", img_path], timeout=15)
+            out = "\n".join(out.splitlines()[:40])
             if out:
                 lines.append(out)
             else:
                 lines.append("No metadata extracted — image may have metadata stripped.")
-        except:
+        except Exception as e:
+            log_err("photo_forensics image fetch", e)
             lines.append("Could not fetch image for automated extraction.")
         lines.append("")
 
@@ -1310,8 +1355,7 @@ def module_geolocation(target, job_id, dob="", ssn="", oln=""):
 
     if re.match(r'^\d+\.\d+\.\d+\.\d+$', target):
         try:
-            out, _, _ = run_cmd(f"curl -s 'https://ipapi.co/{target}/json/' 2>/dev/null")
-            data = json.loads(out)
+            data = http_get_json(f"https://ipapi.co/{urllib.parse.quote(target)}/json/")
             lines.append("=" * 50)
             lines.append("IP GEOLOCATION (LIVE)")
             lines.append("=" * 50)
@@ -1327,8 +1371,8 @@ def module_geolocation(target, job_id, dob="", ssn="", oln=""):
             if lat and lon:
                 lines.append(f"Maps:     https://www.google.com/maps?q={lat},{lon}")
             lines.append("")
-        except:
-            pass
+        except Exception as e:
+            log_err("ipapi.co geolocation", e)
 
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "geolocation", "result": result})
@@ -1349,12 +1393,12 @@ def module_username_search(target, job_id, dob="", ssn="", oln=""):
     lines.append("AUTOMATED SCANNER")
     lines.append("=" * 50)
     lines.append("")
-    out, _, _ = run_cmd(f"python3 -m sherlock {target} --timeout 8 2>/dev/null", timeout=120)
+    out, _, _ = run_cmd(["python3", "-m", "sherlock", target, "--timeout", "8"], timeout=120)
     if out and "not found" not in out.lower():
         lines.append("[SHERLOCK — 300+ PLATFORMS]")
         lines.append(out)
         lines.append("")
-    out2, _, rc2 = run_cmd(f"python3 -m maigret {target} --top-sites 50 2>/dev/null", timeout=120)
+    out2, _, rc2 = run_cmd(["python3", "-m", "maigret", target, "--top-sites", "50"], timeout=120)
     if out2 and rc2 == 0:
         lines.append("[MAIGRET — FULL DOSSIER]")
         lines.append(out2[:2000])
@@ -1458,17 +1502,19 @@ def phone_pattern_analysis(number):
 
     for fmt in formats[:6]:  # Cap at 6 to avoid rate limiting on Render
         try:
-            q = quote(f'"{fmt}"')
-            ddg_url = f"https://html.duckduckgo.com/html/?q={q}"
-            out, _, rc = run_cmd(
-                f"curl -s -L -A 'Mozilla/5.0' --data 'q={q}' 'https://html.duckduckgo.com/html/' 2>/dev/null | python3 -c \"import sys,re; data=sys.stdin.read(); matches=re.findall(r'class=.result__snippet.[^>]*>([^<]+)<', data); print(' '.join(matches[:15]))\"",
-                timeout=12
+            html = http_post(
+                "https://html.duckduckgo.com/html/",
+                data={"q": f'"{fmt}"'},
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=12,
             )
-            if out:
-                all_text.append(out)
+            matches = re.findall(r'class=.result__snippet.[^>]*>([^<]+)<', html)
+            snippet = " ".join(matches[:15])
+            if snippet:
+                all_text.append(snippet)
                 searched += 1
-        except:
-            pass
+        except Exception as e:
+            log_err(f"DuckDuckGo phone scrape ({fmt})", e)
 
     if not all_text:
         return None
@@ -1476,7 +1522,7 @@ def phone_pattern_analysis(number):
     combined = " ".join(all_text).lower()
 
     # Name extraction — capitalized word pairs common in name contexts
-    name_pattern = re.compile(r'([A-Z][a-z]{1,15})\s+([A-Z][a-z]{1,20})')
+    name_pattern = re.compile(r'\b([A-Z][a-z]{1,15})\s+([A-Z][a-z]{1,20})\b')
     raw_names = {}
     for chunk in all_text:
         for match in name_pattern.finditer(chunk):
@@ -1507,18 +1553,20 @@ def phone_pattern_analysis(number):
                      'WI','WY','DC']
 
     raw_locs = {}
+    joined = " ".join(all_text)
+    # Full state names: word-boundary, case-insensitive.
     for state in us_states:
-        count = combined.count(state.lower())
+        count = len(re.findall(r'\b' + re.escape(state) + r'\b', joined, re.IGNORECASE))
         if count > 0:
             raw_locs[state] = count
     for abbr in state_abbrevs:
-        count = len(re.findall(r'' + abbr + r'', " ".join(all_text)))
+        count = len(re.findall(r'\b' + abbr + r'\b', " ".join(all_text)))
         if count > 0:
             existing = raw_locs.get(abbr, 0)
             raw_locs[abbr] = existing + count
 
     # City extraction — look for "city, ST" patterns
-    city_pattern = re.compile(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?),\s*([A-Z]{2})')
+    city_pattern = re.compile(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?),\s*([A-Z]{2})\b')
     for chunk in all_text:
         for match in city_pattern.finditer(chunk):
             city_state = f"{match.group(1)}, {match.group(2)}"
@@ -1607,6 +1655,7 @@ def module_phone(target, job_id, dob="", ssn="", oln=""):
                 lines.append("Pattern analysis: insufficient public data for this number.")
                 lines.append("")
         except Exception as e:
+            log_err("phone pattern analysis", e)
             lines.append(f"Pattern analysis unavailable: {str(e)}")
             lines.append("")
 
@@ -1615,11 +1664,10 @@ def module_phone(target, job_id, dob="", ssn="", oln=""):
 
     if ipqs_key:
         try:
-            ipqs_out, _, _ = run_cmd(
-                f"curl -s 'https://www.ipqualityscore.com/api/json/phone/{ipqs_key}/{clean}' 2>/dev/null",
-                timeout=10
-            )
-            ipqs_data = json.loads(ipqs_out)
+            ipqs_url = ("https://www.ipqualityscore.com/api/json/phone/"
+                        + urllib.parse.quote(ipqs_key, safe="")
+                        + "/" + urllib.parse.quote(clean, safe=""))
+            ipqs_data = http_get_json(ipqs_url, timeout=10)
             if ipqs_data.get("success"):
                 lines.append("=== CARRIER INTELLIGENCE (IPQS) ===")
                 lines.append(f"Valid:        {ipqs_data.get('valid', 'N/A')}")
@@ -1631,24 +1679,24 @@ def module_phone(target, job_id, dob="", ssn="", oln=""):
                 lines.append(f"VoIP:         {ipqs_data.get('VOIP', False)}")
                 lines.append(f"Prepaid:      {ipqs_data.get('prepaid', False)}")
                 lines.append("")
-        except:
-            pass
+        except Exception as e:
+            log_err("IPQS phone lookup", e)
 
     if nv_key:
         try:
-            nv_out, _, _ = run_cmd(
-                f"curl -s 'http://apilayer.net/api/validate?access_key={nv_key}&number={clean}&country_code=US&format=1' 2>/dev/null",
-                timeout=10
-            )
-            nv_data = json.loads(nv_out)
+            nv_url = ("http://apilayer.net/api/validate?access_key="
+                      + urllib.parse.quote_plus(nv_key)
+                      + "&number=" + urllib.parse.quote_plus(clean)
+                      + "&country_code=US&format=1")
+            nv_data = http_get_json(nv_url, timeout=10)
             if nv_data.get("valid"):
                 lines.append("=== CARRIER INTELLIGENCE (NUMVERIFY) ===")
                 lines.append(f"Line Type:    {nv_data.get('line_type', 'N/A')}")
                 lines.append(f"Carrier:      {nv_data.get('carrier', 'N/A')}")
                 lines.append(f"Location:     {nv_data.get('location', 'N/A')}")
                 lines.append("")
-        except:
-            pass
+        except Exception as e:
+            log_err("Numverify phone lookup", e)
 
     if not ipqs_key and not nv_key:
         lines.append("Add IPQS_API_KEY or NUMVERIFY_API_KEY to Render env vars for live carrier data.")
@@ -1727,7 +1775,7 @@ def module_email_investigate(target, job_id, dob="", ssn="", oln=""):
     lines.append(f"TARGET EMAIL: {target}")
     lines.append("")
 
-    out, err, rc = run_cmd(f"python3 -m holehe {target} --only-used 2>/dev/null", timeout=120)
+    out, err, rc = run_cmd(["python3", "-m", "holehe", target, "--only-used"], timeout=120)
     if out and "holehe" not in out.lower() and "error" not in out.lower():
         lines.append("=" * 50)
         lines.append("HOLEHE — ACCOUNT DETECTION (120+ SITES)")
@@ -1737,11 +1785,8 @@ def module_email_investigate(target, job_id, dob="", ssn="", oln=""):
         lines.append("")
 
     try:
-        rep_out, _, _ = run_cmd(
-            f"curl -s 'https://emailrep.io/{target}' -H 'User-Agent: fivet-osint' 2>/dev/null",
-            timeout=10
-        )
-        data = json.loads(rep_out)
+        rep_url = "https://emailrep.io/" + urllib.parse.quote(target, safe="")
+        data = http_get_json(rep_url, timeout=10)
         details = data.get("details", {})
         lines.append("=" * 50)
         lines.append("EMAIL REPUTATION — FREE")
@@ -1755,13 +1800,13 @@ def module_email_investigate(target, job_id, dob="", ssn="", oln=""):
         lines.append(f"Free Provider: {details.get('free_provider', False)}")
         lines.append(f"Profiles:      {', '.join(details.get('profiles', [])) or 'None detected'}")
         lines.append("")
-    except:
-        pass
+    except Exception as e:
+        log_err("emailrep reputation", e)
 
     try:
         domain = target.split("@")[1]
-        dns_out, _, _ = run_cmd(f"dig +short A {domain} 2>/dev/null")
-        mx_out, _, _ = run_cmd(f"dig +short MX {domain} 2>/dev/null")
+        dns_out, _, _ = run_cmd(["dig", "+short", "A", domain])
+        mx_out, _, _ = run_cmd(["dig", "+short", "MX", domain])
         if dns_out or mx_out:
             lines.append("=" * 50)
             lines.append(f"EMAIL DOMAIN INTEL: {domain}")
@@ -1772,8 +1817,8 @@ def module_email_investigate(target, job_id, dob="", ssn="", oln=""):
             if mx_out:
                 lines.append(f"Mail Server: {mx_out}")
             lines.append("")
-    except:
-        pass
+    except Exception as e:
+        log_err("email domain DNS", e)
 
     lines.append("=" * 50)
     lines.append("FREE LOOKUP SITES")
@@ -1848,12 +1893,9 @@ def module_breach_leak(target, job_id, dob="", ssn="", oln=""):
     # ── LIVE API CALL — XposedOrNot (genuinely free, no key, no signup) ──
     if is_email:
         try:
-            out, _, rc = run_cmd(
-                f"curl -s 'https://api.xposedornot.com/v1/check-email/{target}' "
-                f"-H 'User-Agent: fivet-osint' 2>/dev/null",
-                timeout=10
-            )
-            data = json.loads(out)
+            xon_url = ("https://api.xposedornot.com/v1/check-email/"
+                       + urllib.parse.quote(target, safe=""))
+            data = http_get_json(xon_url, timeout=10)
             lines.append("=" * 50)
             lines.append("LIVE BREACH CHECK — XPOSEDORNOT (FREE API)")
             lines.append("=" * 50)
@@ -1873,6 +1915,7 @@ def module_breach_leak(target, job_id, dob="", ssn="", oln=""):
                 lines.append("No conclusive result returned.")
             lines.append("")
         except Exception as e:
+            log_err("XposedOrNot breach check", e)
             lines.append(f"XposedOrNot live check unavailable: {str(e)}")
             lines.append("")
     else:
@@ -2069,11 +2112,10 @@ def module_business(target, job_id, dob="", ssn="", oln=""):
     lines.append("")
 
     try:
-        out, _, _ = run_cmd(
-            f"curl -s 'https://api.opencorporates.com/v0.4/companies/search?q={name_plus}&jurisdiction_code=us_nm&format=json' 2>/dev/null",
-            timeout=10
-        )
-        data = json.loads(out)
+        oc_url = ("https://api.opencorporates.com/v0.4/companies/search?q="
+                  + urllib.parse.quote_plus(target)
+                  + "&jurisdiction_code=us_nm&format=json")
+        data = http_get_json(oc_url, timeout=10)
         companies = data.get("results", {}).get("companies", [])
         if companies:
             lines.append("=" * 50)
@@ -2093,6 +2135,7 @@ def module_business(target, job_id, dob="", ssn="", oln=""):
             lines.append("No NM results from OpenCorporates.")
             lines.append("")
     except Exception as e:
+        log_err("OpenCorporates search", e)
         lines.append(f"OpenCorporates: {str(e)}")
         lines.append("")
 
@@ -2146,11 +2189,10 @@ def module_business(target, job_id, dob="", ssn="", oln=""):
         lines.append("")
 
     try:
-        ddg_out, _, _ = run_cmd(
-            f"curl -s 'https://api.duckduckgo.com/?q={name_plus}+company&format=json&no_html=1' 2>/dev/null",
-            timeout=10
-        )
-        ddg_data = json.loads(ddg_out)
+        ddg_url = ("https://api.duckduckgo.com/?q="
+                   + urllib.parse.quote_plus(f"{target} company")
+                   + "&format=json&no_html=1")
+        ddg_data = http_get_json(ddg_url, timeout=10)
         if ddg_data.get("Abstract"):
             lines.append("=" * 50)
             lines.append("PUBLIC BUSINESS SUMMARY")
@@ -2160,8 +2202,8 @@ def module_business(target, job_id, dob="", ssn="", oln=""):
             if ddg_data.get("AbstractURL"):
                 lines.append(f"Source: {ddg_data['AbstractURL']}")
             lines.append("")
-    except:
-        pass
+    except Exception as e:
+        log_err("DuckDuckGo business lookup", e)
 
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "business", "result": result})
@@ -2176,10 +2218,11 @@ def module_whois(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "whois"})
     api_key = os.environ.get("WHOIS_API_KEY", "at_free")
     try:
-        out, _, _ = run_cmd(
-            f"curl -s 'https://www.whoisxmlapi.com/whoisserver/WhoisService?apiKey={api_key}&domainName={target}&outputFormat=JSON' 2>/dev/null"
-        )
-        data = json.loads(out)
+        whois_url = ("https://www.whoisxmlapi.com/whoisserver/WhoisService?apiKey="
+                     + urllib.parse.quote_plus(api_key)
+                     + "&domainName=" + urllib.parse.quote_plus(target)
+                     + "&outputFormat=JSON")
+        data = http_get_json(whois_url)
         record = data.get("WhoisRecord", {})
         registrant = record.get("registrant", {})
         lines = [
@@ -2196,8 +2239,10 @@ def module_whois(target, job_id, dob="", ssn="", oln=""):
         if nameservers:
             lines.append(f"Nameservers: {', '.join(nameservers[:4])}")
         result = "\n".join(lines)
-    except:
-        out, err, _ = run_cmd(f"whois {target} 2>/dev/null | head -40")
+    except Exception as e:
+        log_err("WhoisXML API (falling back to whois CLI)", e)
+        out, err, _ = run_cmd(["whois", target])
+        out = "\n".join(out.splitlines()[:40])
         result = out if out else f"WHOIS lookup failed for {target}"
     emit(job_id, "module_done", {"module": "whois", "result": result})
     return result
@@ -2211,7 +2256,7 @@ def module_dns(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "dns"})
     lines = []
     for rtype in ["A", "AAAA", "MX", "NS", "TXT", "CNAME"]:
-        out, _, _ = run_cmd(f"dig +short {rtype} {target} 2>/dev/null")
+        out, _, _ = run_cmd(["dig", "+short", rtype, target])
         if out:
             lines.append(f"[{rtype}] {out}")
     result = "\n".join(lines) if lines else "No DNS records found."
@@ -2257,8 +2302,7 @@ def module_geoip(target, job_id, dob="", ssn="", oln=""):
     emit(job_id, "module_start", {"module": "geoip"})
     try:
         ip = socket.gethostbyname(target)
-        out, _, _ = run_cmd(f"curl -s 'https://ipapi.co/{ip}/json/' 2>/dev/null")
-        data = json.loads(out)
+        data = http_get_json(f"https://ipapi.co/{urllib.parse.quote(ip)}/json/")
         lines = [
             f"IP:       {data.get('ip', ip)}",
             f"City:     {data.get('city', 'N/A')}",
@@ -2321,12 +2365,11 @@ def module_virustotal(target, job_id, dob="", ssn="", oln=""):
     if not api_key:
         result = "Add VT_API_KEY to Render Environment Variables."
     else:
-        out, _, _ = run_cmd(
-            f"curl -s --request GET "
-            f"--url 'https://www.virustotal.com/api/v3/domains/{target}' "
-            f"--header 'x-apikey: {api_key}' 2>/dev/null"
-        )
+        vt_url = ("https://www.virustotal.com/api/v3/domains/"
+                  + urllib.parse.quote(target, safe=""))
+        out = ""
         try:
+            out = http_get(vt_url, headers={"x-apikey": api_key})
             data = json.loads(out)
             attrs = data.get("data", {}).get("attributes", {})
             stats = attrs.get("last_analysis_stats", {})
@@ -2338,7 +2381,8 @@ def module_virustotal(target, job_id, dob="", ssn="", oln=""):
                 f"Reputation:  {attrs.get('reputation', 'N/A')}\n"
                 f"Categories:  {', '.join(set(cats.values())) if cats else 'N/A'}"
             )
-        except:
+        except Exception as e:
+            log_err("VirusTotal domain lookup", e)
             result = out[:500] if out else "VirusTotal lookup failed."
     emit(job_id, "module_done", {"module": "virustotal", "result": result})
     return result
@@ -2555,9 +2599,65 @@ def run_investigation(job_id, target, target_type, selected_modules, dob="", ssn
 
 
 # ── Authentication ────────────────────────────────────────────────────────────
-import secrets
+# Stateless auth: tokens are HMAC-SHA256 signed payloads (username, role, name,
+# issued-at). No server-side session store — a token is valid on any instance
+# as long as the signature verifies and it hasn't expired.
+import secrets, hmac, hashlib, base64
 
-active_sessions = {}
+SECRET_KEY = os.environ.get("SECRET_KEY", "")
+if not SECRET_KEY:
+    SECRET_KEY = secrets.token_hex(32)
+    print("[AUTH][WARNING] SECRET_KEY env var is NOT set — using a randomly "
+          "generated key. All tokens will be invalidated on every restart/"
+          "redeploy and will NOT be shared across instances. Set SECRET_KEY in "
+          "the environment (e.g. Render env vars) for stable auth.")
+_SECRET_KEY_BYTES = SECRET_KEY.encode()
+
+# How long a token stays valid (seconds). Override with TOKEN_TTL_SECONDS.
+TOKEN_TTL_SECONDS = int(os.environ.get("TOKEN_TTL_SECONDS", 12 * 3600))
+
+
+def _b64u_encode(raw):
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
+def _b64u_decode(s):
+    pad = "=" * (-len(s) % 4)
+    return base64.urlsafe_b64decode(s + pad)
+
+
+def make_token(username, role, name, issued_at=None):
+    if issued_at is None:
+        issued_at = int(time.time())
+    payload = {"u": username, "r": role, "n": name, "iat": issued_at}
+    payload_b64 = _b64u_encode(json.dumps(payload, separators=(",", ":")).encode())
+    sig = hmac.new(_SECRET_KEY_BYTES, payload_b64.encode(), hashlib.sha256).digest()
+    return payload_b64 + "." + _b64u_encode(sig)
+
+
+def verify_session_token(token):
+    """Return a session dict {username, role, name, created} for a valid,
+    unexpired, correctly-signed token; otherwise None."""
+    if not token or "." not in token:
+        return None
+    payload_b64, _, sig_b64 = token.partition(".")
+    try:
+        expected = hmac.new(_SECRET_KEY_BYTES, payload_b64.encode(), hashlib.sha256).digest()
+        if not hmac.compare_digest(_b64u_decode(sig_b64), expected):
+            return None
+        payload = json.loads(_b64u_decode(payload_b64))
+    except Exception:
+        return None
+    iat = payload.get("iat", 0)
+    if not isinstance(iat, (int, float)) or (time.time() - iat) > TOKEN_TTL_SECONDS:
+        return None
+    return {
+        "username": payload.get("u", ""),
+        "role": payload.get("r", ""),
+        "name": payload.get("n", ""),
+        "created": iat,
+    }
+
 
 def get_users():
     users = {}
@@ -2636,7 +2736,7 @@ def save_audit_log(log_list):
         print(f"[AUDIT WRITE ERROR] {e}")
 
 
-def append_audit_entry(entry):
+def _write_audit_entry(entry):
     if SUPABASE_ENABLED:
         try:
             _supabase_request("POST", "audit_log", body=entry)
@@ -2648,6 +2748,12 @@ def append_audit_entry(entry):
         log_list = load_audit_log()
         log_list.append(entry)
         save_audit_log(log_list)
+
+
+def append_audit_entry(entry):
+    # Write on a background daemon thread so a slow or unreachable audit
+    # backend never blocks the login/search request path.
+    threading.Thread(target=_write_audit_entry, args=(entry,), daemon=True).start()
 
 
 def log_auth_event(username, action, detail, ip="unknown", name="", target=""):
@@ -2672,14 +2778,7 @@ def login():
     users = get_users()
     user = users.get(username)
     if user and user["password"] == password:
-        token = secrets.token_hex(32)
-        active_sessions[token] = {
-            "username": username,
-            "role": user["role"],
-            "name": user["name"],
-            "created": datetime.utcnow().isoformat(),
-            "ip": ip
-        }
+        token = make_token(username, user["role"], user["name"])
         log_auth_event(username, "LOGIN_SUCCESS", f"User {user['name']} authenticated", ip, name=user["name"])
         return jsonify({"success": True, "token": token, "username": username,
                         "role": user["role"], "name": user["name"]})
@@ -2691,7 +2790,7 @@ def login():
 def verify_token():
     data = request.json
     token = data.get("token", "")
-    session = active_sessions.get(token)
+    session = verify_session_token(token)
     if session:
         return jsonify({"valid": True, "username": session["username"],
                         "role": session["role"], "name": session["name"]})
@@ -2701,7 +2800,7 @@ def verify_token():
 def logout():
     data = request.json
     token = data.get("token", "")
-    session = active_sessions.pop(token, None)
+    session = verify_session_token(token)
     if session:
         log_auth_event(session["username"], "LOGOUT", "User logged out", name=session.get("name",""))
     return jsonify({"success": True})
@@ -2710,7 +2809,7 @@ def logout():
 def get_audit():
     data = request.json or {}
     token = data.get("token", "")
-    session = active_sessions.get(token)
+    session = verify_session_token(token)
     if not session or session.get("role") != "admin":
         return jsonify({"error": "Unauthorized — admin access required"}), 403
     log_list = load_audit_log()
@@ -2730,7 +2829,16 @@ def investigate():
     dob = data.get("dob", "").strip()
     ssn = data.get("ssn", "").strip()
     oln = data.get("oln", "").strip()
+    city = data.get("city", "").strip()
+    state = data.get("state", "").strip()
     token = data.get("token", "")
+
+    # If city/state are supplied separately, compose a canonical
+    # "Name, City ST" string so parse_name_location's comma branch handles it.
+    if target and "," not in target and (city or state):
+        loc = " ".join(p for p in [city, state] if p).strip()
+        if loc:
+            target = f"{target}, {loc}"
     if isinstance(modules_param, str) and modules_param:
         selected_modules = modules_param.split(",")
     elif isinstance(modules_param, list):
@@ -2740,10 +2848,12 @@ def investigate():
     if not target:
         return jsonify({"error": "No target provided"}), 400
 
-    # Attribute this search to the logged-in user for the audit log
-    session = active_sessions.get(token)
-    searcher_username = session["username"] if session else "unknown"
-    searcher_name = session["name"] if session else "Unknown User"
+    # Require a valid token — investigations must be attributable to a user.
+    session = verify_session_token(token)
+    if not session:
+        return jsonify({"error": "Authentication required"}), 401
+    searcher_username = session["username"]
+    searcher_name = session["name"]
     ip = request.headers.get("X-Forwarded-For", request.remote_addr)
     log_auth_event(
         searcher_username, "SEARCH",
@@ -2751,8 +2861,8 @@ def investigate():
         ip, name=searcher_name, target=target
     )
 
-    job_id = f"job_{int(time.time()*1000)}"
-    new_job(job_id)
+    job_id = "job_" + secrets.token_urlsafe(16)
+    new_job(job_id, owner=searcher_username)
     threading.Thread(
         target=run_investigation,
         args=(job_id, target, target_type, selected_modules, dob, ssn, oln),
@@ -2762,6 +2872,17 @@ def investigate():
 
 @app.route("/api/stream/<job_id>")
 def stream(job_id):
+    # If a token is supplied, it must belong to the user who created the job.
+    # (Optional: when no token is supplied, the stream is not gated here.)
+    token = request.args.get("token", "")
+    if token:
+        session = verify_session_token(token)
+        job = jobs.get(job_id)
+        owner = job.get("owner") if job else None
+        if owner and owner != "unknown":
+            if not session or session.get("username") != owner:
+                return jsonify({"error": "Forbidden — token does not match job owner"}), 403
+
     def generate():
         if job_id not in jobs:
             yield f"data: {json.dumps({'type':'error','data':{'message':'Job not found'}})}\n\n"
@@ -2781,7 +2902,7 @@ def stream(job_id):
 
 @app.route("/api/health")
 def health():
-    tools = {t: tool_available(t) for t in ["whois", "dig", "curl"]}
+    tools = {t: tool_available(t) for t in ["whois", "dig"]}
     return jsonify({
         "status": "ok",
         "tools": tools,

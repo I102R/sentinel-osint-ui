@@ -407,7 +407,21 @@ async function runInvestigation() {
     const oln = document.getElementById('olnInput')?.value.trim() || '';
     const params = new URLSearchParams({ target: query, type: targetType, modules: mods.join(','), dob, ssn, oln, token: authToken || '' });
     const res = await fetch(`${BACKEND}/api/investigate?${params}`, { method: 'GET' });
+    if (res.status === 401) {
+      // Token missing or expired — clear auth state and force re-login.
+      authToken = null;
+      currentUser = null;
+      sessionStorage.removeItem('fivet_auth');
+      document.getElementById('lockscreen').style.display = 'flex';
+      throw new Error('Session expired — please log in again.');
+    }
+    if (!res.ok) {
+      let msg = `Investigation request failed (HTTP ${res.status}).`;
+      try { const j = await res.json(); if (j && j.error) msg = j.error; } catch (_) {}
+      throw new Error(msg);
+    }
     const { job_id } = await res.json();
+    if (!job_id) throw new Error('No job ID returned by server.');
 
     let done = 0;
     await new Promise((resolve, reject) => {
