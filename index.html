@@ -104,8 +104,14 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
 .exp-btn:disabled{border-color:var(--border);color:var(--dim);cursor:not-allowed;}
 .scanline{position:fixed;left:0;right:0;height:2px;background:linear-gradient(transparent,rgba(0,168,150,0.05),transparent);pointer-events:none;animation:scan 8s linear infinite;z-index:999;}
 @keyframes scan{0%{top:-2px}100%{top:100vh}}
-#identifierRow{display:flex!important;}
+#identifierRow{display:flex!important;flex-direction:column;}
 #identifierRow input::placeholder{color:#2a3a4a;}
+.idf{flex:1;min-width:115px;background:var(--panel);border:1px solid var(--border);border-radius:3px;padding:6px 10px;color:var(--text);font-family:'Share Tech Mono',monospace;font-size:11px;outline:none;}
+.idf:focus{border-color:var(--accent);}
+select.idf{cursor:pointer;}
+.idf-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;}
+.idf-hint{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);margin:-2px 2px 6px;letter-spacing:.5px;}
+.idf-grp{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--accent);letter-spacing:2px;margin:2px 2px 4px;text-transform:uppercase;}
 </style>
 </head>
 <body>
@@ -182,11 +188,36 @@ aside{width:230px;border-right:1px solid var(--border);padding:14px 12px;display
           <button class="run-btn" id="runBtn" onclick="runInvestigation()">▶ INVESTIGATE</button>
           <button class="clr-btn" onclick="clearAll()">CLR</button>
         </div>
-        <div id="identifierRow" style="display:none;margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
-          <input id="dobInput" type="text" placeholder="DOB: MM/DD/YYYY" style="flex:1;min-width:130px;background:var(--panel);border:1px solid var(--border);border-radius:3px;padding:6px 10px;color:var(--text);font-family:Share Tech Mono,monospace;font-size:11px;outline:none;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'"/>
-          <input id="ssnInput" type="text" placeholder="SSN: XXX-XX-XXXX" maxlength="11" style="flex:1;min-width:130px;background:var(--panel);border:1px solid var(--border);border-radius:3px;padding:6px 10px;color:var(--text);font-family:Share Tech Mono,monospace;font-size:11px;outline:none;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" oninput="maskSSN(this)"/>
-          <input id="olnInput" type="text" placeholder="OLN / DL#" style="flex:1;min-width:130px;background:var(--panel);border:1px solid var(--border);border-radius:3px;padding:6px 10px;color:var(--text);font-family:Share Tech Mono,monospace;font-size:11px;outline:none;" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'"/>
-          <button onclick="clearIdentifiers()" style="padding:6px 10px;background:transparent;border:1px solid var(--border);color:var(--dim);font-family:Share Tech Mono,monospace;font-size:9px;cursor:pointer;border-radius:3px;white-space:nowrap;" title="Clear identifiers">✕ CLR ID</button>
+        <div id="identifierRow" style="display:none;margin-top:8px;">
+          <div class="idf-grp">Name parts (optional — override quick-entry box; paternal = primary surname)</div>
+          <div class="idf-row">
+            <input id="firstInput" class="idf" type="text" placeholder="First"/>
+            <input id="middleInput" class="idf" type="text" placeholder="Middle"/>
+            <input id="paternalInput" class="idf" type="text" placeholder="Paternal surname (primary)"/>
+            <input id="maternalInput" class="idf" type="text" placeholder="Maternal surname"/>
+          </div>
+          <div class="idf-hint">Leave blank to use the quick-entry box above. When both surnames are given, searches run under both orderings and both surnames.</div>
+          <div class="idf-row">
+            <input id="cityInput" class="idf" type="text" placeholder="City"/>
+            <select id="stateInput" class="idf" title="State"><option value="">State…</option></select>
+            <input id="dobInput" class="idf" type="text" placeholder="DOB: MM/DD/YYYY, MM/YYYY, or March 1987"/>
+          </div>
+          <div class="idf-hint">DOB accepts full or partial dates — partials are kept exactly as typed and used as a “born …” filter hint.</div>
+          <div class="idf-row">
+            <input id="ssnInput" class="idf" type="text" placeholder="SSN: XXX-XX-XXXX" maxlength="11" oninput="maskSSN(this)"/>
+            <input id="olnInput" class="idf" type="text" placeholder="OLN / DL#"/>
+          </div>
+          <div class="idf-hint">OLN / driver's license # is often found in the court system (traffic citations, criminal complaints, case dockets).</div>
+          <div class="idf-row">
+            <input id="phoneInput" class="idf" type="text" placeholder="Phone"/>
+            <input id="emailInput" class="idf" type="text" placeholder="Email"/>
+            <input id="usernameInput" class="idf" type="text" placeholder="Username / handle"/>
+            <input id="employerInput" class="idf" type="text" placeholder="Employer (free text)"/>
+          </div>
+          <div class="idf-hint">Username feeds the exact handle into social modules (skips name-guessed permutations). Employer is often known to the client/victim — describe it however they do.</div>
+          <div class="idf-row">
+            <button onclick="clearIdentifiers()" style="padding:6px 12px;background:transparent;border:1px solid var(--border);color:var(--dim);font-family:Share Tech Mono,monospace;font-size:9px;cursor:pointer;border-radius:3px;white-space:nowrap;" title="Clear all identifier fields">✕ CLR ID</button>
+          </div>
         </div>
       </div>
       <div class="prog-area" id="progArea">
@@ -240,6 +271,17 @@ let history = JSON.parse(localStorage.getItem('fivet_history') || '[]');
 let stats = JSON.parse(localStorage.getItem('fivet_stats') || '{"queries":0,"findings":0}');
 
 const TARGET_TYPES = ['PERSON','COMPANY','DOMAIN','IP','EMAIL','USERNAME','PHONE','PLATE','LOCATION'];
+const US_STATES = ['AL','AK','AZ','AR','CA','CO','CT','DE','DC','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
+
+function populateStates() {
+  const sel = document.getElementById('stateInput');
+  if (!sel || sel.options.length > 1) return;
+  US_STATES.forEach(s => {
+    const o = document.createElement('option');
+    o.value = s; o.textContent = s;
+    sel.appendChild(o);
+  });
+}
 
 // ── Module definitions — all paywall tools removed, all sources verified free ──
 const ALL_MODULES = [
@@ -281,6 +323,7 @@ function init() {
   renderTypes();
   renderModules();
   renderHistory();
+  populateStates();
   updateStats();
   setInterval(() => { document.getElementById('clock').textContent = new Date().toLocaleTimeString(); }, 1000);
   if (BACKEND) testBackend(true);
@@ -368,7 +411,14 @@ function showCfgMsg(msg, type) {
 }
 
 async function runInvestigation() {
-  const query = document.getElementById('searchInput').value.trim();
+  let query = document.getElementById('searchInput').value.trim();
+  // Allow a structured-name-only PERSON search: compose a quick-entry name from
+  // the name parts when the main box is empty so the request is still valid.
+  if (!query && targetType === 'PERSON') {
+    const parts = ['firstInput','middleInput','paternalInput','maternalInput']
+      .map(id => document.getElementById(id)?.value.trim() || '').filter(Boolean);
+    if (parts.length) query = parts.join(' ');
+  }
   if (!query || running) return;
   if (!BACKEND) { showCfgMsg('Set your backend URL first!', 'err'); return; }
 
@@ -405,7 +455,17 @@ async function runInvestigation() {
     const dob = document.getElementById('dobInput')?.value.trim() || '';
     const ssn = document.getElementById('ssnInput')?.value.trim() || '';
     const oln = document.getElementById('olnInput')?.value.trim() || '';
-    const params = new URLSearchParams({ target: query, type: targetType, modules: mods.join(','), dob, ssn, oln, token: authToken || '' });
+    const first = document.getElementById('firstInput')?.value.trim() || '';
+    const middle = document.getElementById('middleInput')?.value.trim() || '';
+    const paternal = document.getElementById('paternalInput')?.value.trim() || '';
+    const maternal = document.getElementById('maternalInput')?.value.trim() || '';
+    const phone = document.getElementById('phoneInput')?.value.trim() || '';
+    const email = document.getElementById('emailInput')?.value.trim() || '';
+    const username = document.getElementById('usernameInput')?.value.trim() || '';
+    const employer = document.getElementById('employerInput')?.value.trim() || '';
+    const city = document.getElementById('cityInput')?.value.trim() || '';
+    const state = document.getElementById('stateInput')?.value.trim() || '';
+    const params = new URLSearchParams({ target: query, type: targetType, modules: mods.join(','), dob, ssn, oln, first, middle, paternal, maternal, phone, email, username, employer, city, state, token: authToken || '' });
     const res = await fetch(`${BACKEND}/api/investigate?${params}`, { method: 'GET' });
     if (res.status === 401) {
       // Token missing or expired — clear auth state and force re-login.
@@ -560,16 +620,29 @@ function updateStats() {
   if (stats.lastTime) document.getElementById('sTime').textContent = stats.lastTime;
 }
 
+// Collect the optional person fields present in the identifier row as
+// "Label: value" strings (SSN masked). Shared by export and AI analysis.
+function personFieldLines() {
+  const g = id => document.getElementById(id)?.value.trim() || '';
+  const ssn = g('ssnInput');
+  const pairs = [
+    ['First', g('firstInput')], ['Middle', g('middleInput')],
+    ['Paternal surname', g('paternalInput')], ['Maternal surname', g('maternalInput')],
+    ['City', g('cityInput')], ['State', g('stateInput')],
+    ['DOB', g('dobInput')],
+    ['SSN', ssn ? ssn.substring(0,3) + '-**-****' : ''],
+    ['OLN/DL', g('olnInput')],
+    ['Phone', g('phoneInput')], ['Email', g('emailInput')],
+    ['Username', g('usernameInput')], ['Employer', g('employerInput')],
+  ];
+  return pairs.filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`);
+}
+
 function exportReport() {
   const target = document.getElementById('searchInput').value.trim();
   if (!Object.keys(allResults).length) return;
-  const expDob = document.getElementById('dobInput')?.value.trim() || '';
-  const expSsn = document.getElementById('ssnInput')?.value.trim() || '';
-  const expOln = document.getElementById('olnInput')?.value.trim() || '';
   let r = `FIVE T OSINT REPORT\n${'='.repeat(50)}\nTarget: ${target}\nType: ${targetType}\nDate: ${new Date().toUTCString()}\n`;
-  if (expDob) r += `DOB: ${expDob}\n`;
-  if (expSsn) r += `SSN: ${expSsn.substring(0,3)}-**-****\n`;
-  if (expOln) r += `OLN: ${expOln}\n`;
+  personFieldLines().forEach(line => { r += line + '\n'; });
   r += `${'='.repeat(50)}\n`;
   Object.entries(allResults).forEach(([mod, content]) => {
     r += `\n\n${mod.toUpperCase()}\n${'-'.repeat(30)}\n${content}\n`;
@@ -589,14 +662,7 @@ function analyzeWithAI() {
     resultsSummary += `\n\n=== ${mod.toUpperCase()} ===\n${content}`;
   });
 
-  const dob = document.getElementById('dobInput')?.value.trim() || '';
-  const ssn = document.getElementById('ssnInput')?.value.trim() || '';
-  const oln = document.getElementById('olnInput')?.value.trim() || '';
-  const identifiers = [
-    dob ? `DOB: ${dob}` : '',
-    ssn ? `SSN: ${ssn.substring(0,3)}-**-****` : '',
-    oln ? `OLN/DL: ${oln}` : ''
-  ].filter(Boolean).join(' | ');
+  const identifiers = personFieldLines().join(' | ');
 
   const prompt = `You are an OSINT investigator assistant for Parnall Law Firm, a personal injury law firm in Albuquerque, New Mexico. You are assisting investigators Rick Anglada, T. Lopez, and C. McPherson.
 
@@ -642,12 +708,15 @@ function maskSSN(input) {
 }
 
 function clearIdentifiers() {
-  const dob = document.getElementById('dobInput');
+  ['dobInput','olnInput','firstInput','middleInput','paternalInput','maternalInput',
+   'phoneInput','emailInput','usernameInput','employerInput','cityInput'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
   const ssn = document.getElementById('ssnInput');
-  const oln = document.getElementById('olnInput');
-  if (dob) dob.value = '';
   if (ssn) { ssn.value = ''; ssn.dataset.raw = ''; }
-  if (oln) oln.value = '';
+  const state = document.getElementById('stateInput');
+  if (state) state.value = '';
 }
 
 function showIdentifierRow() {

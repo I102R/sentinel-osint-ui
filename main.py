@@ -157,19 +157,141 @@ def parse_name_location(target):
     last = name_words[-1] if len(name_words) > 1 else ""
     return name_part, location_part, first, last, state, city
 
+
+# ── Partial-DOB Helpers ───────────────────────────────────────────────────────
+_MONTHS = {"january","february","march","april","may","june","july","august",
+           "september","october","november","december",
+           "jan","feb","mar","apr","jun","jul","aug","sep","sept","oct","nov","dec"}
+
+def dob_is_full_date(dob):
+    """True only for a complete numeric date (MM/DD/YYYY or similar) that is safe
+    to hand to a site's dob= parameter. Partial forms (MM/YYYY, 'March 1987')
+    return False so callers echo them verbatim instead of mangling them."""
+    d = (dob or "").strip()
+    if not d:
+        return False
+    parts = re.split(r"[/\-.]", d)
+    if len(parts) == 3 and all(p.strip().isdigit() for p in parts):
+        return True
+    return False
+
+def dob_born_hint(dob):
+    """Return a 'born <as entered>' filter hint, echoing the DOB exactly as the
+    investigator typed it (partial or full). Empty string when no DOB."""
+    d = (dob or "").strip()
+    return f"born {d}" if d else ""
+
+
+# ── Person Resolver ───────────────────────────────────────────────────────────
+def resolve_person(target, extra=None):
+    """Normalize a person target into a bundle the person-modules build URLs and
+    dorks from. When structured name parts are supplied in `extra`, the free-text
+    name parser is bypassed for the name (location still comes from extra.city/
+    state, falling back to the parsed location). Name-only searches keep today's
+    behavior exactly.
+
+    Returned dict keys:
+      first, middle, paternal, maternal
+      surnames        list of surnames to search under (BOTH when paternal AND
+                      maternal are present — DBs index Hispanic subjects under
+                      either — else the single known/parsed surname)
+      first_last      list of (first, surname) pairs for {first}-{last} style URLs
+      name_orderings  list of full-name strings; two orderings ("Pat Mat" and
+                      "Mat Pat") when both surnames present, else one
+      primary_name    name_orderings[0] (display / single-name fallback)
+      last_primary    paternal when present (single last name where one is needed)
+      state, city, location_part
+      structured      True when structured name parts drove the result
+    """
+    extra = extra or {}
+    first    = (extra.get("first") or "").strip()
+    middle   = (extra.get("middle") or "").strip()
+    paternal = (extra.get("paternal") or "").strip()
+    maternal = (extra.get("maternal") or "").strip()
+
+    p_name, p_location, p_first, p_last, p_state, p_city = parse_name_location(target)
+
+    structured = bool(first or middle or paternal or maternal)
+
+    if structured:
+        # Structured parts take precedence; parser is bypassed for the name.
+        base = " ".join(w for w in [first, middle] if w).strip()
+        if paternal and maternal:
+            surnames = [paternal, maternal]
+            name_orderings = [
+                " ".join(w for w in [base, paternal, maternal] if w).strip(),
+                " ".join(w for w in [base, maternal, paternal] if w).strip(),
+            ]
+            last_primary = paternal
+        elif paternal or maternal:
+            single = paternal or maternal
+            surnames = [single]
+            name_orderings = [" ".join(w for w in [base, single] if w).strip()]
+            last_primary = single
+        else:
+            surnames = []
+            name_orderings = [base] if base else []
+            last_primary = ""
+        state = (extra.get("state") or p_state or "").strip()
+        city  = (extra.get("city") or p_city or "").strip()
+    else:
+        # Legacy free-text path — single ordering, exactly as before.
+        first = p_first
+        surnames = [p_last] if p_last else []
+        name_orderings = [p_name] if p_name else []
+        last_primary = p_last
+        state = (extra.get("state") or p_state or "").strip()
+        city  = (extra.get("city") or p_city or "").strip()
+
+    if not name_orderings:
+        name_orderings = [p_name] if p_name else [target.strip()]
+
+    first_last = [(first, s) for s in surnames] if (first and surnames) else []
+    location_part = " ".join(w for w in [city, state] if w).strip()
+
+    return {
+        "first": first, "middle": middle,
+        "paternal": paternal, "maternal": maternal,
+        "surnames": surnames,
+        "first_last": first_last,
+        "name_orderings": name_orderings,
+        "primary_name": name_orderings[0] if name_orderings else target.strip(),
+        "last_primary": last_primary,
+        "state": state, "city": city, "location_part": location_part,
+        "structured": structured,
+    }
+
 # ══════════════════════════════════════════════════════════════════════════════
 # MODULE: PEOPLE SEARCH
 # All sources verified free June 2026
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_people_search(target, job_id, dob="", ssn="", oln=""):
+def module_people_search(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "people"})
-    name_part, location_part, first, last, state, city = parse_name_location(target)
+    p = resolve_person(target, extra)
+    name_part = p["primary_name"]
+    location_part = p["location_part"]
+    state = p["state"]
+    city = p["city"]
+    first = p["first"]
+    orderings = p["name_orderings"]
+    surnames = p["surnames"]
 
     name_plus = name_part.replace(" ", "+")
     loc_plus = location_part.replace(" ", "+")
-    name_url = name_part.replace(" ", "-").lower()
-    city_url = city.replace(" ", "-").lower()
+    dob_full = dob_is_full_date(dob)
+
+    # Pair each full-name ordering with a distinct surname so both surname
+    # orderings AND both surnames (paternal + maternal) get searched — databases
+    # index Hispanic subjects under either surname, so searching only the paternal
+    # misses records filed under the maternal. Single-surname / legacy free-text
+    # names produce exactly one variant (today's behavior).
+    variants = []
+    for i, nf in enumerate(orderings):
+        sn = surnames[i] if i < len(surnames) else ""
+        variants.append((nf, sn))
+    if not variants:
+        variants = [(name_part, "")]
 
     lines = []
     lines.append(f"TARGET:   {name_part}")
@@ -189,27 +311,37 @@ def module_people_search(target, job_id, dob="", ssn="", oln=""):
     lines.append("=" * 50)
     lines.append("")
 
-    sites = [
-        ("FAMILYTREENOW ★ BEST FREE",    f"https://www.familytreenow.com/search/people/results?first={first}&last={last}&state={state}" + (f"&dob={dob.replace('/','%2F')}" if dob else "")),
-        ("TRUEPEOPLESEARCH",              f"https://www.truepeoplesearch.com/results?name={name_plus}&citystatezip={loc_plus}"),
-        ("FASTPEOPLESEARCH",              f"https://www.fastpeoplesearch.com/name/{name_url}"),
-        ("THATSTHEM ★ 100% FREE",         f"https://thatsthem.com/name/{first}-{last}"),
-        ("IDCRAWL (social+records)",      f"https://www.idcrawl.com/name/{first}-{last}"),
-        ("PEEKYOU (social+arrests)",      f"https://www.peekyou.com/{first}_{last}"),
-        ("SORTEDBYNAME.COM",              f"https://www.sortedbyname.com/search?q={name_plus}"),
-        ("ZABASEARCH",                    f"https://www.zabasearch.com/people/{first}+{last}/{state}/"),
-        ("411.COM",                       f"https://www.411.com/name/{first}-{last}/{state}"),
-        ("USPHONEBOOK",                   f"https://www.usphonebook.com/{first}-{last}"),
-        ("ADDRESSES.COM",                 f"https://www.addresses.com/people/{first}+{last}/{state}/"),
-        ("SEARCHPEOPLEFREE",              f"https://www.searchpeoplefree.com/find/{first}-{last}"),
-        ("NUWBER",                        f"https://nuwber.com/search?firstName={first}&lastName={last}&city={city.replace(' ','+')}&state={state}"),
-        ("VOTERRECORDS.COM",              f"https://voterrecords.com/voters/{name_url}/1"),
-        ("PUBLICRECORDS.ONLINE",          f"https://publicrecords.online/search/?first_name={first}&last_name={last}&state={state}"),
-    ]
-    for name, url in sites:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
+    for nf, surname in variants:
+        v_plus = nf.replace(" ", "+")
+        v_url = nf.replace(" ", "-").lower()
+        if len(variants) > 1:
+            tag = f"  (surname: {surname})" if surname else ""
+            lines.append(f"── SEARCH VARIANT: {nf}{tag} ──")
+            lines.append("")
+        ftn = f"https://www.familytreenow.com/search/people/results?first={first}&last={surname}&state={state}"
+        if dob_full:
+            ftn += f"&dob={dob.replace('/','%2F')}"
+        sites = [
+            ("FAMILYTREENOW ★ BEST FREE",    ftn),
+            ("TRUEPEOPLESEARCH",              f"https://www.truepeoplesearch.com/results?name={v_plus}&citystatezip={loc_plus}"),
+            ("FASTPEOPLESEARCH",              f"https://www.fastpeoplesearch.com/name/{v_url}"),
+            ("THATSTHEM ★ 100% FREE",         f"https://thatsthem.com/name/{first}-{surname}"),
+            ("IDCRAWL (social+records)",      f"https://www.idcrawl.com/name/{first}-{surname}"),
+            ("PEEKYOU (social+arrests)",      f"https://www.peekyou.com/{first}_{surname}"),
+            ("SORTEDBYNAME.COM",              f"https://www.sortedbyname.com/search?q={v_plus}"),
+            ("ZABASEARCH",                    f"https://www.zabasearch.com/people/{first}+{surname}/{state}/"),
+            ("411.COM",                       f"https://www.411.com/name/{first}-{surname}/{state}"),
+            ("USPHONEBOOK",                   f"https://www.usphonebook.com/{first}-{surname}"),
+            ("ADDRESSES.COM",                 f"https://www.addresses.com/people/{first}+{surname}/{state}/"),
+            ("SEARCHPEOPLEFREE",              f"https://www.searchpeoplefree.com/find/{first}-{surname}"),
+            ("NUWBER",                        f"https://nuwber.com/search?firstName={first}&lastName={surname}&city={city.replace(' ','+')}&state={state}"),
+            ("VOTERRECORDS.COM",              f"https://voterrecords.com/voters/{v_url}/1"),
+            ("PUBLICRECORDS.ONLINE",          f"https://publicrecords.online/search/?first_name={first}&last_name={surname}&state={state}"),
+        ]
+        for name, url in sites:
+            lines.append(f"[{name}]")
+            lines.append(f"  {url}")
+            lines.append("")
 
     lines.append("=" * 50)
     lines.append("SOCIAL MEDIA")
@@ -252,22 +384,29 @@ def module_people_search(target, job_id, dob="", ssn="", oln=""):
     lines.append("=" * 50)
     lines.append("")
 
-    dorks = [
-        f'"{name_part}" "{location_part}"' if location_part else f'"{name_part}" New Mexico',
-        f'"{name_part}" address phone',
-        f'"{name_part}" site:familytreenow.com',
-        f'"{name_part}" site:truepeoplesearch.com',
-        f'"{name_part}" site:linkedin.com',
-        f'"{name_part}" arrest OR mugshot',
-        f'"{name_part}" court OR lawsuit OR case',
-        f'"{name_part}" obituary',
-        f'"{name_part}" email OR contact',
-    ]
-    for dork in dorks:
-        encoded = dork.replace(" ", "+").replace('"', '%22')
-        lines.append(f"  {dork}")
-        lines.append(f"  https://www.google.com/search?q={encoded}")
-        lines.append("")
+    # Dorks are quote-exact and order-sensitive, so generate the full set once
+    # per name ordering (both "Paternal Maternal" and "Maternal Paternal" when
+    # both surnames are present); the second ordering is intentionally kept.
+    for nf in orderings:
+        if len(orderings) > 1:
+            lines.append(f"── DORKS FOR: {nf} ──")
+            lines.append("")
+        dorks = [
+            f'"{nf}" "{location_part}"' if location_part else f'"{nf}" New Mexico',
+            f'"{nf}" address phone',
+            f'"{nf}" site:familytreenow.com',
+            f'"{nf}" site:truepeoplesearch.com',
+            f'"{nf}" site:linkedin.com',
+            f'"{nf}" arrest OR mugshot',
+            f'"{nf}" court OR lawsuit OR case',
+            f'"{nf}" obituary',
+            f'"{nf}" email OR contact',
+        ]
+        for dork in dorks:
+            encoded = dork.replace(" ", "+").replace('"', '%22')
+            lines.append(f"  {dork}")
+            lines.append(f"  https://www.google.com/search?q={encoded}")
+            lines.append("")
 
     try:
         san_url = ("https://api.opensanctions.org/search/default?q="
@@ -297,10 +436,24 @@ def module_people_search(target, job_id, dob="", ssn="", oln=""):
 # MODULE: PUBLIC RECORDS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_public_records(target, job_id, dob="", ssn="", oln=""):
+def module_public_records(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "public_records"})
-    name_part, location_part, first, last, state, city = parse_name_location(target)
+    p = resolve_person(target, extra)
+    name_part = p["primary_name"]
+    first = p["first"]
+    last = p["last_primary"]
+    orderings = p["name_orderings"]
+    surnames = p["surnames"]
     name_plus = name_part.replace(" ", "+")
+
+    # Variant pairs (full-name ordering + surname) so the people-finder block
+    # searches both surname orderings and under both surnames when present.
+    variants = []
+    for i, nf in enumerate(orderings):
+        sn = surnames[i] if i < len(surnames) else ""
+        variants.append((nf, sn))
+    if not variants:
+        variants = [(name_part, last)]
 
     lines = []
     lines.append(f"TARGET: {name_part}")
@@ -318,22 +471,29 @@ def module_public_records(target, job_id, dob="", ssn="", oln=""):
     lines.append("=" * 50)
     lines.append("")
 
-    free_people = [
-        ("JudyRecords ★ 740M Court Cases FREE", f"https://www.judyrecords.com/search?q={name_plus}"),
-        ("FamilyTreeNow ★ BEST FREE",    f"https://www.familytreenow.com/search/people/results?first={first}&last={last}"),
-        ("TruePeopleSearch",              f"https://www.truepeoplesearch.com/results?name={name_plus}"),
-        ("FastPeopleSearch",              f"https://www.fastpeoplesearch.com/name/{name_part.replace(' ','-').lower()}"),
-        ("ThatsThem ★ 100% FREE",         f"https://thatsthem.com/name/{first}-{last}"),
-        ("IDCrawl",                       f"https://www.idcrawl.com/name/{first}-{last}"),
-        ("SearchPeopleFree",              f"https://www.searchpeoplefree.com/find/{first}-{last}"),
-        ("Nuwber",                        f"https://nuwber.com/search?firstName={first}&lastName={last}"),
-        ("PublicRecords.Online",          f"https://publicrecords.online/search/?first_name={first}&last_name={last}"),
-        ("Addresses.com",                 f"https://www.addresses.com/people/{first}+{last}/"),
-    ]
-    for name, url in free_people:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
+    for nf, surname in variants:
+        v_plus = nf.replace(" ", "+")
+        v_url = nf.replace(" ", "-").lower()
+        if len(variants) > 1:
+            tag = f"  (surname: {surname})" if surname else ""
+            lines.append(f"── SEARCH VARIANT: {nf}{tag} ──")
+            lines.append("")
+        free_people = [
+            ("JudyRecords ★ 740M Court Cases FREE", f"https://www.judyrecords.com/search?q={v_plus}"),
+            ("FamilyTreeNow ★ BEST FREE",    f"https://www.familytreenow.com/search/people/results?first={first}&last={surname}"),
+            ("TruePeopleSearch",              f"https://www.truepeoplesearch.com/results?name={v_plus}"),
+            ("FastPeopleSearch",              f"https://www.fastpeoplesearch.com/name/{v_url}"),
+            ("ThatsThem ★ 100% FREE",         f"https://thatsthem.com/name/{first}-{surname}"),
+            ("IDCrawl",                       f"https://www.idcrawl.com/name/{first}-{surname}"),
+            ("SearchPeopleFree",              f"https://www.searchpeoplefree.com/find/{first}-{surname}"),
+            ("Nuwber",                        f"https://nuwber.com/search?firstName={first}&lastName={surname}"),
+            ("PublicRecords.Online",          f"https://publicrecords.online/search/?first_name={first}&last_name={surname}"),
+            ("Addresses.com",                 f"https://www.addresses.com/people/{first}+{surname}/"),
+        ]
+        for name, url in free_people:
+            lines.append(f"[{name}]")
+            lines.append(f"  {url}")
+            lines.append("")
 
     lines.append("=" * 50)
     lines.append("ARREST & CRIMINAL RECORDS")
@@ -423,10 +583,23 @@ def module_public_records(target, job_id, dob="", ssn="", oln=""):
 # MODULE: PROPERTY RECORDS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_property(target, job_id, dob="", ssn="", oln=""):
+def module_property(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "property"})
-    name_part, location_part, first, last, state, city = parse_name_location(target)
+    p = resolve_person(target, extra)
+    name_part = p["primary_name"]
+    location_part = p["location_part"]
+    first = p["first"]
+    last = p["last_primary"]
+    orderings = p["name_orderings"]
+    surnames = p["surnames"]
     name_plus = name_part.replace(" ", "+")
+
+    variants = []
+    for i, nf in enumerate(orderings):
+        sn = surnames[i] if i < len(surnames) else ""
+        variants.append((nf, sn))
+    if not variants:
+        variants = [(name_part, last)]
 
     lines = []
     lines.append(f"TARGET: {name_part}")
@@ -462,14 +635,28 @@ def module_property(target, job_id, dob="", ssn="", oln=""):
     lines.append("=" * 50)
     lines.append("")
 
-    national = [
-        ("PropWire ★ FREE Owner Search",  f"https://propwire.com/search?q={name_plus}"),
-        ("County Office — Owner Search",  f"https://www.countyoffice.org/property-records-search/?q={name_plus}"),
+    # Owner-name searches run under both surname orderings / both surnames.
+    for nf, surname in variants:
+        v_plus = nf.replace(" ", "+")
+        if len(variants) > 1:
+            tag = f"  (surname: {surname})" if surname else ""
+            lines.append(f"── OWNER SEARCH VARIANT: {nf}{tag} ──")
+            lines.append("")
+        owner = [
+            ("PropWire ★ FREE Owner Search",  f"https://propwire.com/search?q={v_plus}"),
+            ("County Office — Owner Search",  f"https://www.countyoffice.org/property-records-search/?q={v_plus}"),
+            ("FamilyTreeNow — Address Hist",  f"https://www.familytreenow.com/search/people/results?first={first}&last={surname}"),
+        ]
+        for name, url in owner:
+            lines.append(f"[{name}]")
+            lines.append(f"  {url}")
+            lines.append("")
+
+    static_national = [
         ("NETR — All 50 States Router",   "https://publicrecords.netronline.com/"),
-        ("FamilyTreeNow — Address Hist",  f"https://www.familytreenow.com/search/people/results?first={first}&last={last}"),
         ("Zillow — Ownership Check",      f"https://www.zillow.com/homes/{location_part.replace(' ','-') or 'new-mexico'}_rb/"),
     ]
-    for name, url in national:
+    for name, url in static_national:
         lines.append(f"[{name}]")
         lines.append(f"  {url}")
         lines.append("")
@@ -495,17 +682,21 @@ def module_property(target, job_id, dob="", ssn="", oln=""):
     lines.append("=" * 50)
     lines.append("")
 
-    dorks = [
-        f'"{name_part}" property owner New Mexico',
-        f'"{name_part}" real estate deed',
-        f'"{name_part}" assessor parcel',
-        f'"{name_part}" foreclosure lien',
-    ]
-    for dork in dorks:
-        encoded = dork.replace(" ", "+").replace('"', '%22')
-        lines.append(f"  {dork}")
-        lines.append(f"  https://www.google.com/search?q={encoded}")
-        lines.append("")
+    for nf in orderings:
+        if len(orderings) > 1:
+            lines.append(f"── DORKS FOR: {nf} ──")
+            lines.append("")
+        dorks = [
+            f'"{nf}" property owner New Mexico',
+            f'"{nf}" real estate deed',
+            f'"{nf}" assessor parcel',
+            f'"{nf}" foreclosure lien',
+        ]
+        for dork in dorks:
+            encoded = dork.replace(" ", "+").replace('"', '%22')
+            lines.append(f"  {dork}")
+            lines.append(f"  https://www.google.com/search?q={encoded}")
+            lines.append("")
 
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "property", "result": result})
@@ -517,12 +708,36 @@ def module_property(target, job_id, dob="", ssn="", oln=""):
 # All sources verified free June 2026 — paywall tools removed
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_skip_trace(target, job_id, dob="", ssn="", oln=""):
+def module_skip_trace(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "skip_trace"})
-    name_part, location_part, first, last, state, city = parse_name_location(target)
+    p = resolve_person(target, extra)
+    name_part = p["primary_name"]
+    location_part = p["location_part"]
+    first = p["first"]
+    last = p["last_primary"]
+    state = p["state"]
+    city = p["city"]
+    orderings = p["name_orderings"]
+    surnames = p["surnames"]
     name_plus = name_part.replace(" ", "+")
     name_url = name_part.replace(" ", "-").lower()
     city_plus = city.replace(" ", "+")
+
+    ex = extra or {}
+    phone_raw = (ex.get("phone") or "").strip()
+    phone_clean = re.sub(r"\D", "", phone_raw)[-10:] if phone_raw else ""
+    email = (ex.get("email") or "").strip()
+    employer = (ex.get("employer") or "").strip()
+    employer_plus = employer.replace(" ", "+")
+
+    # Full-name ordering + surname pairs so people-search queries run under both
+    # surname orderings and both surnames when paternal + maternal are present.
+    variants = []
+    for i, nf in enumerate(orderings):
+        sn = surnames[i] if i < len(surnames) else ""
+        variants.append((nf, sn))
+    if not variants:
+        variants = [(name_part, last)]
 
     lines = []
     lines.append(f"TARGET:   {name_part}")
@@ -549,25 +764,34 @@ def module_skip_trace(target, job_id, dob="", ssn="", oln=""):
         lines.append("")
     if oln:
         lines.append(f"★ OLN PROVIDED: {oln} — run through NM MVD and state DMV records.")
+        lines.append("  The OLN / driver's license number is often found in the court")
+        lines.append("  system (traffic citations, criminal complaints, case dockets).")
         lines.append("")
 
-    tier1 = [
-        ("FamilyTreeNow ★ BEST FREE",     f"https://www.familytreenow.com/search/people/results?first={first}&last={last}&state={state}"),
-        ("TruePeopleSearch",               f"https://www.truepeoplesearch.com/results?name={name_plus}&citystatezip={city_plus}+{state}"),
-        ("FastPeopleSearch",               f"https://www.fastpeoplesearch.com/name/{name_url}"),
-        ("ThatsThem ★ 100% FREE",          f"https://thatsthem.com/name/{first}-{last}"),
-        ("IDCrawl (social+records)",       f"https://www.idcrawl.com/name/{first}-{last}"),
-        ("ZabaSearch (aliases+history)",   f"https://www.zabasearch.com/people/{first}+{last}/{state}/"),
-        ("411.com",                        f"https://www.411.com/name/{first}-{last}/{state}"),
-        ("USPhoneBook",                    f"https://www.usphonebook.com/{first}-{last}"),
-        ("SearchPeopleFree",               f"https://www.searchpeoplefree.com/find/{first}-{last}"),
-        ("Nuwber",                         f"https://nuwber.com/search?firstName={first}&lastName={last}&city={city_plus}&state={state}"),
-        ("PublicRecords.Online",           f"https://publicrecords.online/search/?first_name={first}&last_name={last}&state={state}"),
-    ]
-    for name, url in tier1:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
+    for nf, surname in variants:
+        v_plus = nf.replace(" ", "+")
+        v_url = nf.replace(" ", "-").lower()
+        if len(variants) > 1:
+            tag = f"  (surname: {surname})" if surname else ""
+            lines.append(f"── SEARCH VARIANT: {nf}{tag} ──")
+            lines.append("")
+        tier1 = [
+            ("FamilyTreeNow ★ BEST FREE",     f"https://www.familytreenow.com/search/people/results?first={first}&last={surname}&state={state}"),
+            ("TruePeopleSearch",               f"https://www.truepeoplesearch.com/results?name={v_plus}&citystatezip={city_plus}+{state}"),
+            ("FastPeopleSearch",               f"https://www.fastpeoplesearch.com/name/{v_url}"),
+            ("ThatsThem ★ 100% FREE",          f"https://thatsthem.com/name/{first}-{surname}"),
+            ("IDCrawl (social+records)",       f"https://www.idcrawl.com/name/{first}-{surname}"),
+            ("ZabaSearch (aliases+history)",   f"https://www.zabasearch.com/people/{first}+{surname}/{state}/"),
+            ("411.com",                        f"https://www.411.com/name/{first}-{surname}/{state}"),
+            ("USPhoneBook",                    f"https://www.usphonebook.com/{first}-{surname}"),
+            ("SearchPeopleFree",               f"https://www.searchpeoplefree.com/find/{first}-{surname}"),
+            ("Nuwber",                         f"https://nuwber.com/search?firstName={first}&lastName={surname}&city={city_plus}&state={state}"),
+            ("PublicRecords.Online",           f"https://publicrecords.online/search/?first_name={first}&last_name={surname}&state={state}"),
+        ]
+        for name, url in tier1:
+            lines.append(f"[{name}]")
+            lines.append(f"  {url}")
+            lines.append("")
 
     lines.append("=" * 50)
     lines.append("TIER 2 — VOTER REGISTRATION (GOVERNMENT-VERIFIED ADDRESS)")
@@ -661,16 +885,22 @@ def module_skip_trace(target, job_id, dob="", ssn="", oln=""):
     lines.append("Find relatives to locate subject indirectly.")
     lines.append("")
 
-    relatives = [
-        ("FamilyTreeNow Relatives",       f"https://www.familytreenow.com/search/people/results?first={first}&last={last}"),
-        ("TruePeopleSearch Relatives",    f"https://www.truepeoplesearch.com/results?name={name_plus}"),
-        ("ThatsThem Associates",          f"https://thatsthem.com/name/{first}-{last}"),
-        ("IDCrawl Social Connections",    f"https://www.idcrawl.com/name/{first}-{last}"),
-    ]
-    for name, url in relatives:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
+    for nf, surname in variants:
+        v_plus = nf.replace(" ", "+")
+        if len(variants) > 1:
+            tag = f"  (surname: {surname})" if surname else ""
+            lines.append(f"── RELATIVES VARIANT: {nf}{tag} ──")
+            lines.append("")
+        relatives = [
+            ("FamilyTreeNow Relatives",       f"https://www.familytreenow.com/search/people/results?first={first}&last={surname}"),
+            ("TruePeopleSearch Relatives",    f"https://www.truepeoplesearch.com/results?name={v_plus}"),
+            ("ThatsThem Associates",          f"https://thatsthem.com/name/{first}-{surname}"),
+            ("IDCrawl Social Connections",    f"https://www.idcrawl.com/name/{first}-{surname}"),
+        ]
+        for name, url in relatives:
+            lines.append(f"[{name}]")
+            lines.append(f"  {url}")
+            lines.append("")
 
     lines.append("=" * 50)
     lines.append("TIER 4 — ADDRESS VERIFICATION (FREE)")
@@ -714,6 +944,68 @@ def module_skip_trace(target, job_id, dob="", ssn="", oln=""):
         lines.append(f"  {url}")
         lines.append("")
 
+    # Employer routed inline (business module stays COMPANY-only): search the
+    # free-text employer against NM SOS + OpenCorporates and tie subject↔employer.
+    if employer:
+        lines.append(f"★ EMPLOYER PROVIDED: {employer}")
+        lines.append("  Employer is often known to the client/victim — ask them if unsure.")
+        lines.append("  Employer address = alternative service-of-process location.")
+        lines.append("")
+        emp_links = [
+            ("Employer — NM SOS Business Search",  f"https://portal.sos.state.nm.us/BFS/online/CorporationFormation/SearchBusinesses?SearchCriteria={employer_plus}"),
+            ("Employer — NM SOS (new portal)",     f"https://enterprise.sos.nm.gov/search/business?searchType=byName&searchValue={employer_plus}"),
+            ("Employer — OpenCorporates (NM)",     f"https://opencorporates.com/companies?q={employer_plus}&jurisdiction_code=us_nm"),
+            ("Employer — LinkedIn Company",        f"https://www.linkedin.com/search/results/companies/?keywords={employer_plus}"),
+            ("Subject @ Employer (Google)",        f"https://www.google.com/search?q=%22{name_plus}%22+%22{employer_plus}%22"),
+        ]
+        for name, url in emp_links:
+            lines.append(f"[{name}]")
+            lines.append(f"  {url}")
+            lines.append("")
+
+    # Phone routed inline into skip-trace reverse-lookup links (the live
+    # pattern-analysis path stays in the Phone module — not replicated here).
+    if phone_clean:
+        lines.append("=" * 50)
+        lines.append("PHONE (PROVIDED) — REVERSE LOOKUP")
+        lines.append("=" * 50)
+        lines.append("")
+        lines.append(f"★ PHONE PROVIDED: {phone_clean} — reverse-lookup for name/address confirmation.")
+        lines.append("")
+        phone_links = [
+            ("TruePeopleSearch (phone)",   f"https://www.truepeoplesearch.com/results?phoneno={phone_clean}"),
+            ("ThatsThem (phone)",          f"https://thatsthem.com/phone/{phone_clean}"),
+            ("FastPeopleSearch (phone)",   f"https://www.fastpeoplesearch.com/phone/{phone_clean}"),
+            ("USPhoneBook (phone)",        f"https://www.usphonebook.com/{phone_clean}"),
+            ("NumLookup (carrier/owner)",  f"https://www.numlookup.com/?number={phone_clean}"),
+            ("SpyDialer (voicemail name)", f"https://www.spydialer.com/default.aspx?phone={phone_clean}"),
+        ]
+        for name, url in phone_links:
+            lines.append(f"[{name}]")
+            lines.append(f"  {url}")
+            lines.append("")
+
+    # Email routed inline into skip-trace (the live account-detection path stays
+    # in the Email module; breach_leak does the live breach check on the email).
+    if email:
+        lines.append("=" * 50)
+        lines.append("EMAIL (PROVIDED) — IDENTITY & REVERSE LOOKUP")
+        lines.append("=" * 50)
+        lines.append("")
+        lines.append(f"★ EMAIL PROVIDED: {email} — confirms identity and surfaces linked accounts.")
+        lines.append("")
+        email_enc = urllib.parse.quote(email, safe="")
+        email_links = [
+            ("ThatsThem (email)",          f"https://thatsthem.com/email/{email_enc}"),
+            ("IntelTechniques Email",      f"https://inteltechniques.com/tools/Email.html"),
+            ("Have I Been Pwned",          f"https://haveibeenpwned.com/account/{email_enc}"),
+            ("EmailRep.io",                f"https://emailrep.io/{email_enc}"),
+        ]
+        for name, url in email_links:
+            lines.append(f"[{name}]")
+            lines.append(f"  {url}")
+            lines.append("")
+
     try:
         san_url = ("https://api.opensanctions.org/search/default?q="
                    + urllib.parse.quote_plus(name_part) + "&schema=Person")
@@ -738,17 +1030,40 @@ def module_skip_trace(target, job_id, dob="", ssn="", oln=""):
     lines.append("=" * 50)
     lines.append("")
 
-    dorks = [
-        f'"{name_part}" "{location_part}" address' if location_part else f'"{name_part}" address New Mexico',
-        f'"{name_part}" "{state}" current address' if state else f'"{name_part}" current address New Mexico',
-        f'"{name_part}" voter registration "New Mexico"',
-        f'"{name_part}" "{state}" phone number' if state else f'"{name_part}" phone number',
-        f'"{name_part}" employer OR works OR employed "{state}"' if state else f'"{name_part}" employer OR works OR employed',
-        f'"{name_part}" site:linkedin.com "{state}"' if state else f'"{name_part}" site:linkedin.com',
-        f'"{name_part}" obituary OR memorial',
-        f'"{name_part}" arrest OR booking "{state}"' if state else f'"{name_part}" arrest OR booking',
-    ]
-    for dork in dorks:
+    born = dob_born_hint(dob)
+    for nf in orderings:
+        if len(orderings) > 1:
+            lines.append(f"── DORKS FOR: {nf} ──")
+            lines.append("")
+        dorks = [
+            f'"{nf}" "{location_part}" address' if location_part else f'"{nf}" address New Mexico',
+            f'"{nf}" "{state}" current address' if state else f'"{nf}" current address New Mexico',
+            f'"{nf}" voter registration "New Mexico"',
+            f'"{nf}" "{state}" phone number' if state else f'"{nf}" phone number',
+            f'"{nf}" employer OR works OR employed "{state}"' if state else f'"{nf}" employer OR works OR employed',
+            f'"{nf}" site:linkedin.com "{state}"' if state else f'"{nf}" site:linkedin.com',
+            f'"{nf}" obituary OR memorial',
+            f'"{nf}" arrest OR booking "{state}"' if state else f'"{nf}" arrest OR booking',
+        ]
+        if born:
+            dorks.append(f'"{nf}" "{born}"')
+        if employer:
+            dorks.append(f'"{nf}" "{employer}"')
+        for dork in dorks:
+            encoded = dork.replace(" ", "+").replace('"', '%22')
+            lines.append(f"  {dork}")
+            lines.append(f"  https://www.google.com/search?q={encoded}")
+            lines.append("")
+
+    # Identifier-specific dorks (not name-ordering dependent).
+    id_dorks = []
+    if phone_clean:
+        id_dorks.append(f'"{phone_clean}"')
+        id_dorks.append(f'"{phone_clean}" name OR address')
+    if email:
+        id_dorks.append(f'"{email}"')
+        id_dorks.append(f'"{email}" name OR profile')
+    for dork in id_dorks:
         encoded = dork.replace(" ", "+").replace('"', '%22')
         lines.append(f"  {dork}")
         lines.append(f"  https://www.google.com/search?q={encoded}")
@@ -763,25 +1078,27 @@ def module_skip_trace(target, job_id, dob="", ssn="", oln=""):
 # MODULE: SOCIAL MEDIA SEARCH
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_social_media(target, job_id, dob="", ssn="", oln=""):
+def module_social_media(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "social_media"})
 
-    if "," in target:
-        name_quoted = target.split(",")[0].strip()
-    else:
-        name_quoted = target.strip()
-    name_plus = name_quoted.replace(" ", "+")
+    p = resolve_person(target, extra)
+    name_quoted = p["primary_name"]
     parts = name_quoted.split()
-    first = parts[0] if parts else target
-    last = parts[-1] if len(parts) > 1 else ""
+    first = p["first"] or (parts[0] if parts else target)
+    last = p["last_primary"] or (parts[-1] if len(parts) > 1 else "")
+    name_plus = name_quoted.replace(" ", "+")
+    city = p["city"] or "Albuquerque"
 
-    # Derive city for location-scoped searches (fixes prior NameError on `city`)
-    _, _, _, _, _, city = parse_name_location(target)
-    if not city:
-        city = "Albuquerque"
+    ex = extra or {}
+    username = (ex.get("username") or "").strip()
+    # Exact handle when provided; else fall back to a first+last guess for the
+    # handle-based platforms (Snapchat/Venmo/Cash App).
+    handle = username.lower() if username else f"{first.lower()}{last.lower()}"
 
     lines = []
     lines.append(f"TARGET: {name_quoted}")
+    if username:
+        lines.append(f"USERNAME: {username}")
     lines.append("")
 
     lines.append("=" * 50)
@@ -867,12 +1184,12 @@ def module_social_media(target, job_id, dob="", ssn="", oln=""):
     lines.append("=" * 50)
     lines.append("")
     misc = [
-        ("Snapchat",    f"https://www.snapchat.com/add/{first.lower()}{last.lower()}"),
+        ("Snapchat",    f"https://www.snapchat.com/add/{handle}"),
         ("Pinterest",   f"https://www.pinterest.com/search/people/?q={name_plus}"),
         ("Nextdoor",    "https://nextdoor.com/find-neighbors/"),
         ("Meetup",      f"https://www.meetup.com/find/?keywords={name_plus}"),
-        ("Venmo",       f"https://venmo.com/{first.lower()}{last.lower()}"),
-        ("Cash App",    f"https://cash.app/${first.lower()}{last.lower()}"),
+        ("Venmo",       f"https://venmo.com/{handle}"),
+        ("Cash App",    f"https://cash.app/${handle}"),
     ]
     for label, url in misc:
         lines.append(f"[{label}]")
@@ -905,14 +1222,26 @@ def module_social_media(target, job_id, dob="", ssn="", oln=""):
 # MODULE: SOCIAL FOOTPRINT
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_social_footprint(target, job_id, dob="", ssn="", oln=""):
+def module_social_footprint(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "social_footprint"})
-    name_part, location_part, first, last, state, city = parse_name_location(target)
+    p = resolve_person(target, extra)
+    name_part = p["primary_name"]
+    location_part = p["location_part"]
+    first = p["first"]
+    last = p["last_primary"]
     name_plus = name_part.replace(" ", "+")
     loc_plus = location_part.replace(" ", "+")
 
-    username_variants = []
-    if first and last:
+    ex = extra or {}
+    username = (ex.get("username") or "").strip()
+    email = (ex.get("email") or "").strip()
+
+    # When an exact handle is provided, feed it in directly and SKIP name-guessed
+    # permutations. Permutations are kept only when no username is given.
+    handle_for_tools = username.lower() if username else f"{first.lower()}{last.lower()}"
+    if username:
+        username_variants = [username]
+    elif first and last:
         username_variants = [
             f"{first.lower()}{last.lower()}",
             f"{first.lower()}.{last.lower()}",
@@ -920,11 +1249,15 @@ def module_social_footprint(target, job_id, dob="", ssn="", oln=""):
             f"{first.lower()}{last.lower()[:3]}",
             f"{first.lower()[0]}{last.lower()}",
         ]
+    else:
+        username_variants = []
 
     lines = []
     lines.append(f"TARGET:   {name_part}")
     if location_part:
         lines.append(f"LOCATION: {location_part}")
+    if username:
+        lines.append(f"USERNAME: {username} (exact handle — permutations skipped)")
     lines.append("")
 
     lines.append("=" * 50)
@@ -958,7 +1291,7 @@ def module_social_footprint(target, job_id, dob="", ssn="", oln=""):
         ("PeekYou (social+arrests)",      f"https://www.peekyou.com/{first.lower()}_{last.lower()}"),
         ("Sowsearch (FB Deep)",           f"https://sowsearch.info/search?q={name_plus}"),
         ("Boardreader (forums)",          f"https://boardreader.com/s/{name_plus}.html"),
-        ("WhatsMyName (usernames)",       f"https://whatsmyname.app/?q={first.lower()}{last.lower()}"),
+        ("WhatsMyName (usernames)",       f"https://whatsmyname.app/?q={handle_for_tools}"),
         ("IDCrawl (social+records)",      f"https://www.idcrawl.com/name/{first.lower()}-{last.lower()}"),
         ("Epieos (email→social)",         f"https://epieos.com/?q={name_plus}&t=name"),
     ]
@@ -1013,6 +1346,11 @@ def module_social_footprint(target, job_id, dob="", ssn="", oln=""):
         f'"{name_part}" "{location_part}" social media',
         f'"{name_part}" @gmail.com OR @yahoo.com OR @hotmail.com',
     ]
+    if username:
+        dorks.append(f'"{username}"')
+        dorks.append(f'"{username}" site:instagram.com OR site:twitter.com OR site:tiktok.com')
+    if email:
+        dorks.append(f'"{email}"')
     for dork in dorks:
         encoded = dork.replace(" ", "+").replace('"', '%22')
         lines.append(f"  {dork}")
@@ -1029,7 +1367,7 @@ def module_social_footprint(target, job_id, dob="", ssn="", oln=""):
 # PLATE and LOCATION types only — not PERSON
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_hit_and_run(target, job_id, dob="", ssn="", oln=""):
+def module_hit_and_run(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "hit_and_run"})
 
     target_clean = target.upper().strip()
@@ -1181,7 +1519,7 @@ def module_hit_and_run(target, job_id, dob="", ssn="", oln=""):
 # MODULE: PHOTO FORENSICS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_photo_forensics(target, job_id, dob="", ssn="", oln=""):
+def module_photo_forensics(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "photo_forensics"})
     from urllib.parse import quote
     lines = []
@@ -1298,7 +1636,7 @@ def module_photo_forensics(target, job_id, dob="", ssn="", oln=""):
 # MODULE: GEOLOCATION
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_geolocation(target, job_id, dob="", ssn="", oln=""):
+def module_geolocation(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "geolocation"})
     lines = []
     lines.append(f"TARGET: {target}")
@@ -1383,7 +1721,7 @@ def module_geolocation(target, job_id, dob="", ssn="", oln=""):
 # MODULE: USERNAME SEARCH
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_username_search(target, job_id, dob="", ssn="", oln=""):
+def module_username_search(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "username_search"})
     lines = []
     lines.append(f"TARGET USERNAME: {target}")
@@ -1609,7 +1947,7 @@ def phone_pattern_analysis(number):
     }
 
 
-def module_phone(target, job_id, dob="", ssn="", oln=""):
+def module_phone(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "phone"})
     clean = target.replace("-","").replace("(","").replace(")","").replace(" ","").replace("+1","").strip()
     formatted = f"({clean[:3]}) {clean[3:6]}-{clean[6:]}" if len(clean) == 10 else target
@@ -1769,7 +2107,7 @@ def module_phone(target, job_id, dob="", ssn="", oln=""):
 # MODULE: EMAIL INVESTIGATION
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_email_investigate(target, job_id, dob="", ssn="", oln=""):
+def module_email_investigate(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "email_investigate"})
     lines = []
     lines.append(f"TARGET EMAIL: {target}")
@@ -1880,21 +2218,31 @@ def module_email_investigate(target, job_id, dob="", ssn="", oln=""):
 # Available for PERSON, EMAIL, USERNAME target types.
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_breach_leak(target, job_id, dob="", ssn="", oln=""):
+def module_breach_leak(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "breach_leak"})
     lines = []
 
-    # Determine if target looks like an email
-    is_email = "@" in target and "." in target.split("@")[-1]
+    ex = extra or {}
+    provided_email = (ex.get("email") or "").strip()
+
+    # The breach check runs against an email. Use the target when it is itself an
+    # email; otherwise fall back to an email supplied alongside a PERSON search.
+    if "@" in target and "." in target.split("@")[-1]:
+        email_subject = target
+    else:
+        email_subject = provided_email
+    is_email = bool(email_subject) and "@" in email_subject and "." in email_subject.split("@")[-1]
 
     lines.append(f"TARGET: {target}")
+    if email_subject and email_subject != target:
+        lines.append(f"EMAIL:  {email_subject}")
     lines.append("")
 
     # ── LIVE API CALL — XposedOrNot (genuinely free, no key, no signup) ──
     if is_email:
         try:
             xon_url = ("https://api.xposedornot.com/v1/check-email/"
-                       + urllib.parse.quote(target, safe=""))
+                       + urllib.parse.quote(email_subject, safe=""))
             data = http_get_json(xon_url, timeout=10)
             lines.append("=" * 50)
             lines.append("LIVE BREACH CHECK — XPOSEDORNOT (FREE API)")
@@ -1933,7 +2281,7 @@ def module_breach_leak(target, job_id, dob="", ssn="", oln=""):
     if is_email:
         breach_sites = [
             ("XposedOrNot ★ FREE — no signup",       f"https://xposedornot.com/"),
-            ("Have I Been Pwned ★ FREE (site only)",  f"https://haveibeenpwned.com/account/{target}"),
+            ("Have I Been Pwned ★ FREE (site only)",  f"https://haveibeenpwned.com/account/{email_subject}"),
             ("Mozilla Monitor ★ FREE",                 f"https://monitor.mozilla.org/"),
             ("BreachDirectory ★ FREE",                 f"https://breachdirectory.org/"),
             ("LeakCheck.net (1 free lookup)",          f"https://leakcheck.net/"),
@@ -1987,6 +2335,10 @@ def module_breach_leak(target, job_id, dob="", ssn="", oln=""):
         f'"{target}" "stealer log" OR "stealer logs"',
         f'"{target}" site:intelx.io',
     ]
+    # When an email was supplied alongside a name target, add email-keyed leak dorks.
+    if email_subject and email_subject != target:
+        dorks.append(f'"{email_subject}" "combolist" OR "database dump"')
+        dorks.append(f'"{email_subject}" intext:password')
     for dork in dorks:
         encoded = dork.replace(" ", "+").replace('"', '%22')
         lines.append(f"  {dork}")
@@ -2013,7 +2365,7 @@ def module_breach_leak(target, job_id, dob="", ssn="", oln=""):
 # MODULE: LICENSE PLATE LOOKUP
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_plate_lookup(target, job_id, dob="", ssn="", oln=""):
+def module_plate_lookup(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "plate_lookup"})
     target_clean = target.upper().strip()
     parts = target_clean.split()
@@ -2102,7 +2454,7 @@ def module_plate_lookup(target, job_id, dob="", ssn="", oln=""):
 # MODULE: BUSINESS SEARCH
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_business(target, job_id, dob="", ssn="", oln=""):
+def module_business(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "business"})
     name_plus = target.replace(" ", "+")
     name_url = target.replace(" ", "-").lower()
@@ -2214,7 +2566,7 @@ def module_business(target, job_id, dob="", ssn="", oln=""):
 # MODULE: WHOIS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_whois(target, job_id, dob="", ssn="", oln=""):
+def module_whois(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "whois"})
     api_key = os.environ.get("WHOIS_API_KEY", "at_free")
     try:
@@ -2252,7 +2604,7 @@ def module_whois(target, job_id, dob="", ssn="", oln=""):
 # MODULE: DNS RECORDS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_dns(target, job_id, dob="", ssn="", oln=""):
+def module_dns(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "dns"})
     lines = []
     for rtype in ["A", "AAAA", "MX", "NS", "TXT", "CNAME"]:
@@ -2268,7 +2620,7 @@ def module_dns(target, job_id, dob="", ssn="", oln=""):
 # MODULE: PORT SCAN
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_nmap(target, job_id, dob="", ssn="", oln=""):
+def module_nmap(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "nmap"})
     common_ports = {
         21:"FTP",22:"SSH",25:"SMTP",53:"DNS",80:"HTTP",
@@ -2298,7 +2650,7 @@ def module_nmap(target, job_id, dob="", ssn="", oln=""):
 # MODULE: GEOIP
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_geoip(target, job_id, dob="", ssn="", oln=""):
+def module_geoip(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "geoip"})
     try:
         ip = socket.gethostbyname(target)
@@ -2323,7 +2675,7 @@ def module_geoip(target, job_id, dob="", ssn="", oln=""):
 # MODULE: SHODAN
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_shodan(target, job_id, dob="", ssn="", oln=""):
+def module_shodan(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "shodan"})
     api_key = os.environ.get("SHODAN_API_KEY", "")
     if not api_key:
@@ -2359,7 +2711,7 @@ def module_shodan(target, job_id, dob="", ssn="", oln=""):
 # MODULE: VIRUSTOTAL
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_virustotal(target, job_id, dob="", ssn="", oln=""):
+def module_virustotal(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "virustotal"})
     api_key = os.environ.get("VT_API_KEY", "")
     if not api_key:
@@ -2392,7 +2744,7 @@ def module_virustotal(target, job_id, dob="", ssn="", oln=""):
 # MODULE: GOOGLE DORKS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def module_google_dorks(target, job_id, dob="", ssn="", oln=""):
+def module_google_dorks(target, job_id, dob="", ssn="", oln="", extra=None):
     emit(job_id, "module_start", {"module": "dorks"})
 
     lines = []
@@ -2567,7 +2919,7 @@ PERSON_ONLY_MODULES = {"people", "public_records", "property", "skip_trace",
 # serves EMAIL and USERNAME target types
 
 
-def run_investigation(job_id, target, target_type, selected_modules, dob="", ssn="", oln=""):
+def run_investigation(job_id, target, target_type, selected_modules, dob="", ssn="", oln="", extra=None):
     try:
         cutoff = time.time() - 3600
         stale = [jid for jid, j in list(jobs.items())
@@ -2586,7 +2938,8 @@ def run_investigation(job_id, target, target_type, selected_modules, dob="", ssn
         for mod_id in selected_modules:
             fn = MODULE_MAP.get(mod_id)
             if fn:
-                t = threading.Thread(target=fn, args=(target, job_id, dob, ssn, oln), daemon=True)
+                t = threading.Thread(target=fn, args=(target, job_id, dob, ssn, oln),
+                                     kwargs={"extra": extra}, daemon=True)
                 threads.append(t)
                 t.start()
         for t in threads:
@@ -2833,6 +3186,22 @@ def investigate():
     state = data.get("state", "").strip()
     token = data.get("token", "")
 
+    # Optional enrichment fields (all optional; a name-only search still works).
+    # Bundled into a single `extra` dict threaded through to the modules rather
+    # than widening every module signature. Modules that don't use it ignore it.
+    extra = {
+        "first":    data.get("first", "").strip(),
+        "middle":   data.get("middle", "").strip(),
+        "paternal": data.get("paternal", "").strip(),
+        "maternal": data.get("maternal", "").strip(),
+        "phone":    data.get("phone", "").strip(),
+        "email":    data.get("email", "").strip(),
+        "username": data.get("username", "").strip(),
+        "employer": data.get("employer", "").strip(),
+        "city":     city,
+        "state":    state,
+    }
+
     # If city/state are supplied separately, compose a canonical
     # "Name, City ST" string so parse_name_location's comma branch handles it.
     if target and "," not in target and (city or state):
@@ -2866,6 +3235,7 @@ def investigate():
     threading.Thread(
         target=run_investigation,
         args=(job_id, target, target_type, selected_modules, dob, ssn, oln),
+        kwargs={"extra": extra},
         daemon=True
     ).start()
     return jsonify({"job_id": job_id})
