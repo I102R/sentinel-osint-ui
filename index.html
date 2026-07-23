@@ -197,6 +197,12 @@ select.idf{cursor:pointer;}
             <input id="maternalInput" class="idf" type="text" placeholder="Maternal surname"/>
           </div>
           <div class="idf-hint">Leave blank to use the quick-entry box above. When both surnames are given, searches run under both orderings and both surnames.</div>
+          <div class="idf-row" style="align-items:center;">
+            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--dim);letter-spacing:1px;">
+              <input id="spanishToggle" type="checkbox" style="accent-color:var(--accent);cursor:pointer;"/>
+              Include Spanish-language searches
+            </label>
+          </div>
           <div class="idf-row">
             <input id="cityInput" class="idf" type="text" placeholder="City"/>
             <select id="stateInput" class="idf" title="State"><option value="">State…</option></select>
@@ -465,7 +471,8 @@ async function runInvestigation() {
     const employer = document.getElementById('employerInput')?.value.trim() || '';
     const city = document.getElementById('cityInput')?.value.trim() || '';
     const state = document.getElementById('stateInput')?.value.trim() || '';
-    const params = new URLSearchParams({ target: query, type: targetType, modules: mods.join(','), dob, ssn, oln, first, middle, paternal, maternal, phone, email, username, employer, city, state, token: authToken || '' });
+    const spanish = document.getElementById('spanishToggle')?.checked ? '1' : '';
+    const params = new URLSearchParams({ target: query, type: targetType, modules: mods.join(','), dob, ssn, oln, first, middle, paternal, maternal, phone, email, username, employer, city, state, spanish, token: authToken || '' });
     const res = await fetch(`${BACKEND}/api/investigate?${params}`, { method: 'GET' });
     if (res.status === 401) {
       // Token missing or expired — clear auth state and force re-login.
@@ -717,6 +724,8 @@ function clearIdentifiers() {
   if (ssn) { ssn.value = ''; ssn.dataset.raw = ''; }
   const state = document.getElementById('stateInput');
   if (state) state.value = '';
+  const es = document.getElementById('spanishToggle');
+  if (es) es.checked = false;
 }
 
 function showIdentifierRow() {

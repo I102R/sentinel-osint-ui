@@ -261,6 +261,241 @@ def resolve_person(target, extra=None):
         "structured": structured,
     }
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CURATED DORK REFERENCE — TUNABLE KNOBS (PERSON target type)
+# ──────────────────────────────────────────────────────────────────────────────
+# LAYER 1: domain knowledge. To tune dork output over time, edit these lists —
+# adding a site or a term is a one-line change here. The assembly logic in
+# build_person_dorks() (LAYER 2) weaves the subject's entered fields into these
+# patterns. Nothing here executes a search; output is query text for a human.
+# ══════════════════════════════════════════════════════════════════════════════
+
+# NM news/media domains for site: dorks (Crash & Incident + Social web-mentions).
+# Court/record domains are intentionally NOT here — court records are handled
+# separately through a paid database.
+NM_NEWS_DOMAINS = [
+    "abqjournal.com", "krqe.com", "koat.com", "kob.com",
+    "santafenewmexican.com", "currentargus.com", "lcsun-news.com",
+    "daily-times.com",
+]
+
+# Spanish-language life-event / obituary terms (Spanish category — toggle-gated).
+SPANISH_TERMS = [
+    "obituario", "funeraria", "servicios funerarios", "esquela", "en memoria",
+    "quinceañera", "bautizo", "boda", "misa",
+]
+
+# Crash / incident vocabulary (Crash & Incident category).
+CRASH_INCIDENT_TERMS = [
+    "accident", "crash", "collision", "hit and run", "DWI", "DUI",
+    "citation", "booking", "arrest",
+]
+
+# Generic employment vocabulary. The SPECIFIC employer comes from the employer
+# form field, never a hard-coded company list.
+EMPLOYMENT_TERMS = [
+    "employer", "works", "works at", "employed at", "employed by",
+]
+
+# Address / residency vocabulary (Identity & Address category).
+ADDRESS_TERMS = [
+    "address", "lives in", "resident of", "current address", "domicile",
+]
+
+# URL-path fragments for inurl: precision dorks (Precision category).
+URL_PATH_KEYWORDS = [
+    "profile", "person", "record", "detail", "obituary", "obituaries",
+    "memorial", "inmate", "offender", "booking", "arrest",
+]
+
+# Major social platforms for exact-name site: dorks (Social category).
+SOCIAL_DOMAINS = [
+    "facebook.com", "instagram.com", "twitter.com", "x.com",
+    "linkedin.com", "tiktok.com", "reddit.com",
+]
+
+# Common consumer email providers (Social category email-provider dork).
+EMAIL_PROVIDER_DORK = ('"@gmail.com" OR "@yahoo.com" OR "@hotmail.com" '
+                       'OR "@outlook.com"')
+
+
+def dork_year(dob):
+    """Extract a 4-digit year (19xx/20xx) from a full or partial DOB string,
+    or '' if none is present. Used by precision co-occurrence dorks."""
+    m = re.search(r"\b(19|20)\d{2}\b", dob or "")
+    return m.group(0) if m else ""
+
+
+def dork_url(dork):
+    """Build the Google search URL for a dork string (human clicks it; nothing
+    is executed here)."""
+    encoded = dork.replace(" ", "+").replace('"', '%22').replace("'", "%27")
+    return f"https://www.google.com/search?q={encoded}"
+
+
+def phone_formats(digits):
+    """Return the common written formats of a 10-digit US number for a single
+    multi-format phone dork. Empty list if not exactly 10 digits."""
+    d = re.sub(r"\D", "", digits or "")
+    if len(d) != 10:
+        return []
+    a, p, l = d[:3], d[3:6], d[6:]
+    return [d, f"({a}) {p}-{l}", f"{a}-{p}-{l}", f"{a}.{p}.{l}"]
+
+
+def build_person_dorks(p, extra=None, dob=""):
+    """LAYER 2 — assembly. Weaves the subject's entered fields into the curated
+    patterns above, grouped under category headers. Name-based categories emit
+    BOTH surname orderings when both surnames are present. Returns a list of
+    output lines (dork + its Google search URL) to extend a module's `lines`,
+    preserving the joined-text return format. Executes nothing — text only."""
+    ex = extra or {}
+    orderings = [o for o in (p.get("name_orderings") or [p.get("primary_name", "")]) if o]
+    surnames = [s for s in p.get("surnames", []) if s]
+    state = p.get("state", "")
+    city = p.get("city", "")
+    location_part = p.get("location_part", "")
+    loc = location_part or state or "New Mexico"
+    phone_digits = re.sub(r"\D", "", (ex.get("phone") or ""))[-10:]
+    email = (ex.get("email") or "").strip()
+    employer = (ex.get("employer") or "").strip()
+    username = (ex.get("username") or "").strip()
+    year = dork_year(dob)
+    spanish = bool(ex.get("spanish"))
+
+    out = []
+
+    def category(title, note=""):
+        out.append("-" * 50)
+        out.append(title)
+        out.append("-" * 50)
+        if note:
+            out.append(note)
+        out.append("")
+
+    def emit(dorks):
+        for d in dorks:
+            if not d:
+                continue
+            out.append(f"  {d}")
+            out.append(f"  {dork_url(d)}")
+            out.append("")
+
+    def emit_by_ordering(fn):
+        # fn(name_ordering) -> list of dork strings. Loops both orderings with a
+        # subheader when both surname orderings are present.
+        for nf in orderings:
+            if len(orderings) > 1:
+                out.append(f"── {nf} ──")
+                out.append("")
+            emit(fn(nf))
+
+    scoped = bool(location_part or state)  # do we have a place to scope to?
+
+    # ── Identity & Address ──────────────────────────────────────────────────
+    category("IDENTITY & ADDRESS")
+    addr_or = " OR ".join(f'"{t}"' for t in ADDRESS_TERMS)
+    def _identity(nf):
+        ds = [f'"{nf}" "{loc}"']
+        ds.append(f'"{nf}" ({addr_or}) "{loc}"' if scoped else f'"{nf}" ({addr_or})')
+        return ds
+    emit_by_ordering(_identity)
+
+    # ── Phone (multi-format) ────────────────────────────────────────────────
+    fmts = phone_formats(phone_digits)
+    if fmts:
+        category("PHONE (MULTI-FORMAT)")
+        # One dork covering every written format of the number at once.
+        emit([" OR ".join(f'"{f}"' for f in fmts)])
+        pretty = fmts[1] if len(fmts) > 1 else fmts[0]   # "(575) 628-8535"
+        def _phone_name(nf):
+            return [f'"{pretty}" "{nf}"']
+        emit_by_ordering(_phone_name)
+        emit([f'"{pretty}" ({addr_or})'])
+
+    # ── Employment ──────────────────────────────────────────────────────────
+    category("EMPLOYMENT")
+    emp_or = " OR ".join(f'"{t}"' for t in EMPLOYMENT_TERMS)
+    def _employment(nf):
+        ds = []
+        if employer:                       # specific employer from the form field
+            ds.append(f'"{nf}" "{employer}"')
+            if state:
+                ds.append(f'"{nf}" "{employer}" "{state}"')
+        ds.append(f'"{nf}" ({emp_or}) "{state}"' if state else f'"{nf}" ({emp_or})')
+        return ds
+    emit_by_ordering(_employment)
+
+    # ── Crash & Incident (incl. NM news/media coverage) ─────────────────────
+    category("CRASH & INCIDENT")
+    crash_or = " OR ".join(f'"{t}"' for t in CRASH_INCIDENT_TERMS)
+    news_or = " OR ".join(f"site:{d}" for d in NM_NEWS_DOMAINS)
+    def _crash(nf):
+        ds = [f'"{nf}" ({crash_or}) "{state}"' if state else f'"{nf}" ({crash_or})']
+        ds.append(f'"{nf}" ({news_or})')          # NM news/media web-mentions
+        return ds
+    emit_by_ordering(_crash)
+
+    # ── Social ──────────────────────────────────────────────────────────────
+    category("SOCIAL")
+    social_or = " OR ".join(f"site:{d}" for d in SOCIAL_DOMAINS)
+    def _social(nf):
+        return [f'"{nf}" ({social_or})',
+                f'"{nf}" ({EMAIL_PROVIDER_DORK})']
+    emit_by_ordering(_social)
+    if username:                                   # exact handle when provided
+        emit([f'"{username}"', f'"{username}" ({social_or})'])
+    if email:
+        emit([f'"{email}"'])
+
+    # ── Spanish-Language / Family (TOGGLE-GATED) ────────────────────────────
+    # Emitted ONLY when the Spanish toggle is on — never inferred from the name.
+    if spanish:
+        category("SPANISH-LANGUAGE / FAMILY",
+                 "Shown because the Spanish-language toggle is on. "
+                 "Targets obituaries, funeral notices, and family life events.")
+        span_or = " OR ".join(f'"{t}"' for t in SPANISH_TERMS)
+        span_targets = surnames if surnames else [p.get("primary_name", "")]
+        for sn in span_targets:
+            if not sn:
+                continue
+            emit([f'"{sn}" ({span_or}) "{loc}"' if scoped else f'"{sn}" ({span_or})'])
+
+    # ── Precision / Narrowing (intext: / inurl:) ────────────────────────────
+    category("PRECISION / NARROWING",
+             "Escalate here when broad dorks return too much noise. intext:/"
+             "inurl: narrow hard and can over-filter — drop an operator if you "
+             "get too few results.")
+    # Strong intext: co-occurrence dorks — built ONLY when the identifier is on
+    # file (DOB-year, phone), plus an address co-occurrence when a state is known.
+    def _precision_intext(nf):
+        ds = []
+        if year and (city or loc):
+            ds.append(f'"{nf}" intext:{year} intext:"{city or loc}"')
+        if len(phone_digits) == 10:
+            ph = phone_formats(phone_digits)[1]
+            ds.append(f'"{nf}" intext:"{ph}"' + (f' "{state}"' if state else ""))
+        if state:
+            ds.append(f'"{nf}" intext:({addr_or}) "{state}"')
+        return ds
+    emit_by_ordering(_precision_intext)
+    # inurl: fallbacks that work off the name alone. Fragment groups are slices
+    # of URL_PATH_KEYWORDS (edit that constant to tune these).
+    id_path     = " OR ".join(f"inurl:{k}" for k in URL_PATH_KEYWORDS[0:4])   # profile/person/record/detail
+    obit_path   = " OR ".join(f"inurl:{k}" for k in URL_PATH_KEYWORDS[4:7])   # obituary/obituaries/memorial
+    arrest_path = " OR ".join(f"inurl:{k}" for k in URL_PATH_KEYWORDS[7:11])  # inmate/offender/booking/arrest
+    def _precision_inurl(nf):
+        return [f'"{nf}" ({id_path})', f'"{nf}" ({obit_path})']
+    emit_by_ordering(_precision_inurl)
+    # surname-scoped arrest/booking inurl (both surnames when present).
+    for sn in (surnames if surnames else [p.get("primary_name", "")]):
+        if sn:
+            emit([f'"{sn}" ({arrest_path})'])
+
+    return out
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # MODULE: PEOPLE SEARCH
 # All sources verified free June 2026
@@ -1030,44 +1265,10 @@ def module_skip_trace(target, job_id, dob="", ssn="", oln="", extra=None):
     lines.append("=" * 50)
     lines.append("")
 
-    born = dob_born_hint(dob)
-    for nf in orderings:
-        if len(orderings) > 1:
-            lines.append(f"── DORKS FOR: {nf} ──")
-            lines.append("")
-        dorks = [
-            f'"{nf}" "{location_part}" address' if location_part else f'"{nf}" address New Mexico',
-            f'"{nf}" "{state}" current address' if state else f'"{nf}" current address New Mexico',
-            f'"{nf}" voter registration "New Mexico"',
-            f'"{nf}" "{state}" phone number' if state else f'"{nf}" phone number',
-            f'"{nf}" employer OR works OR employed "{state}"' if state else f'"{nf}" employer OR works OR employed',
-            f'"{nf}" site:linkedin.com "{state}"' if state else f'"{nf}" site:linkedin.com',
-            f'"{nf}" obituary OR memorial',
-            f'"{nf}" arrest OR booking "{state}"' if state else f'"{nf}" arrest OR booking',
-        ]
-        if born:
-            dorks.append(f'"{nf}" "{born}"')
-        if employer:
-            dorks.append(f'"{nf}" "{employer}"')
-        for dork in dorks:
-            encoded = dork.replace(" ", "+").replace('"', '%22')
-            lines.append(f"  {dork}")
-            lines.append(f"  https://www.google.com/search?q={encoded}")
-            lines.append("")
-
-    # Identifier-specific dorks (not name-ordering dependent).
-    id_dorks = []
-    if phone_clean:
-        id_dorks.append(f'"{phone_clean}"')
-        id_dorks.append(f'"{phone_clean}" name OR address')
-    if email:
-        id_dorks.append(f'"{email}"')
-        id_dorks.append(f'"{email}" name OR profile')
-    for dork in id_dorks:
-        encoded = dork.replace(" ", "+").replace('"', '%22')
-        lines.append(f"  {dork}")
-        lines.append(f"  https://www.google.com/search?q={encoded}")
-        lines.append("")
+    # Caseload-tuned, category-grouped PERSON dorks. Reference constants and
+    # assembly live in build_person_dorks() near the top of the dork logic so
+    # this stays tunable over time.
+    lines.extend(build_person_dorks(p, extra, dob=dob))
 
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "skip_trace", "result": result})
@@ -1338,20 +1539,34 @@ def module_social_footprint(target, job_id, dob="", ssn="", oln="", extra=None):
     lines.append("SOCIAL FOOTPRINT DORKS")
     lines.append("=" * 50)
     lines.append("")
-    dorks = [
-        f'"{name_part}" site:facebook.com',
-        f'"{name_part}" site:instagram.com',
-        f'"{name_part}" site:twitter.com',
-        f'"{name_part}" site:linkedin.com',
-        f'"{name_part}" "{location_part}" social media',
-        f'"{name_part}" @gmail.com OR @yahoo.com OR @hotmail.com',
-    ]
+    # Name-based social dorks run under BOTH surname orderings when present
+    # (consistent with the other person modules).
+    for nf in p["name_orderings"]:
+        if len(p["name_orderings"]) > 1:
+            lines.append(f"── DORKS FOR: {nf} ──")
+            lines.append("")
+        dorks = [
+            f'"{nf}" site:facebook.com',
+            f'"{nf}" site:instagram.com',
+            f'"{nf}" site:twitter.com',
+            f'"{nf}" site:linkedin.com',
+            f'"{nf}" "{location_part}" social media',
+            f'"{nf}" @gmail.com OR @yahoo.com OR @hotmail.com',
+        ]
+        for dork in dorks:
+            encoded = dork.replace(" ", "+").replace('"', '%22')
+            lines.append(f"  {dork}")
+            lines.append(f"  https://www.google.com/search?q={encoded}")
+            lines.append("")
+
+    # Identifier-specific dorks (not name-ordering dependent).
+    id_dorks = []
     if username:
-        dorks.append(f'"{username}"')
-        dorks.append(f'"{username}" site:instagram.com OR site:twitter.com OR site:tiktok.com')
+        id_dorks.append(f'"{username}"')
+        id_dorks.append(f'"{username}" site:instagram.com OR site:twitter.com OR site:tiktok.com')
     if email:
-        dorks.append(f'"{email}"')
-    for dork in dorks:
+        id_dorks.append(f'"{email}"')
+    for dork in id_dorks:
         encoded = dork.replace(" ", "+").replace('"', '%22')
         lines.append(f"  {dork}")
         lines.append(f"  https://www.google.com/search?q={encoded}")
@@ -3198,6 +3413,7 @@ def investigate():
         "email":    data.get("email", "").strip(),
         "username": data.get("username", "").strip(),
         "employer": data.get("employer", "").strip(),
+        "spanish":  data.get("spanish", "") in ("1", "true", "True", "on", "yes"),
         "city":     city,
         "state":    state,
     }
