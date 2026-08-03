@@ -319,6 +319,34 @@ SOCIAL_DOMAINS = [
 EMAIL_PROVIDER_DORK = ('"@gmail.com" OR "@yahoo.com" OR "@hotmail.com" '
                        'OR "@outlook.com"')
 
+# Loose (UNQUOTED) concept OR-blocks for Google dorks. Mode 6 rule: concepts
+# like address / employment are expressed as loose single words, never as a
+# stack of quoted phrases — quoting forces Google to require every phrase
+# verbatim and the query returns nothing. Edit these to tune concept coverage.
+ADDRESS_LOOSE = "address OR residence OR lives"
+EMPLOYMENT_LOOSE = "employer OR works OR employed"
+
+# ── BANNED SITES ────────────────────────────────────────────────────────────
+# Sites that never yield usable subject data. Matched as a case-insensitive
+# SUBSTRING against every generated URL, so a bare domain blocks all paths on
+# it. Editable: add a domain here to ban it everywhere in one place. is_banned()
+# is the single choke point every link list is filtered through.
+BANNED_SITES = [
+    # Mode 1 — low-yield SEO aggregators (generic ad-filled "records for NAME"
+    # landing pages, not data).
+    "countyoffice.org",
+    "publicrecords.online",
+    "propwire.com",          # name-only owner search returns a generic teaser
+    # Mode 2 — paywall teases (blur the data, then charge). Listed defensively:
+    # even if not currently emitted, they can never sneak back in.
+    "spokeo.com",
+    "beenverified.com",
+    "intelius.com",
+    "truthfinder.com",
+    "peoplefinders.com",
+    "instantcheckmate.com",
+]
+
 
 def dork_year(dob):
     """Extract a 4-digit year (19xx/20xx) from a full or partial DOB string,
@@ -344,12 +372,197 @@ def phone_formats(digits):
     return [d, f"({a}) {p}-{l}", f"{a}-{p}-{l}", f"{a}.{p}.{l}"]
 
 
-def build_person_dorks(p, extra=None, dob=""):
+def is_banned(url):
+    """True if a URL points at a BANNED_SITES domain (Mode 1/2). Case-insensitive
+    substring match, so any path on a banned domain is blocked. Every link list
+    is filtered through this — a banned site can never reach output."""
+    u = (url or "").lower()
+    return any(b in u for b in BANNED_SITES)
+
+
+def google_dork(name, phrase="", terms="", intext="", sites=None):
+    """THE single Google-dork constructor. Every generated dork routes through
+    here so the Mode 6 quoting rule cannot be violated dork-by-dork:
+
+      • `name`   — the full name, the ONLY element hard-quoted automatically and
+                   always as one phrase. State abbreviations and single common
+                   words are NEVER auto-quoted; pass them via `terms` (loose).
+      • `phrase` — at most ONE additional quoted phrase (scalar → stacking of
+                   quoted phrases is structurally impossible).
+      • `terms`  — loose, UNQUOTED words / OR-blocks / operators for concepts
+                   (address, employer, voter) and for locations beyond the city.
+      • `intext` — at most ONE intext: value (scalar → intext: cannot be stacked).
+      • `sites`  — optional list of domains → "(site:a OR site:b)".
+
+    Returns (dork_string, google_search_url). Executes nothing — text only."""
+    parts = []
+    if name:
+        parts.append(f'"{name}"')
+    if phrase:
+        parts.append(f'"{phrase}"')
+    if terms:
+        parts.append(terms)
+    if intext:
+        parts.append(f'intext:"{intext}"' if " " in intext else f"intext:{intext}")
+    if sites:
+        parts.append("(" + " OR ".join(f"site:{d}" for d in sites) + ")")
+    dork = " ".join(p for p in parts if p).strip()
+    return dork, dork_url(dork)
+
+
+def dedup_links(links, seen):
+    """Filter a list of (label, url) pairs: drop BANNED_SITES and any URL already
+    present in `seen` (report-wide dedup — across every category and both surname
+    orderings). Mutates `seen`. Returns the surviving pairs in order."""
+    out = []
+    for label, url in links:
+        if not url or is_banned(url) or url in seen:
+            continue
+        seen.add(url)
+        out.append((label, url))
+    return out
+
+
+def emit_section(lines, title, links, seen, note="", rule="="):
+    """Append a titled link section to `lines`, after filtering `links` through
+    dedup_links(). If nothing survives, NOTHING is appended — no hollow header
+    (per requirement (b)). Returns the number of links emitted."""
+    kept = dedup_links(links, seen)
+    if not kept:
+        return 0
+    bar = rule * 50
+    lines.append(bar)
+    lines.append(title)
+    lines.append(bar)
+    lines.append("")
+    if note:
+        lines.append(note)
+        lines.append("")
+    for label, url in kept:
+        lines.append(f"[{label}]")
+        lines.append(f"  {url}")
+        lines.append("")
+    return len(kept)
+
+
+# State abbreviation → full name (lower-hyphen), for sites whose location filter
+# is a path segment using the spelled-out state (idcrawl). Editable.
+STATE_NAMES = {
+    "AL": "alabama", "AK": "alaska", "AZ": "arizona", "AR": "arkansas",
+    "CA": "california", "CO": "colorado", "CT": "connecticut", "DE": "delaware",
+    "DC": "district-of-columbia", "FL": "florida", "GA": "georgia",
+    "HI": "hawaii", "ID": "idaho", "IL": "illinois", "IN": "indiana",
+    "IA": "iowa", "KS": "kansas", "KY": "kentucky", "LA": "louisiana",
+    "ME": "maine", "MD": "maryland", "MA": "massachusetts", "MI": "michigan",
+    "MN": "minnesota", "MS": "mississippi", "MO": "missouri", "MT": "montana",
+    "NE": "nebraska", "NV": "nevada", "NH": "new-hampshire", "NJ": "new-jersey",
+    "NM": "new-mexico", "NY": "new-york", "NC": "north-carolina",
+    "ND": "north-dakota", "OH": "ohio", "OK": "oklahoma", "OR": "oregon",
+    "PA": "pennsylvania", "RI": "rhode-island", "SC": "south-carolina",
+    "SD": "south-dakota", "TN": "tennessee", "TX": "texas", "UT": "utah",
+    "VT": "vermont", "VA": "virginia", "WA": "washington",
+    "WV": "west-virginia", "WI": "wisconsin", "WY": "wyoming",
+}
+
+
+def people_search_links(first, surname, full_name, city="", state=""):
+    """Curated people-search links with each site's REAL location parameter baked
+    in (Mode 3) — no name-only URLs for sites that support location filtering.
+    Returns (primary, secondary): two lists of (label, url).
+
+    PRIMARY  = free sources with confirmed real data (start here).
+    SECONDARY = hit-or-miss free aggregators worth a look.
+
+    BANNED_SITES are simply never listed here. All modules call this one function
+    so location handling stays consistent across the whole report.
+
+    ── LOCATION SCHEMES (⚑ = pattern I could not verify live per the no-scrape
+    rule; flagged for you to confirm against real output; centralized here so a
+    correction is a one-line edit):
+      TruePeopleSearch  citystatezip=City, ST      (matches prior working code)
+      FamilyTreeNow     &state=ST                  (param already in codebase)
+      ZabaSearch        /state/ path               (param already in codebase)
+      411.com           /ST path                   (param already in codebase)
+      Nuwber            &city=&state=              (param already in codebase)
+      FastPeopleSearch  _city-st path suffix       ⚑
+      ThatsThem         /city-st path segment      ⚑
+      IDCrawl           /<state-full-name> segment ⚑ (your named example)
+      USPhoneBook       — location scheme unconfirmed → kept name-only ⚑
+      SearchPeopleFree  — location scheme unconfirmed → kept name-only ⚑
+      PeekYou           — location scheme unconfirmed → kept name-only ⚑
+      SortedByName      — name index, no location support → name-only (expected)
+    """
+    st = (state or "").strip()
+    st_l = st.lower()
+    city_h = city.strip().replace(" ", "-").lower()
+    fn_plus = full_name.replace(" ", "+")
+    fn_url = full_name.replace(" ", "-").lower()
+    first_url = first.strip().replace(" ", "-").lower()
+    sur_url = surname.strip().replace(" ", "-").lower()
+    csz = ", ".join(w for w in [city.strip(), st] if w)          # "Silver City, NM"
+    csz_plus = csz.replace(" ", "+")
+
+    # PRIMARY — confirmed reliable free sources, each carrying location.
+    tps = f"https://www.truepeoplesearch.com/results?name={fn_plus}"
+    if csz:
+        tps += f"&citystatezip={csz_plus}"
+    fps = f"https://www.fastpeoplesearch.com/name/{first_url}-{sur_url}"
+    if city_h and st_l:
+        fps += f"_{city_h}-{st_l}"          # ⚑ /name/first-last_city-st
+    tt = f"https://thatsthem.com/name/{first_url}-{sur_url}"
+    if city_h and st_l:
+        tt += f"/{city_h}-{st_l}"           # ⚑ /name/first-last/city-st
+    ftn = f"https://www.familytreenow.com/search/people/results?first={first}&last={surname}"
+    if st:
+        ftn += f"&state={st}"
+
+    primary = [
+        ("TruePeopleSearch ★ confirmed reliable", tps),
+        ("FastPeopleSearch",                       fps),
+        ("ThatsThem ★ 100% free",                  tt),
+        ("FamilyTreeNow ★ best free",              ftn),
+    ]
+
+    # SECONDARY — hit-or-miss free aggregators. Kept broadly (drop only obvious
+    # junk); location applied where the site's scheme is known.
+    idc = f"https://www.idcrawl.com/name/{first_url}-{sur_url}"
+    if st and STATE_NAMES.get(st.upper()):
+        idc += f"/{STATE_NAMES[st.upper()]}"     # ⚑ /name/first-last/new-mexico
+    zaba = f"https://www.zabasearch.com/people/{first_url}+{sur_url}/{st}/" if st \
+        else f"https://www.zabasearch.com/people/{first_url}+{sur_url}/"
+    foureleven = f"https://www.411.com/name/{first_url}-{sur_url}/{st}" if st \
+        else f"https://www.411.com/name/{first_url}-{sur_url}"
+    nuwber = f"https://nuwber.com/search?firstName={first}&lastName={surname}"
+    if city.strip():
+        nuwber += f"&city={city.strip().replace(' ', '+')}"
+    if st:
+        nuwber += f"&state={st}"
+    addresses = f"https://www.addresses.com/people/{first_url}+{sur_url}/{st}/" if st \
+        else f"https://www.addresses.com/people/{first_url}+{sur_url}/"
+
+    secondary = [
+        ("IDCrawl (social+records)",   idc),
+        ("ZabaSearch (aliases+hist)",  zaba),
+        ("411.com",                    foureleven),
+        ("Nuwber",                     nuwber),
+        ("Addresses.com",              addresses),
+        ("USPhoneBook",                f"https://www.usphonebook.com/{first_url}-{sur_url}"),
+        ("SearchPeopleFree",           f"https://www.searchpeoplefree.com/find/{first_url}-{sur_url}"),
+        ("PeekYou (social+arrests)",   f"https://www.peekyou.com/{first_url}_{sur_url}"),
+        ("SortedByName",               f"https://www.sortedbyname.com/search?q={fn_plus}"),
+    ]
+    return primary, secondary
+
+
+def build_person_dorks(p, extra=None, dob="", seen=None):
     """LAYER 2 — assembly. Weaves the subject's entered fields into the curated
     patterns above, grouped under category headers. Name-based categories emit
     BOTH surname orderings when both surnames are present. Returns a list of
     output lines (dork + its Google search URL) to extend a module's `lines`,
-    preserving the joined-text return format. Executes nothing — text only."""
+    preserving the joined-text return format. Executes nothing — text only.
+
+    `seen` is an optional report-wide set of already-emitted URLs; pass the
+    module's set so dork URLs are de-duplicated against the rest of the report."""
     ex = extra or {}
     orderings = [o for o in (p.get("name_orderings") or [p.get("primary_name", "")]) if o]
     surnames = [s for s in p.get("surnames", []) if s]
@@ -364,134 +577,172 @@ def build_person_dorks(p, extra=None, dob=""):
     year = dork_year(dob)
     spanish = bool(ex.get("spanish"))
 
+    primary_name = p.get("primary_name", "")
+    if seen is None:
+        seen = set()
     out = []
 
-    def category(title, note=""):
+    # ── assembly helpers ─────────────────────────────────────────────────────
+    # Every dork is a (dork_string, url) tuple from google_dork(); emission
+    # dedups on the URL (report-wide) and drops a category whose dorks all
+    # vanished — no hollow headers.
+    def _dedup(raw):
+        items = []
+        for it in raw:
+            if not it:
+                continue
+            d, u = it
+            if not d or u in seen:
+                continue
+            seen.add(u)
+            items.append((d, u))
+        return items
+
+    def build_blocks(fn, targets):
+        multi = len(targets) > 1
+        blocks = []
+        for nf in targets:
+            items = _dedup(fn(nf))
+            if items:
+                blocks.append((nf if multi else None, items))
+        return blocks
+
+    def flush(title, blocks, note="", extra=None):
+        extra_items = _dedup(extra or [])
+        if not blocks and not extra_items:
+            return
         out.append("-" * 50)
         out.append(title)
         out.append("-" * 50)
         if note:
             out.append(note)
         out.append("")
-
-    def emit(dorks):
-        for d in dorks:
-            if not d:
-                continue
+        for sub, items in blocks:
+            if sub is not None:
+                out.append(f"── {sub} ──")
+                out.append("")
+            for d, u in items:
+                out.append(f"  {d}")
+                out.append(f"  {u}")
+                out.append("")
+        for d, u in extra_items:
             out.append(f"  {d}")
-            out.append(f"  {dork_url(d)}")
+            out.append(f"  {u}")
             out.append("")
 
-    def emit_by_ordering(fn):
-        # fn(name_ordering) -> list of dork strings. Loops both orderings with a
-        # subheader when both surname orderings are present.
-        for nf in orderings:
-            if len(orderings) > 1:
-                out.append(f"── {nf} ──")
-                out.append("")
-            emit(fn(nf))
+    def dork_place(name, concept=""):
+        # name + optional loose concept OR-block + location. Mode 6: the city
+        # (when present) is the single quoted phrase; the state is ALWAYS loose
+        # (never quoted); concepts stay loose. Falls back to loose "New Mexico"
+        # only when no location was entered at all.
+        terms = f"({concept})" if concept else ""
+        if state:
+            terms = (terms + " " + state).strip()
+        if city:
+            return google_dork(name, phrase=city, terms=terms)
+        if not state:
+            terms = (terms + " New Mexico").strip()
+        return google_dork(name, terms=terms)
 
-    scoped = bool(location_part or state)  # do we have a place to scope to?
+    def loose_place(base=""):
+        # loose (unquoted) location tokens, for dorks whose one quoted-phrase
+        # slot is already spent (employer / phone / intext).
+        bits = [base] if base else []
+        if city:
+            bits.append(city)
+        if state:
+            bits.append(state)
+        return " ".join(bits).strip()
 
     # ── Identity & Address ──────────────────────────────────────────────────
-    category("IDENTITY & ADDRESS")
-    addr_or = " OR ".join(f'"{t}"' for t in ADDRESS_TERMS)
     def _identity(nf):
-        ds = [f'"{nf}" "{loc}"']
-        ds.append(f'"{nf}" ({addr_or}) "{loc}"' if scoped else f'"{nf}" ({addr_or})')
-        return ds
-    emit_by_ordering(_identity)
+        return [dork_place(nf), dork_place(nf, ADDRESS_LOOSE)]
+    flush("IDENTITY & ADDRESS", build_blocks(_identity, orderings))
 
     # ── Phone (multi-format) ────────────────────────────────────────────────
     fmts = phone_formats(phone_digits)
     if fmts:
-        category("PHONE (MULTI-FORMAT)")
-        # One dork covering every written format of the number at once.
-        emit([" OR ".join(f'"{f}"' for f in fmts)])
-        pretty = fmts[1] if len(fmts) > 1 else fmts[0]   # "(575) 628-8535"
+        pretty = fmts[1] if len(fmts) > 1 else fmts[0]      # "(575) 628-8535"
+        # Exact-match OR alternatives of ONE number — broadening, not the Mode 6
+        # over-constraint (that rule targets AND-ed quoted phrases).
+        phone_or = " OR ".join(f'"{f}"' for f in fmts)
         def _phone_name(nf):
-            return [f'"{pretty}" "{nf}"']
-        emit_by_ordering(_phone_name)
-        emit([f'"{pretty}" ({addr_or})'])
+            return [google_dork(nf, phrase=pretty)]         # name + the number
+        phone_extra = [
+            google_dork("", terms=phone_or),                # the number, all formats
+            google_dork("", phrase=pretty, terms=f"({ADDRESS_LOOSE})"),
+        ]
+        flush("PHONE (MULTI-FORMAT)",
+              build_blocks(_phone_name, orderings), extra=phone_extra)
 
     # ── Employment ──────────────────────────────────────────────────────────
-    category("EMPLOYMENT")
-    emp_or = " OR ".join(f'"{t}"' for t in EMPLOYMENT_TERMS)
     def _employment(nf):
         ds = []
         if employer:                       # specific employer from the form field
-            ds.append(f'"{nf}" "{employer}"')
-            if state:
-                ds.append(f'"{nf}" "{employer}" "{state}"')
-        ds.append(f'"{nf}" ({emp_or}) "{state}"' if state else f'"{nf}" ({emp_or})')
+            ds.append(google_dork(nf, phrase=employer, terms=state))
+        ds.append(dork_place(nf, EMPLOYMENT_LOOSE))
         return ds
-    emit_by_ordering(_employment)
+    flush("EMPLOYMENT", build_blocks(_employment, orderings))
 
     # ── Crash & Incident (incl. NM news/media coverage) ─────────────────────
-    category("CRASH & INCIDENT")
-    crash_or = " OR ".join(f'"{t}"' for t in CRASH_INCIDENT_TERMS)
-    news_or = " OR ".join(f"site:{d}" for d in NM_NEWS_DOMAINS)
+    crash_or = " OR ".join(CRASH_INCIDENT_TERMS)             # loose concepts
     def _crash(nf):
-        ds = [f'"{nf}" ({crash_or}) "{state}"' if state else f'"{nf}" ({crash_or})']
-        ds.append(f'"{nf}" ({news_or})')          # NM news/media web-mentions
-        return ds
-    emit_by_ordering(_crash)
+        return [dork_place(nf, crash_or),
+                google_dork(nf, sites=NM_NEWS_DOMAINS)]      # NM news/media
+    flush("CRASH & INCIDENT", build_blocks(_crash, orderings))
 
     # ── Social ──────────────────────────────────────────────────────────────
-    category("SOCIAL")
-    social_or = " OR ".join(f"site:{d}" for d in SOCIAL_DOMAINS)
     def _social(nf):
-        return [f'"{nf}" ({social_or})',
-                f'"{nf}" ({EMAIL_PROVIDER_DORK})']
-    emit_by_ordering(_social)
+        return [google_dork(nf, sites=SOCIAL_DOMAINS),
+                google_dork(nf, terms=EMAIL_PROVIDER_DORK)]
+    social_extra = []
     if username:                                   # exact handle when provided
-        emit([f'"{username}"', f'"{username}" ({social_or})'])
+        social_extra.append(google_dork(username))
+        social_extra.append(google_dork(username, sites=SOCIAL_DOMAINS))
     if email:
-        emit([f'"{email}"'])
+        social_extra.append(google_dork(email))
+    flush("SOCIAL", build_blocks(_social, orderings), extra=social_extra)
 
     # ── Spanish-Language / Family (TOGGLE-GATED) ────────────────────────────
     # Emitted ONLY when the Spanish toggle is on — never inferred from the name.
     if spanish:
-        category("SPANISH-LANGUAGE / FAMILY",
-                 "Shown because the Spanish-language toggle is on. "
-                 "Targets obituaries, funeral notices, and family life events.")
-        span_or = " OR ".join(f'"{t}"' for t in SPANISH_TERMS)
-        span_targets = surnames if surnames else [p.get("primary_name", "")]
-        for sn in span_targets:
-            if not sn:
-                continue
-            emit([f'"{sn}" ({span_or}) "{loc}"' if scoped else f'"{sn}" ({span_or})'])
+        span_or = " OR ".join(SPANISH_TERMS)                # loose concepts
+        span_targets = [s for s in (surnames or [primary_name]) if s]
+        def _span(sn):
+            return [dork_place(sn, span_or)]
+        flush("SPANISH-LANGUAGE / FAMILY",
+              build_blocks(_span, span_targets),
+              note="Shown because the Spanish-language toggle is on. "
+                   "Targets obituaries, funeral notices, and family life events.")
 
     # ── Precision / Narrowing (intext: / inurl:) ────────────────────────────
-    category("PRECISION / NARROWING",
-             "Escalate here when broad dorks return too much noise. intext:/"
-             "inurl: narrow hard and can over-filter — drop an operator if you "
-             "get too few results.")
-    # Strong intext: co-occurrence dorks — built ONLY when the identifier is on
-    # file (DOB-year, phone), plus an address co-occurrence when a state is known.
-    def _precision_intext(nf):
+    # intext: co-occurrence dorks — built ONLY when the identifier is on file
+    # (DOB-year, phone), plus a single-intext address co-occurrence when a state
+    # is known. Mode 6: at most ONE intext: per dork; state never quoted.
+    def _precision(nf):
         ds = []
-        if year and (city or loc):
-            ds.append(f'"{nf}" intext:{year} intext:"{city or loc}"')
+        if year:
+            ds.append(google_dork(nf, intext=year, terms=loose_place()))
         if len(phone_digits) == 10:
             ph = phone_formats(phone_digits)[1]
-            ds.append(f'"{nf}" intext:"{ph}"' + (f' "{state}"' if state else ""))
+            ds.append(google_dork(nf, intext=ph, terms=state))
         if state:
-            ds.append(f'"{nf}" intext:({addr_or}) "{state}"')
+            ds.append(google_dork(nf, intext="address", terms=state))
+        # inurl: fallbacks (operators, not intext) — slices of URL_PATH_KEYWORDS.
+        ds.append(google_dork(nf, terms=f"({id_path})"))
+        ds.append(google_dork(nf, terms=f"({obit_path})"))
         return ds
-    emit_by_ordering(_precision_intext)
-    # inurl: fallbacks that work off the name alone. Fragment groups are slices
-    # of URL_PATH_KEYWORDS (edit that constant to tune these).
     id_path     = " OR ".join(f"inurl:{k}" for k in URL_PATH_KEYWORDS[0:4])   # profile/person/record/detail
     obit_path   = " OR ".join(f"inurl:{k}" for k in URL_PATH_KEYWORDS[4:7])   # obituary/obituaries/memorial
     arrest_path = " OR ".join(f"inurl:{k}" for k in URL_PATH_KEYWORDS[7:11])  # inmate/offender/booking/arrest
-    def _precision_inurl(nf):
-        return [f'"{nf}" ({id_path})', f'"{nf}" ({obit_path})']
-    emit_by_ordering(_precision_inurl)
-    # surname-scoped arrest/booking inurl (both surnames when present).
-    for sn in (surnames if surnames else [p.get("primary_name", "")]):
-        if sn:
-            emit([f'"{sn}" ({arrest_path})'])
+    arrest_extra = [google_dork(sn, terms=f"({arrest_path})")
+                    for sn in (surnames or [primary_name]) if sn]
+    flush("PRECISION / NARROWING",
+          build_blocks(_precision, orderings),
+          note="Escalate here when broad dorks return too much noise. intext:/"
+               "inurl: narrow hard and can over-filter — drop an operator if you "
+               "get too few results.",
+          extra=arrest_extra)
 
     return out
 
@@ -528,6 +779,8 @@ def module_people_search(target, job_id, dob="", ssn="", oln="", extra=None):
     if not variants:
         variants = [(name_part, "")]
 
+    seen = set()   # report-wide URL dedup across every section below
+
     lines = []
     lines.append(f"TARGET:   {name_part}")
     if location_part:
@@ -541,47 +794,37 @@ def module_people_search(target, job_id, dob="", ssn="", oln="", extra=None):
         lines.append(f"OLN:      {oln}")
     lines.append("")
 
-    lines.append("=" * 50)
-    lines.append("FREE PEOPLE FINDER SITES — VERIFIED NO PAYWALL")
-    lines.append("=" * 50)
-    lines.append("")
-
-    for nf, surname in variants:
-        v_plus = nf.replace(" ", "+")
-        v_url = nf.replace(" ", "-").lower()
-        if len(variants) > 1:
-            tag = f"  (surname: {surname})" if surname else ""
-            lines.append(f"── SEARCH VARIANT: {nf}{tag} ──")
+    # People-finder sites, curated and grouped so reliable sources come first.
+    # Location is baked into every URL by people_search_links() (Mode 3);
+    # BANNED_SITES are filtered and URLs de-duplicated report-wide.
+    def render_group(title, group_index, note=""):
+        blocks = []
+        for nf, surname in variants:
+            links = people_search_links(first, surname, nf, city, state)[group_index]
+            kept = dedup_links(links, seen)
+            if kept:
+                blocks.append((nf, surname, kept))
+        if not blocks:
+            return
+        lines.append("=" * 50)
+        lines.append(title)
+        lines.append("=" * 50)
+        lines.append("")
+        if note:
+            lines.append(note)
             lines.append("")
-        ftn = f"https://www.familytreenow.com/search/people/results?first={first}&last={surname}&state={state}"
-        if dob_full:
-            ftn += f"&dob={dob.replace('/','%2F')}"
-        sites = [
-            ("FAMILYTREENOW ★ BEST FREE",    ftn),
-            ("TRUEPEOPLESEARCH",              f"https://www.truepeoplesearch.com/results?name={v_plus}&citystatezip={loc_plus}"),
-            ("FASTPEOPLESEARCH",              f"https://www.fastpeoplesearch.com/name/{v_url}"),
-            ("THATSTHEM ★ 100% FREE",         f"https://thatsthem.com/name/{first}-{surname}"),
-            ("IDCRAWL (social+records)",      f"https://www.idcrawl.com/name/{first}-{surname}"),
-            ("PEEKYOU (social+arrests)",      f"https://www.peekyou.com/{first}_{surname}"),
-            ("SORTEDBYNAME.COM",              f"https://www.sortedbyname.com/search?q={v_plus}"),
-            ("ZABASEARCH",                    f"https://www.zabasearch.com/people/{first}+{surname}/{state}/"),
-            ("411.COM",                       f"https://www.411.com/name/{first}-{surname}/{state}"),
-            ("USPHONEBOOK",                   f"https://www.usphonebook.com/{first}-{surname}"),
-            ("ADDRESSES.COM",                 f"https://www.addresses.com/people/{first}+{surname}/{state}/"),
-            ("SEARCHPEOPLEFREE",              f"https://www.searchpeoplefree.com/find/{first}-{surname}"),
-            ("NUWBER",                        f"https://nuwber.com/search?firstName={first}&lastName={surname}&city={city.replace(' ','+')}&state={state}"),
-            ("VOTERRECORDS.COM",              f"https://voterrecords.com/voters/{v_url}/1"),
-            ("PUBLICRECORDS.ONLINE",          f"https://publicrecords.online/search/?first_name={first}&last_name={surname}&state={state}"),
-        ]
-        for name, url in sites:
-            lines.append(f"[{name}]")
-            lines.append(f"  {url}")
-            lines.append("")
+        for nf, surname, kept in blocks:
+            if len(variants) > 1:
+                tag = f"  (surname: {surname})" if surname else ""
+                lines.append(f"── {nf}{tag} ──")
+                lines.append("")
+            for name, url in kept:
+                lines.append(f"[{name}]")
+                lines.append(f"  {url}")
+                lines.append("")
 
-    lines.append("=" * 50)
-    lines.append("SOCIAL MEDIA")
-    lines.append("=" * 50)
-    lines.append("")
+    render_group("PRIMARY SOURCES (start here) — FREE, REAL DATA", 0)
+    render_group("SECONDARY / HIT-OR-MISS — FREE AGGREGATORS", 1)
 
     social = [
         ("LinkedIn",  f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
@@ -592,15 +835,7 @@ def module_people_search(target, job_id, dob="", ssn="", oln="", extra=None):
         ("YouTube",   f"https://www.youtube.com/results?search_query={name_plus}"),
         ("Reddit",    f"https://www.reddit.com/search/?q=%22{name_part}%22&type=user"),
     ]
-    for platform, url in social:
-        lines.append(f"[{platform}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("COURT & PUBLIC RECORDS")
-    lines.append("=" * 50)
-    lines.append("")
+    emit_section(lines, "SOCIAL MEDIA", social, seen)
 
     courts = [
         ("NM Courts (CourtLook)",   "https://caselookup.nmcourts.gov/caselookup/app"),
@@ -609,39 +844,43 @@ def module_people_search(target, job_id, dob="", ssn="", oln="", extra=None):
         ("OpenSanctions Watchlist", f"https://www.opensanctions.org/search/?q={name_plus}"),
         ("VINE Offender Search NM", "https://vinelink.vineapps.com/search/NM/Person"),
     ]
-    for name, url in courts:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
+    emit_section(lines, "COURT & PUBLIC RECORDS", courts, seen)
 
-    lines.append("=" * 50)
-    lines.append("GOOGLE DORKS")
-    lines.append("=" * 50)
-    lines.append("")
-
-    # Dorks are quote-exact and order-sensitive, so generate the full set once
-    # per name ordering (both "Paternal Maternal" and "Maternal Paternal" when
-    # both surnames are present); the second ordering is intentionally kept.
-    for nf in orderings:
-        if len(orderings) > 1:
-            lines.append(f"── DORKS FOR: {nf} ──")
-            lines.append("")
-        dorks = [
-            f'"{nf}" "{location_part}"' if location_part else f'"{nf}" New Mexico',
-            f'"{nf}" address phone',
-            f'"{nf}" site:familytreenow.com',
-            f'"{nf}" site:truepeoplesearch.com',
-            f'"{nf}" site:linkedin.com',
-            f'"{nf}" arrest OR mugshot',
-            f'"{nf}" court OR lawsuit OR case',
-            f'"{nf}" obituary',
-            f'"{nf}" email OR contact',
+    # GOOGLE DORKS — all routed through google_dork() so the Mode 6 quoting rule
+    # holds (name quoted once, state never quoted, no stacked intext:). Emitted
+    # per name ordering; de-duplicated and header-suppressed when empty.
+    def dork_set(nf):
+        loc = google_dork(nf, phrase=city, terms=state) if city \
+            else google_dork(nf, terms=(state or "New Mexico"))
+        return [
+            loc,
+            google_dork(nf, terms="address phone"),
+            google_dork(nf, sites=["familytreenow.com"]),
+            google_dork(nf, sites=["truepeoplesearch.com"]),
+            google_dork(nf, sites=["linkedin.com"]),
+            google_dork(nf, terms="arrest OR mugshot"),
+            google_dork(nf, terms="court OR lawsuit OR case"),
+            google_dork(nf, terms="obituary"),
+            google_dork(nf, terms="email OR contact"),
         ]
-        for dork in dorks:
-            encoded = dork.replace(" ", "+").replace('"', '%22')
-            lines.append(f"  {dork}")
-            lines.append(f"  https://www.google.com/search?q={encoded}")
-            lines.append("")
+    dork_blocks = []
+    for nf in orderings:
+        kept = [(d, u) for d, u in dork_set(nf) if u not in seen and not seen.add(u)]
+        if kept:
+            dork_blocks.append((nf, kept))
+    if dork_blocks:
+        lines.append("=" * 50)
+        lines.append("GOOGLE DORKS")
+        lines.append("=" * 50)
+        lines.append("")
+        for nf, kept in dork_blocks:
+            if len(orderings) > 1:
+                lines.append(f"── DORKS FOR: {nf} ──")
+                lines.append("")
+            for dork, url in kept:
+                lines.append(f"  {dork}")
+                lines.append(f"  {url}")
+                lines.append("")
 
     try:
         san_url = ("https://api.opensanctions.org/search/default?q="
@@ -677,6 +916,8 @@ def module_public_records(target, job_id, dob="", ssn="", oln="", extra=None):
     name_part = p["primary_name"]
     first = p["first"]
     last = p["last_primary"]
+    state = p["state"]
+    city = p["city"]
     orderings = p["name_orderings"]
     surnames = p["surnames"]
     name_plus = name_part.replace(" ", "+")
@@ -690,6 +931,8 @@ def module_public_records(target, job_id, dob="", ssn="", oln="", extra=None):
     if not variants:
         variants = [(name_part, last)]
 
+    seen = set()   # report-wide URL dedup across every section below
+
     lines = []
     lines.append(f"TARGET: {name_part}")
     if dob:
@@ -701,39 +944,34 @@ def module_public_records(target, job_id, dob="", ssn="", oln="", extra=None):
         lines.append(f"OLN:    {oln}")
     lines.append("")
 
-    lines.append("=" * 50)
-    lines.append("FREE PEOPLE & ADDRESS RECORDS")
-    lines.append("=" * 50)
-    lines.append("")
+    # Curated people-finder sites, reliable-first, location baked in (Mode 3),
+    # BANNED_SITES filtered, URLs de-duplicated report-wide. JudyRecords is a
+    # court-case index (not a people aggregator) and lives in the criminal block.
+    def render_group(title, group_index):
+        blocks = []
+        for nf, surname in variants:
+            links = people_search_links(first, surname, nf, city, state)[group_index]
+            kept = dedup_links(links, seen)
+            if kept:
+                blocks.append((nf, surname, kept))
+        if not blocks:
+            return
+        lines.append("=" * 50)
+        lines.append(title)
+        lines.append("=" * 50)
+        lines.append("")
+        for nf, surname, kept in blocks:
+            if len(variants) > 1:
+                tag = f"  (surname: {surname})" if surname else ""
+                lines.append(f"── {nf}{tag} ──")
+                lines.append("")
+            for name, url in kept:
+                lines.append(f"[{name}]")
+                lines.append(f"  {url}")
+                lines.append("")
 
-    for nf, surname in variants:
-        v_plus = nf.replace(" ", "+")
-        v_url = nf.replace(" ", "-").lower()
-        if len(variants) > 1:
-            tag = f"  (surname: {surname})" if surname else ""
-            lines.append(f"── SEARCH VARIANT: {nf}{tag} ──")
-            lines.append("")
-        free_people = [
-            ("JudyRecords ★ 740M Court Cases FREE", f"https://www.judyrecords.com/search?q={v_plus}"),
-            ("FamilyTreeNow ★ BEST FREE",    f"https://www.familytreenow.com/search/people/results?first={first}&last={surname}"),
-            ("TruePeopleSearch",              f"https://www.truepeoplesearch.com/results?name={v_plus}"),
-            ("FastPeopleSearch",              f"https://www.fastpeoplesearch.com/name/{v_url}"),
-            ("ThatsThem ★ 100% FREE",         f"https://thatsthem.com/name/{first}-{surname}"),
-            ("IDCrawl",                       f"https://www.idcrawl.com/name/{first}-{surname}"),
-            ("SearchPeopleFree",              f"https://www.searchpeoplefree.com/find/{first}-{surname}"),
-            ("Nuwber",                        f"https://nuwber.com/search?firstName={first}&lastName={surname}"),
-            ("PublicRecords.Online",          f"https://publicrecords.online/search/?first_name={first}&last_name={surname}"),
-            ("Addresses.com",                 f"https://www.addresses.com/people/{first}+{surname}/"),
-        ]
-        for name, url in free_people:
-            lines.append(f"[{name}]")
-            lines.append(f"  {url}")
-            lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("ARREST & CRIMINAL RECORDS")
-    lines.append("=" * 50)
-    lines.append("")
+    render_group("PRIMARY SOURCES (start here) — FREE PEOPLE & ADDRESS", 0)
+    render_group("SECONDARY / HIT-OR-MISS — FREE AGGREGATORS", 1)
 
     criminal = [
         ("JudyRecords ★ 740M US Cases FREE",   f"https://www.judyrecords.com/search?q={name_plus}"),
@@ -751,15 +989,7 @@ def module_public_records(target, job_id, dob="", ssn="", oln="", extra=None):
         ("Sex Offender Registry NM",            "https://www.nmsexoffender.dps.nm.gov/"),
         ("Sex Offender Registry National",      f"https://www.nsopw.gov/Search/Results?firstName={first}&lastName={last}"),
     ]
-    for name, url in criminal:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("VITAL RECORDS & GENEALOGY")
-    lines.append("=" * 50)
-    lines.append("")
+    emit_section(lines, "ARREST & CRIMINAL RECORDS", criminal, seen)
 
     vital = [
         ("FamilySearch (Free)",      f"https://www.familysearch.org/search/record/results?q.givenName={first}&q.surname={last}"),
@@ -769,15 +999,7 @@ def module_public_records(target, job_id, dob="", ssn="", oln="", extra=None):
         ("Legacy.com Obituaries",    f"https://www.legacy.com/obituaries/search?keyword={name_plus}"),
         ("NamUs Missing Persons",    "https://www.namus.gov/MissingPersons/Search#/results"),
     ]
-    for name, url in vital:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("PROFESSIONAL LICENSES")
-    lines.append("=" * 50)
-    lines.append("")
+    emit_section(lines, "VITAL RECORDS & GENEALOGY", vital, seen)
 
     licenses = [
         ("NM License Lookup",        "https://www.rld.nm.gov/licensing-and-regulation/"),
@@ -786,10 +1008,7 @@ def module_public_records(target, job_id, dob="", ssn="", oln="", extra=None):
         ("NPPES (Medical NPI)",      f"https://npiregistry.cms.hhs.gov/search?search_type=ind&first_name={first}&last_name={last}"),
         ("BLS License Lookup",       "https://www.careeronestop.org/Toolkit/Credentials/find-licenses.aspx"),
     ]
-    for name, url in licenses:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
+    emit_section(lines, "PROFESSIONAL LICENSES", licenses, seen)
 
     try:
         cl_url = ("https://www.courtlistener.com/api/rest/v3/people/?name_last="
@@ -823,6 +1042,7 @@ def module_property(target, job_id, dob="", ssn="", oln="", extra=None):
     p = resolve_person(target, extra)
     name_part = p["primary_name"]
     location_part = p["location_part"]
+    state = p["state"]
     first = p["first"]
     last = p["last_primary"]
     orderings = p["name_orderings"]
@@ -836,18 +1056,12 @@ def module_property(target, job_id, dob="", ssn="", oln="", extra=None):
     if not variants:
         variants = [(name_part, last)]
 
+    seen = set()   # report-wide URL dedup across every section below
+
     lines = []
     lines.append(f"TARGET: {name_part}")
     if location_part:
         lines.append(f"LOCATION: {location_part}")
-    lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("NEW MEXICO PROPERTY RECORDS")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("NOTE: Use NETR to find the correct direct search link for any NM county.")
-    lines.append("Most county assessors require clicking through a disclaimer before searching.")
     lines.append("")
 
     nm_counties = [
@@ -860,46 +1074,46 @@ def module_property(target, job_id, dob="", ssn="", oln="", extra=None):
         ("San Juan County — Property Search",          "https://www.sjcounty.net/departments/assessor"),
         ("Bernalillo County Clerk — Deeds/Liens",      "https://www.berncoclerk.gov/recording-and-filing/public-records-search/"),
     ]
-    for name, url in nm_counties:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
+    emit_section(lines, "NEW MEXICO PROPERTY RECORDS", nm_counties, seen,
+                 note="NOTE: Use NETR to find the correct direct search link for any "
+                      "NM county.\nMost county assessors require clicking through a "
+                      "disclaimer before searching.")
 
-    lines.append("=" * 50)
-    lines.append("NATIONAL PROPERTY DATABASES — FREE")
-    lines.append("=" * 50)
-    lines.append("")
-
-    # Owner-name searches run under both surname orderings / both surnames.
+    # National owner-name search (both surname orderings). PropWire and County
+    # Office are BANNED_SITES (Mode 1 — ad-filled owner-teaser pages) and are cut;
+    # what remains is FamilyTreeNow address history plus the NETR/Zillow routers.
+    ftn_state = f"&state={state}" if state else ""
+    nat_blocks = []
     for nf, surname in variants:
-        v_plus = nf.replace(" ", "+")
-        if len(variants) > 1:
-            tag = f"  (surname: {surname})" if surname else ""
-            lines.append(f"── OWNER SEARCH VARIANT: {nf}{tag} ──")
-            lines.append("")
         owner = [
-            ("PropWire ★ FREE Owner Search",  f"https://propwire.com/search?q={v_plus}"),
-            ("County Office — Owner Search",  f"https://www.countyoffice.org/property-records-search/?q={v_plus}"),
-            ("FamilyTreeNow — Address Hist",  f"https://www.familytreenow.com/search/people/results?first={first}&last={surname}"),
+            ("FamilyTreeNow — Address Hist",
+             f"https://www.familytreenow.com/search/people/results?first={first}&last={surname}{ftn_state}"),
         ]
-        for name, url in owner:
+        kept = dedup_links(owner, seen)
+        if kept:
+            nat_blocks.append((nf, surname, kept))
+    static_national = dedup_links([
+        ("NETR — All 50 States Router",   "https://publicrecords.netronline.com/"),
+        ("Zillow — Ownership Check",      f"https://www.zillow.com/homes/{location_part.replace(' ','-') or 'new-mexico'}_rb/"),
+    ], seen)
+    if nat_blocks or static_national:
+        lines.append("=" * 50)
+        lines.append("NATIONAL PROPERTY DATABASES — FREE")
+        lines.append("=" * 50)
+        lines.append("")
+        for nf, surname, kept in nat_blocks:
+            if len(variants) > 1:
+                tag = f"  (surname: {surname})" if surname else ""
+                lines.append(f"── OWNER SEARCH VARIANT: {nf}{tag} ──")
+                lines.append("")
+            for name, url in kept:
+                lines.append(f"[{name}]")
+                lines.append(f"  {url}")
+                lines.append("")
+        for name, url in static_national:
             lines.append(f"[{name}]")
             lines.append(f"  {url}")
             lines.append("")
-
-    static_national = [
-        ("NETR — All 50 States Router",   "https://publicrecords.netronline.com/"),
-        ("Zillow — Ownership Check",      f"https://www.zillow.com/homes/{location_part.replace(' ','-') or 'new-mexico'}_rb/"),
-    ]
-    for name, url in static_national:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("TAX & LIENS — FREE")
-    lines.append("=" * 50)
-    lines.append("")
 
     tax = [
         ("NM Taxation & Revenue",     "https://tap.state.nm.us/tap/_/"),
@@ -907,31 +1121,34 @@ def module_property(target, job_id, dob="", ssn="", oln="", extra=None):
         ("UCC Filings NM",            "https://portal.sos.state.nm.us/BFS/online/UCCFilings/SearchUCC"),
         ("Bankruptcy Search",         "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
     ]
-    for name, url in tax:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
+    emit_section(lines, "TAX & LIENS — FREE", tax, seen)
 
-    lines.append("=" * 50)
-    lines.append("GOOGLE DORKS FOR PROPERTY")
-    lines.append("=" * 50)
-    lines.append("")
-
-    for nf in orderings:
-        if len(orderings) > 1:
-            lines.append(f"── DORKS FOR: {nf} ──")
-            lines.append("")
-        dorks = [
-            f'"{nf}" property owner New Mexico',
-            f'"{nf}" real estate deed',
-            f'"{nf}" assessor parcel',
-            f'"{nf}" foreclosure lien',
+    # Property dorks routed through google_dork() (Mode 6 quoting rule).
+    def prop_dorks(nf):
+        return [
+            google_dork(nf, terms="property owner New Mexico"),
+            google_dork(nf, terms="real estate deed"),
+            google_dork(nf, terms="assessor parcel"),
+            google_dork(nf, terms="foreclosure lien"),
         ]
-        for dork in dorks:
-            encoded = dork.replace(" ", "+").replace('"', '%22')
-            lines.append(f"  {dork}")
-            lines.append(f"  https://www.google.com/search?q={encoded}")
-            lines.append("")
+    dork_blocks = []
+    for nf in orderings:
+        kept = [(d, u) for d, u in prop_dorks(nf) if u not in seen and not seen.add(u)]
+        if kept:
+            dork_blocks.append((nf, kept))
+    if dork_blocks:
+        lines.append("=" * 50)
+        lines.append("GOOGLE DORKS FOR PROPERTY")
+        lines.append("=" * 50)
+        lines.append("")
+        for nf, kept in dork_blocks:
+            if len(orderings) > 1:
+                lines.append(f"── DORKS FOR: {nf} ──")
+                lines.append("")
+            for dork, url in kept:
+                lines.append(f"  {dork}")
+                lines.append(f"  {url}")
+                lines.append("")
 
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "property", "result": result})
@@ -974,6 +1191,8 @@ def module_skip_trace(target, job_id, dob="", ssn="", oln="", extra=None):
     if not variants:
         variants = [(name_part, last)]
 
+    seen = set()   # report-wide URL dedup across every section below
+
     lines = []
     lines.append(f"TARGET:   {name_part}")
     if location_part:
@@ -989,10 +1208,6 @@ def module_skip_trace(target, job_id, dob="", ssn="", oln="", extra=None):
     lines.append("⚠ DPPA: Law firms qualify under 18 U.S.C. § 2721(b) for litigation & process serving.")
     lines.append("")
 
-    lines.append("=" * 50)
-    lines.append("TIER 1 — FREE SOURCES THAT SHOW FULL RESULTS")
-    lines.append("=" * 50)
-    lines.append("")
     if dob:
         lines.append(f"★ DOB PROVIDED: {dob} — use to disambiguate same-name results.")
         lines.append("  Filter results to subjects matching this date of birth.")
@@ -1003,44 +1218,60 @@ def module_skip_trace(target, job_id, dob="", ssn="", oln="", extra=None):
         lines.append("  system (traffic citations, criminal complaints, case dockets).")
         lines.append("")
 
-    for nf, surname in variants:
-        v_plus = nf.replace(" ", "+")
-        v_url = nf.replace(" ", "-").lower()
-        if len(variants) > 1:
-            tag = f"  (surname: {surname})" if surname else ""
-            lines.append(f"── SEARCH VARIANT: {nf}{tag} ──")
+    # Curated people-finder sites, reliable-first, location baked in (Mode 3),
+    # BANNED_SITES filtered, URLs de-duplicated report-wide.
+    def render_group(title, group_index, note=""):
+        blocks = []
+        for nf, surname in variants:
+            links = people_search_links(first, surname, nf, city, state)[group_index]
+            kept = dedup_links(links, seen)
+            if kept:
+                blocks.append((nf, surname, kept))
+        if not blocks:
+            return
+        lines.append("=" * 50)
+        lines.append(title)
+        lines.append("=" * 50)
+        lines.append("")
+        if note:
+            lines.append(note)
             lines.append("")
-        tier1 = [
-            ("FamilyTreeNow ★ BEST FREE",     f"https://www.familytreenow.com/search/people/results?first={first}&last={surname}&state={state}"),
-            ("TruePeopleSearch",               f"https://www.truepeoplesearch.com/results?name={v_plus}&citystatezip={city_plus}+{state}"),
-            ("FastPeopleSearch",               f"https://www.fastpeoplesearch.com/name/{v_url}"),
-            ("ThatsThem ★ 100% FREE",          f"https://thatsthem.com/name/{first}-{surname}"),
-            ("IDCrawl (social+records)",       f"https://www.idcrawl.com/name/{first}-{surname}"),
-            ("ZabaSearch (aliases+history)",   f"https://www.zabasearch.com/people/{first}+{surname}/{state}/"),
-            ("411.com",                        f"https://www.411.com/name/{first}-{surname}/{state}"),
-            ("USPhoneBook",                    f"https://www.usphonebook.com/{first}-{surname}"),
-            ("SearchPeopleFree",               f"https://www.searchpeoplefree.com/find/{first}-{surname}"),
-            ("Nuwber",                         f"https://nuwber.com/search?firstName={first}&lastName={surname}&city={city_plus}&state={state}"),
-            ("PublicRecords.Online",           f"https://publicrecords.online/search/?first_name={first}&last_name={surname}&state={state}"),
-        ]
-        for name, url in tier1:
-            lines.append(f"[{name}]")
-            lines.append(f"  {url}")
-            lines.append("")
+        for nf, surname, kept in blocks:
+            if len(variants) > 1:
+                tag = f"  (surname: {surname})" if surname else ""
+                lines.append(f"── {nf}{tag} ──")
+                lines.append("")
+            for name, url in kept:
+                lines.append(f"[{name}]")
+                lines.append(f"  {url}")
+                lines.append("")
+
+    render_group("PRIMARY SOURCES (start here) — FREE, FULL RESULTS", 0,
+                 note="Each result page also lists the subject's relatives & "
+                      "associates — use them to locate the subject indirectly.")
+    render_group("SECONDARY / HIT-OR-MISS — FREE AGGREGATORS", 1)
 
     lines.append("=" * 50)
-    lines.append("TIER 2 — VOTER REGISTRATION (GOVERNMENT-VERIFIED ADDRESS)")
+    lines.append("VOTER REGISTRATION (GOVERNMENT-VERIFIED ADDRESS)")
     lines.append("=" * 50)
     lines.append("")
-    lines.append("Voter registration = most reliable free address source.")
+    lines.append("Voter registration = most reliable free address source. The state")
+    lines.append("lookups are interactive portals — see MANUAL LOOKUPS below.")
     lines.append("")
     if dob:
-        lines.append(f"★ DOB {dob} — use in NM Voter Portal to confirm identity match.")
-        lines.append("  NM voter portal accepts DOB for lookup — highest-confidence free source.")
+        lines.append(f"★ DOB {dob} — enter in the state voter portal to confirm identity.")
         lines.append("")
-    lines.append("TIP: FEC political donations = free government database with name + address + employer.")
-    lines.append(f"  https://www.fec.gov/data/receipts/individual-contributions/?contributor_name={name_plus}")
+    lines.append("TIP: FEC political donations (see Tier 5) also give name + address + employer.")
     lines.append("")
+    # Pre-fillable Google search for voter-registration web mentions (Mode 6:
+    # name quoted, one extra quoted phrase, location loose, state never quoted).
+    gv_dork, gv_url = google_dork(name_part, phrase="voter registration",
+                                  terms=" ".join(w for w in [city, state] if w))
+    if gv_url not in seen:
+        seen.add(gv_url)
+        lines.append("[Google — Voter Registration Mentions]")
+        lines.append(f"  {gv_url}")
+        lines.append("")
 
     # State-specific voter portals — all 50 states + DC
     voter_portals = {
@@ -1097,116 +1328,79 @@ def module_skip_trace(target, job_id, dob="", ssn="", oln="", extra=None):
         "WY": ("WY Voter Search",        "https://sos.wyo.gov/elections/"),
     }
 
-    # Show state-specific portal if known, otherwise generic
+    # Interactive lookups that CANNOT be pre-filled from a URL — presented
+    # honestly as manual steps (Mode 5). VoterRecords.com and the state voter
+    # portal are stateful search forms; a link only reaches their front door,
+    # not the subject.
     state_portal = voter_portals.get(state.upper() if state else "NM")
-    voter = [
-        ("VoterRecords.com ★ ALL STATES",  f"https://voterrecords.com/voters/{name_url}/1"),
+    manual = [
+        ("VoterRecords.com — all states (type the name on the site)",
+         "https://voterrecords.com/"),
     ]
     if state_portal:
-        voter.append((f"{state_portal[0]} ★ STATE PORTAL", state_portal[1]))
+        manual.append((f"{state_portal[0]} — official state portal (form; type the name)",
+                       state_portal[1]))
     else:
-        voter.append(("NVRA State Voter Portal Finder", "https://www.usa.gov/voter-registration-card"))
-    voter.append(("Google Voter Registration Search", f"https://www.google.com/search?q=%22{name_plus}%22+%22voter+registration%22+%22{location_part}%22"))
-
-    for name, url in voter:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("TIER 3 — RELATIVES & ASSOCIATES")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("Find relatives to locate subject indirectly.")
-    lines.append("")
-
-    for nf, surname in variants:
-        v_plus = nf.replace(" ", "+")
-        if len(variants) > 1:
-            tag = f"  (surname: {surname})" if surname else ""
-            lines.append(f"── RELATIVES VARIANT: {nf}{tag} ──")
-            lines.append("")
-        relatives = [
-            ("FamilyTreeNow Relatives",       f"https://www.familytreenow.com/search/people/results?first={first}&last={surname}"),
-            ("TruePeopleSearch Relatives",    f"https://www.truepeoplesearch.com/results?name={v_plus}"),
-            ("ThatsThem Associates",          f"https://thatsthem.com/name/{first}-{surname}"),
-            ("IDCrawl Social Connections",    f"https://www.idcrawl.com/name/{first}-{surname}"),
-        ]
-        for name, url in relatives:
-            lines.append(f"[{name}]")
-            lines.append(f"  {url}")
-            lines.append("")
-
-    lines.append("=" * 50)
-    lines.append("TIER 4 — ADDRESS VERIFICATION (FREE)")
-    lines.append("=" * 50)
-    lines.append("")
+        manual.append(("State Voter Portal Finder", "https://www.usa.gov/voter-registration-card"))
+    emit_section(lines, "MANUAL LOOKUPS — SEARCH BY HAND (cannot be pre-filled)",
+                 manual, seen,
+                 note="These are interactive search portals. A URL only opens the "
+                      "front page — open each and search by hand.")
 
     verify = [
         ("USPS Address Lookup",           "https://tools.usps.com/zip-code-lookup.htm?byaddress"),
         ("Melissa Address Check",         "https://www.melissa.com/v2/lookups/addresscheck/"),
-        ("Google Maps Verify",            f"https://www.google.com/maps/search/{name_plus}+{city_plus}+{state}"),
-        ("NETR Property Records",          f"https://publicrecords.netronline.com/"),
-        ("PropWire Owner Search",           f"https://propwire.com/search?q={name_plus}"),
+        ("NETR Property Records",          "https://publicrecords.netronline.com/"),
     ]
-    for name, url in verify:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
+    emit_section(lines, "TIER 4 — ADDRESS VERIFICATION (FREE)", verify, seen)
 
-    lines.append("=" * 50)
-    lines.append("TIER 5 — WORKPLACE & EMPLOYMENT (FREE)")
-    lines.append("=" * 50)
-    lines.append("")
-    lines.append("Employer address = alternative service of process location.")
-    lines.append("")
-
+    # Google helper links routed through google_dork() (Mode 6: no quoted state,
+    # single quoted phrase, no stacked intext:). NM SOS business search is a
+    # business registry — it does NOT index people by personal name, so it is
+    # generated ONLY from an actual employer/business name (below), never here.
+    _, li_state_url = google_dork(name_part, sites=["linkedin.com"], terms=state)
+    _, emp_dork_url = google_dork(name_part, terms="employer OR works OR employed")
     employment = [
         ("LinkedIn People Search",         f"https://www.linkedin.com/search/results/people/?keywords={name_plus}&origin=GLOBAL_SEARCH_HEADER"),
-        ("Google LinkedIn + State",        f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22{state}%22"),
-        ("Google Employer Dork",           f"https://www.google.com/search?q=%22{name_plus}%22+employer+OR+works+OR+%22employed+at%22"),
+        ("Google LinkedIn + State",        li_state_url),
+        ("Google Employer Dork",           emp_dork_url),
         ("FEC Political Donations ★",      f"https://www.fec.gov/data/receipts/individual-contributions/?contributor_name={name_plus}"),
         ("OpenSecrets Donor Search ★",     f"https://www.opensecrets.org/donor-lookup/results?name={name_plus}"),
         ("NPPES Medical NPI (National)",   f"https://npiregistry.cms.hhs.gov/search?search_type=ind&first_name={first}&last_name={last}"),
         ("BLS License Lookup (National)",  f"https://www.careeronestop.org/Toolkit/Credentials/find-licenses.aspx?keyword={name_plus}"),
         ("NM Contractor License",          "https://www.rld.nm.gov/licensing-and-regulation/"),
         ("NM Bar (if NM attorney)",        "https://www.nmbar.org/"),
-        ("NM SOS Business Search",         f"https://portal.sos.state.nm.us/BFS/online/CorporationFormation/SearchBusinesses?SearchCriteria={name_plus}"),
-        ("NM SOS Business (new portal)",   f"https://enterprise.sos.nm.gov/search/business?searchType=byOwner&searchValue={name_plus}"),
     ]
-    for name, url in employment:
-        lines.append(f"[{name}]")
-        lines.append(f"  {url}")
-        lines.append("")
+    emit_section(lines, "TIER 5 — WORKPLACE & EMPLOYMENT (FREE)", employment, seen,
+                 note="Employer address = alternative service of process location.")
 
     # Employer routed inline (business module stays COMPANY-only): search the
     # free-text employer against NM SOS + OpenCorporates and tie subject↔employer.
+    # NM SOS business searches are correct HERE because they run on a business
+    # name, not the subject's personal name.
     if employer:
-        lines.append(f"★ EMPLOYER PROVIDED: {employer}")
-        lines.append("  Employer is often known to the client/victim — ask them if unsure.")
-        lines.append("  Employer address = alternative service-of-process location.")
-        lines.append("")
+        _, subj_emp_url = google_dork(name_part, phrase=employer)
         emp_links = [
             ("Employer — NM SOS Business Search",  f"https://portal.sos.state.nm.us/BFS/online/CorporationFormation/SearchBusinesses?SearchCriteria={employer_plus}"),
             ("Employer — NM SOS (new portal)",     f"https://enterprise.sos.nm.gov/search/business?searchType=byName&searchValue={employer_plus}"),
             ("Employer — OpenCorporates (NM)",     f"https://opencorporates.com/companies?q={employer_plus}&jurisdiction_code=us_nm"),
             ("Employer — LinkedIn Company",        f"https://www.linkedin.com/search/results/companies/?keywords={employer_plus}"),
-            ("Subject @ Employer (Google)",        f"https://www.google.com/search?q=%22{name_plus}%22+%22{employer_plus}%22"),
+            ("Subject @ Employer (Google)",        subj_emp_url),
         ]
-        for name, url in emp_links:
-            lines.append(f"[{name}]")
-            lines.append(f"  {url}")
+        kept = dedup_links(emp_links, seen)
+        if kept:
+            lines.append(f"★ EMPLOYER PROVIDED: {employer}")
+            lines.append("  Employer is often known to the client/victim — ask them if unsure.")
+            lines.append("  Employer address = alternative service-of-process location.")
             lines.append("")
+            for name, url in kept:
+                lines.append(f"[{name}]")
+                lines.append(f"  {url}")
+                lines.append("")
 
     # Phone routed inline into skip-trace reverse-lookup links (the live
     # pattern-analysis path stays in the Phone module — not replicated here).
     if phone_clean:
-        lines.append("=" * 50)
-        lines.append("PHONE (PROVIDED) — REVERSE LOOKUP")
-        lines.append("=" * 50)
-        lines.append("")
-        lines.append(f"★ PHONE PROVIDED: {phone_clean} — reverse-lookup for name/address confirmation.")
-        lines.append("")
         phone_links = [
             ("TruePeopleSearch (phone)",   f"https://www.truepeoplesearch.com/results?phoneno={phone_clean}"),
             ("ThatsThem (phone)",          f"https://thatsthem.com/phone/{phone_clean}"),
@@ -1215,20 +1409,13 @@ def module_skip_trace(target, job_id, dob="", ssn="", oln="", extra=None):
             ("NumLookup (carrier/owner)",  f"https://www.numlookup.com/?number={phone_clean}"),
             ("SpyDialer (voicemail name)", f"https://www.spydialer.com/default.aspx?phone={phone_clean}"),
         ]
-        for name, url in phone_links:
-            lines.append(f"[{name}]")
-            lines.append(f"  {url}")
-            lines.append("")
+        emit_section(lines, "PHONE (PROVIDED) — REVERSE LOOKUP", phone_links, seen,
+                     note=f"★ PHONE PROVIDED: {phone_clean} — reverse-lookup for "
+                          "name/address confirmation.")
 
     # Email routed inline into skip-trace (the live account-detection path stays
     # in the Email module; breach_leak does the live breach check on the email).
     if email:
-        lines.append("=" * 50)
-        lines.append("EMAIL (PROVIDED) — IDENTITY & REVERSE LOOKUP")
-        lines.append("=" * 50)
-        lines.append("")
-        lines.append(f"★ EMAIL PROVIDED: {email} — confirms identity and surfaces linked accounts.")
-        lines.append("")
         email_enc = urllib.parse.quote(email, safe="")
         email_links = [
             ("ThatsThem (email)",          f"https://thatsthem.com/email/{email_enc}"),
@@ -1236,10 +1423,10 @@ def module_skip_trace(target, job_id, dob="", ssn="", oln="", extra=None):
             ("Have I Been Pwned",          f"https://haveibeenpwned.com/account/{email_enc}"),
             ("EmailRep.io",                f"https://emailrep.io/{email_enc}"),
         ]
-        for name, url in email_links:
-            lines.append(f"[{name}]")
-            lines.append(f"  {url}")
-            lines.append("")
+        emit_section(lines, "EMAIL (PROVIDED) — IDENTITY & REVERSE LOOKUP",
+                     email_links, seen,
+                     note=f"★ EMAIL PROVIDED: {email} — confirms identity and "
+                          "surfaces linked accounts.")
 
     try:
         san_url = ("https://api.opensanctions.org/search/default?q="
@@ -1267,8 +1454,9 @@ def module_skip_trace(target, job_id, dob="", ssn="", oln="", extra=None):
 
     # Caseload-tuned, category-grouped PERSON dorks. Reference constants and
     # assembly live in build_person_dorks() near the top of the dork logic so
-    # this stays tunable over time.
-    lines.extend(build_person_dorks(p, extra, dob=dob))
+    # this stays tunable over time. `seen` is threaded so dork URLs de-duplicate
+    # against the links already emitted above.
+    lines.extend(build_person_dorks(p, extra, dob=dob, seen=seen))
 
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "skip_trace", "result": result})
@@ -1315,7 +1503,7 @@ def module_social_media(target, job_id, dob="", ssn="", oln="", extra=None):
         ("Events",           f"https://www.facebook.com/search/events/?q={name_plus}"),
         ("Marketplace",      f"https://www.facebook.com/marketplace/search/?query={name_plus}"),
         ("Sowsearch (Deep)", f"https://sowsearch.info/search?q={name_plus}"),
-        ("Google FB Search", f"https://www.google.com/search?q=site:facebook.com+%22{name_plus}%22"),
+        ("Google FB Search", google_dork(name_quoted, sites=["facebook.com"])[1]),
     ]
     for label, url in fb:
         lines.append(f"[{label}]")
@@ -1329,7 +1517,7 @@ def module_social_media(target, job_id, dob="", ssn="", oln="", extra=None):
     ig = [
         ("Profile Search",   f"https://www.instagram.com/explore/search/keyword/?q={name_plus}"),
         ("Hashtag Search",   f"https://www.instagram.com/explore/tags/{name_plus.replace('+','')}/"),
-        ("Google IG Search", f"https://www.google.com/search?q=site:instagram.com+%22{name_plus}%22"),
+        ("Google IG Search", google_dork(name_quoted, sites=["instagram.com"])[1]),
     ]
     for label, url in ig:
         lines.append(f"[{label}]")
@@ -1358,7 +1546,7 @@ def module_social_media(target, job_id, dob="", ssn="", oln="", extra=None):
     li = [
         ("People Search",    f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
         ("Posts Search",     f"https://www.linkedin.com/search/results/content/?keywords={name_plus}"),
-        ("Google LI Search", f"https://www.google.com/search?q=site:linkedin.com/in+%22{name_plus}%22"),
+        ("Google LI Search", google_dork(name_quoted, sites=["linkedin.com/in"])[1]),
     ]
     for label, url in li:
         lines.append(f"[{label}]")
@@ -1372,8 +1560,8 @@ def module_social_media(target, job_id, dob="", ssn="", oln="", extra=None):
     other = [
         ("TikTok User",    f"https://www.tiktok.com/search/user?q={name_plus}"),
         ("YouTube Channel",f"https://www.youtube.com/results?search_query={name_plus}&sp=EgIQAg%253D%253D"),
-        ("Reddit User",    f"https://www.reddit.com/search/?q=%22{name_quoted}%22&type=user"),
-        ("Reddit Posts",   f"https://www.reddit.com/search/?q=%22{name_quoted}%22"),
+        ("Reddit User",    f"https://www.reddit.com/search/?q=%22{name_plus}%22&type=user"),
+        ("Reddit Posts",   f"https://www.reddit.com/search/?q=%22{name_plus}%22"),
     ]
     for label, url in other:
         lines.append(f"[{label}]")
@@ -1428,6 +1616,7 @@ def module_social_footprint(target, job_id, dob="", ssn="", oln="", extra=None):
     p = resolve_person(target, extra)
     name_part = p["primary_name"]
     location_part = p["location_part"]
+    state = p["state"]
     first = p["first"]
     last = p["last_primary"]
     name_plus = name_part.replace(" ", "+")
@@ -1486,6 +1675,10 @@ def module_social_footprint(target, job_id, dob="", ssn="", oln="", extra=None):
     lines.append("REAL-TIME SOCIAL SEARCH — FREE TOOLS")
     lines.append("=" * 50)
     lines.append("")
+    # IDCrawl carries location (Mode 3) via its state-name path segment.
+    idcrawl_sf = f"https://www.idcrawl.com/name/{first.lower()}-{last.lower()}"
+    if state and STATE_NAMES.get(state.upper()):
+        idcrawl_sf += f"/{STATE_NAMES[state.upper()]}"
     realtime = [
         ("Social Searcher ★ FREE",        f"https://www.social-searcher.com/social-buzz/?q={name_plus}"),
         ("Social Catfish (reverse ID)",   f"https://socialcatfish.com/search/?q={name_plus}"),
@@ -1493,7 +1686,7 @@ def module_social_footprint(target, job_id, dob="", ssn="", oln="", extra=None):
         ("Sowsearch (FB Deep)",           f"https://sowsearch.info/search?q={name_plus}"),
         ("Boardreader (forums)",          f"https://boardreader.com/s/{name_plus}.html"),
         ("WhatsMyName (usernames)",       f"https://whatsmyname.app/?q={handle_for_tools}"),
-        ("IDCrawl (social+records)",      f"https://www.idcrawl.com/name/{first.lower()}-{last.lower()}"),
+        ("IDCrawl (social+records)",      idcrawl_sf),
         ("Epieos (email→social)",         f"https://epieos.com/?q={name_plus}&t=name"),
     ]
     for name, url in realtime:
@@ -1505,11 +1698,16 @@ def module_social_footprint(target, job_id, dob="", ssn="", oln="", extra=None):
     lines.append("LINKEDIN DEEP SEARCH")
     lines.append("=" * 50)
     lines.append("")
+    # Google LinkedIn dorks routed through google_dork() (Mode 6: name quoted
+    # once, state/location loose — never quoted).
+    _, li_exact = google_dork(name_part, sites=["linkedin.com/in"])
+    _, li_loc = google_dork(name_part, sites=["linkedin.com"],
+                            terms=(location_part or "New Mexico"))
     li = [
         ("LinkedIn People Search",     f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
         ("LinkedIn + Location filter", f"https://www.linkedin.com/search/results/people/?keywords={name_plus}&geoUrn=%5B%22102095887%22%5D"),
-        ("Google LI Profile (exact)",  f"https://www.google.com/search?q=site:linkedin.com/in+%22{name_plus}%22"),
-        ("Google LI + Location",       f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22{location_part}%22" if location_part else f"https://www.google.com/search?q=site:linkedin.com+%22{name_plus}%22+%22New+Mexico%22"),
+        ("Google LI Profile (exact)",  li_exact),
+        ("Google LI + Location",       li_loc),
     ]
     for name, url in li:
         lines.append(f"[{name}]")
