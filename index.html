@@ -188,13 +188,13 @@ select.idf{cursor:pointer;}
           <button class="run-btn" id="runBtn" onclick="runInvestigation()">▶ INVESTIGATE</button>
           <button class="clr-btn" onclick="clearAll()">CLR</button>
         </div>
-        <div id="identifierRow" style="display:none;margin-top:8px;">
+        <div id="identifierRow" autocomplete="off" style="display:none;margin-top:8px;">
           <div class="idf-grp">Name parts (optional — override quick-entry box; paternal = primary surname)</div>
           <div class="idf-row">
-            <input id="firstInput" class="idf" type="text" placeholder="First"/>
-            <input id="middleInput" class="idf" type="text" placeholder="Middle"/>
-            <input id="paternalInput" class="idf" type="text" placeholder="Paternal surname (primary)"/>
-            <input id="maternalInput" class="idf" type="text" placeholder="Maternal surname"/>
+            <input id="firstInput" class="idf" type="text" placeholder="First" autocomplete="off"/>
+            <input id="middleInput" class="idf" type="text" placeholder="Middle" autocomplete="off"/>
+            <input id="paternalInput" class="idf" type="text" placeholder="Paternal surname (primary)" autocomplete="off"/>
+            <input id="maternalInput" class="idf" type="text" placeholder="Maternal surname" autocomplete="off"/>
           </div>
           <div class="idf-hint">Leave blank to use the quick-entry box above. When both surnames are given, searches run under both orderings and both surnames.</div>
           <div class="idf-row" style="align-items:center;">
@@ -204,21 +204,21 @@ select.idf{cursor:pointer;}
             </label>
           </div>
           <div class="idf-row">
-            <input id="cityInput" class="idf" type="text" placeholder="City"/>
-            <select id="stateInput" class="idf" title="State"><option value="">State…</option></select>
-            <input id="dobInput" class="idf" type="text" placeholder="DOB: MM/DD/YYYY, MM/YYYY, or March 1987"/>
+            <input id="cityInput" class="idf" type="text" placeholder="City" autocomplete="off"/>
+            <select id="stateInput" class="idf" title="State" autocomplete="off"><option value="">State…</option></select>
+            <input id="dobInput" class="idf" type="text" placeholder="DOB: MM/DD/YYYY, MM/YYYY, or March 1987" autocomplete="off"/>
           </div>
           <div class="idf-hint">DOB accepts full or partial dates — partials are kept exactly as typed and used as a “born …” filter hint.</div>
           <div class="idf-row">
-            <input id="ssnInput" class="idf" type="text" placeholder="SSN: XXX-XX-XXXX" maxlength="11" oninput="maskSSN(this)"/>
-            <input id="olnInput" class="idf" type="text" placeholder="OLN / DL#"/>
+            <input id="ssnInput" class="idf" type="text" placeholder="SSN: XXX-XX-XXXX" maxlength="11" oninput="maskSSN(this)" autocomplete="off"/>
+            <input id="olnInput" class="idf" type="text" placeholder="OLN / DL#" autocomplete="off"/>
           </div>
           <div class="idf-hint">OLN / driver's license # is often found in the court system (traffic citations, criminal complaints, case dockets).</div>
           <div class="idf-row">
-            <input id="phoneInput" class="idf" type="text" placeholder="Phone"/>
-            <input id="emailInput" class="idf" type="text" placeholder="Email"/>
-            <input id="usernameInput" class="idf" type="text" placeholder="Username / handle"/>
-            <input id="employerInput" class="idf" type="text" placeholder="Employer (free text)"/>
+            <input id="phoneInput" class="idf" type="text" placeholder="Phone" autocomplete="off"/>
+            <input id="emailInput" class="idf" type="text" placeholder="Email" autocomplete="new-password"/>
+            <input id="usernameInput" class="idf" type="text" placeholder="Username / handle" autocomplete="new-password"/>
+            <input id="employerInput" class="idf" type="text" placeholder="Employer (free text)" autocomplete="off"/>
           </div>
           <div class="idf-hint">Username feeds the exact handle into social modules (skips name-guessed permutations). Employer is often known to the client/victim — describe it however they do.</div>
           <div class="idf-row">
