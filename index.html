@@ -472,8 +472,12 @@ async function runInvestigation() {
     const city = document.getElementById('cityInput')?.value.trim() || '';
     const state = document.getElementById('stateInput')?.value.trim() || '';
     const spanish = document.getElementById('spanishToggle')?.checked ? '1' : '';
-    const params = new URLSearchParams({ target: query, type: targetType, modules: mods.join(','), dob, ssn, oln, first, middle, paternal, maternal, phone, email, username, employer, city, state, spanish, token: authToken || '' });
-    const res = await fetch(`${BACKEND}/api/investigate?${params}`, { method: 'GET' });
+    const body = { target: query, type: targetType, modules: mods.join(','), dob, ssn, oln, first, middle, paternal, maternal, phone, email, username, employer, city, state, spanish, token: authToken || '' };
+    const res = await fetch(`${BACKEND}/api/investigate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
     if (res.status === 401) {
       // Token missing or expired — clear auth state and force re-login.
       authToken = null;
@@ -584,6 +588,8 @@ function setProgress(show, pct, label) {
 function clearAll() {
   allResults = {};
   activeModIds = new Set();
+  document.getElementById('searchInput').value = '';
+  clearIdentifiers();
   document.getElementById('results').innerHTML = `
     <div class="empty" id="emptyState">
       <div class="empty-icon">◎</div>

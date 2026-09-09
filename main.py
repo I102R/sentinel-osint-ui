@@ -3382,6 +3382,43 @@ _SECRET_KEY_BYTES = SECRET_KEY.encode()
 # How long a token stays valid (seconds). Override with TOKEN_TTL_SECONDS.
 TOKEN_TTL_SECONDS = int(os.environ.get("TOKEN_TTL_SECONDS", 12 * 3600))
 
+# ── Login Rate Limiting (in-memory, per-username) ──────────────────────────
+# The old client-side-only lockout (a JS variable) was trivially bypassed by
+# calling /api/auth/login directly. This enforces the same policy server-side.
+LOGIN_MAX_ATTEMPTS = int(os.environ.get("LOGIN_MAX_ATTEMPTS", 5))
+LOGIN_LOCKOUT_SECONDS = int(os.environ.get("LOGIN_LOCKOUT_SECONDS", 15 * 60))
+_login_attempts = {}   # username -> {"count": int, "locked_until": float}
+_login_lock = threading.Lock()
+
+
+def _seconds_until_unlocked(username):
+    """Seconds remaining on an active lockout for `username`, or 0 if not
+    locked. A lockout whose window has fully elapsed resets the attempt
+    count so the next try starts fresh."""
+    with _login_lock:
+        entry = _login_attempts.get(username)
+        if not entry:
+            return 0
+        remaining = entry["locked_until"] - time.time()
+        if remaining <= 0:
+            if entry["locked_until"]:
+                _login_attempts.pop(username, None)
+            return 0
+        return remaining
+
+
+def _record_failed_login(username):
+    with _login_lock:
+        entry = _login_attempts.setdefault(username, {"count": 0, "locked_until": 0})
+        entry["count"] += 1
+        if entry["count"] >= LOGIN_MAX_ATTEMPTS:
+            entry["locked_until"] = time.time() + LOGIN_LOCKOUT_SECONDS
+
+
+def _clear_login_attempts(username):
+    with _login_lock:
+        _login_attempts.pop(username, None)
+
 
 def _b64u_encode(raw):
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
@@ -3541,14 +3578,24 @@ def login():
     username = data.get("username", "").strip().lower()
     password = data.get("password", "")
     ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+
+    remaining = _seconds_until_unlocked(username)
+    if remaining > 0:
+        wait_min = int(remaining // 60) + 1
+        log_auth_event(username, "LOGIN_BLOCKED", f"Account locked — {wait_min} min remaining", ip)
+        return jsonify({"success": False,
+                        "error": f"Account locked. Try again in {wait_min} minute(s)."}), 429
+
     users = get_users()
     user = users.get(username)
     if user and user["password"] == password:
+        _clear_login_attempts(username)
         token = make_token(username, user["role"], user["name"])
         log_auth_event(username, "LOGIN_SUCCESS", f"User {user['name']} authenticated", ip, name=user["name"])
         return jsonify({"success": True, "token": token, "username": username,
                         "role": user["role"], "name": user["name"]})
     else:
+        _record_failed_login(username)
         log_auth_event(username, "LOGIN_FAILED", "Invalid credentials", ip)
         return jsonify({"success": False, "error": "Invalid credentials"}), 401
 
@@ -3583,12 +3630,9 @@ def get_audit():
     log_list = list(reversed(log_list))
     return jsonify({"success": True, "count": len(log_list), "entries": log_list})
 
-@app.route("/api/investigate", methods=["GET", "POST"])
+@app.route("/api/investigate", methods=["POST"])
 def investigate():
-    if request.method == "POST":
-        data = request.json or {}
-    else:
-        data = request.args
+    data = request.get_json(silent=True) or {}
     target = data.get("target", "").strip()
     target_type = data.get("type", "PERSON")
     modules_param = data.get("modules", "")
