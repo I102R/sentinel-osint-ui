@@ -271,15 +271,6 @@ def resolve_person(target, extra=None):
 # patterns. Nothing here executes a search; output is query text for a human.
 # ══════════════════════════════════════════════════════════════════════════════
 
-# NM news/media domains for site: dorks (Crash & Incident + Social web-mentions).
-# Court/record domains are intentionally NOT here — court records are handled
-# separately through a paid database.
-NM_NEWS_DOMAINS = [
-    "abqjournal.com", "krqe.com", "koat.com", "kob.com",
-    "santafenewmexican.com", "currentargus.com", "lcsun-news.com",
-    "daily-times.com",
-]
-
 # Spanish-language life-event / obituary terms (Spanish category — toggle-gated).
 SPANISH_TERMS = [
     "obituario", "funeraria", "servicios funerarios", "esquela", "en memoria",
@@ -345,6 +336,11 @@ BANNED_SITES = [
     "truthfinder.com",
     "peoplefinders.com",
     "instantcheckmate.com",
+    # Mode 3 — monetized mugshot farms. Redundant with our dedicated
+    # court/booking tools and low-value (ad-filled, pay-to-remove).
+    "arrestfacts.com",
+    "bustedmugshots.com",
+    "mugshots.com",
 ]
 
 
@@ -569,7 +565,6 @@ def build_person_dorks(p, extra=None, dob="", seen=None):
     state = p.get("state", "")
     city = p.get("city", "")
     location_part = p.get("location_part", "")
-    loc = location_part or state or "New Mexico"
     phone_digits = re.sub(r"\D", "", (ex.get("phone") or ""))[-10:]
     email = (ex.get("email") or "").strip()
     employer = (ex.get("employer") or "").strip()
@@ -633,15 +628,13 @@ def build_person_dorks(p, extra=None, dob="", seen=None):
     def dork_place(name, concept=""):
         # name + optional loose concept OR-block + location. Mode 6: the city
         # (when present) is the single quoted phrase; the state is ALWAYS loose
-        # (never quoted); concepts stay loose. Falls back to loose "New Mexico"
-        # only when no location was entered at all.
+        # (never quoted); concepts stay loose. No location term at all when
+        # neither city nor state was entered — never assume a state.
         terms = f"({concept})" if concept else ""
         if state:
             terms = (terms + " " + state).strip()
         if city:
             return google_dork(name, phrase=city, terms=terms)
-        if not state:
-            terms = (terms + " New Mexico").strip()
         return google_dork(name, terms=terms)
 
     def loose_place(base=""):
@@ -684,11 +677,11 @@ def build_person_dorks(p, extra=None, dob="", seen=None):
         return ds
     flush("EMPLOYMENT", build_blocks(_employment, orderings))
 
-    # ── Crash & Incident (incl. NM news/media coverage) ─────────────────────
+    # ── Crash & Incident ─────────────────────────────────────────────────────
     crash_or = " OR ".join(CRASH_INCIDENT_TERMS)             # loose concepts
     def _crash(nf):
         return [dork_place(nf, crash_or),
-                google_dork(nf, sites=NM_NEWS_DOMAINS)]      # NM news/media
+                dork_place(nf, "accident OR crash OR incident")]
     flush("CRASH & INCIDENT", build_blocks(_crash, orderings))
 
     # ── Social ──────────────────────────────────────────────────────────────
@@ -735,8 +728,10 @@ def build_person_dorks(p, extra=None, dob="", seen=None):
     id_path     = " OR ".join(f"inurl:{k}" for k in URL_PATH_KEYWORDS[0:4])   # profile/person/record/detail
     obit_path   = " OR ".join(f"inurl:{k}" for k in URL_PATH_KEYWORDS[4:7])   # obituary/obituaries/memorial
     arrest_path = " OR ".join(f"inurl:{k}" for k in URL_PATH_KEYWORDS[7:11])  # inmate/offender/booking/arrest
-    arrest_extra = [google_dork(sn, terms=f"({arrest_path})")
-                    for sn in (surnames or [primary_name]) if sn]
+    # Full name (not bare surname) + entered state, so this doesn't return
+    # every inmate nationwide who shares the surname.
+    arrest_terms = f"({arrest_path})" + (f" {state}" if state else "")
+    arrest_extra = [google_dork(nf, terms=arrest_terms) for nf in orderings]
     flush("PRECISION / NARROWING",
           build_blocks(_precision, orderings),
           note="Escalate here when broad dorks return too much noise. intext:/"
@@ -837,21 +832,22 @@ def module_people_search(target, job_id, dob="", ssn="", oln="", extra=None):
     ]
     emit_section(lines, "SOCIAL MEDIA", social, seen)
 
+    vine_url = f"https://vinelink.vineapps.com/search/{state.upper()}/Person" \
+        if state else "https://vinelink.vineapps.com/"
+    vine_label = f"VINE Offender Search ({state.upper()})" if state \
+        else "VINE Offender Search (pick a state)"
     courts = [
-        ("NM Courts (CourtLook)",   "https://caselookup.nmcourts.gov/caselookup/app"),
-        ("PACER Federal Courts",    "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
-        ("CourtListener (Free)",    f"https://www.courtlistener.com/?q={name_plus}&type=p"),
         ("OpenSanctions Watchlist", f"https://www.opensanctions.org/search/?q={name_plus}"),
-        ("VINE Offender Search NM", "https://vinelink.vineapps.com/search/NM/Person"),
+        (vine_label, vine_url),
     ]
-    emit_section(lines, "COURT & PUBLIC RECORDS", courts, seen)
+    emit_section(lines, "WATCHLIST & OFFENDER SEARCH", courts, seen)
 
     # GOOGLE DORKS — all routed through google_dork() so the Mode 6 quoting rule
     # holds (name quoted once, state never quoted, no stacked intext:). Emitted
     # per name ordering; de-duplicated and header-suppressed when empty.
     def dork_set(nf):
         loc = google_dork(nf, phrase=city, terms=state) if city \
-            else google_dork(nf, terms=(state or "New Mexico"))
+            else google_dork(nf, terms=state)
         return [
             loc,
             google_dork(nf, terms="address phone"),
@@ -859,7 +855,6 @@ def module_people_search(target, job_id, dob="", ssn="", oln="", extra=None):
             google_dork(nf, sites=["truepeoplesearch.com"]),
             google_dork(nf, sites=["linkedin.com"]),
             google_dork(nf, terms="arrest OR mugshot"),
-            google_dork(nf, terms="court OR lawsuit OR case"),
             google_dork(nf, terms="obituary"),
             google_dork(nf, terms="email OR contact"),
         ]
@@ -973,22 +968,23 @@ def module_public_records(target, job_id, dob="", ssn="", oln="", extra=None):
     render_group("PRIMARY SOURCES (start here) — FREE PEOPLE & ADDRESS", 0)
     render_group("SECONDARY / HIT-OR-MISS — FREE AGGREGATORS", 1)
 
+    vine_url = f"https://vinelink.vineapps.com/search/{state.upper()}/Person" \
+        if state else "https://vinelink.vineapps.com/"
+    vine_label = f"VINE Offender Search ({state.upper()})" if state \
+        else "VINE Offender Search (pick a state)"
     criminal = [
         ("JudyRecords ★ 740M US Cases FREE",   f"https://www.judyrecords.com/search?q={name_plus}"),
-        ("Trellis.law (State Courts Free)",     f"https://trellis.law/person/{first}-{last}"),
-        ("NM Courts (CourtLook)",               "https://caselookup.nmcourts.gov/caselookup/app"),
-        ("PACER Federal Courts",                "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
-        ("CourtListener (Free Federal)",        f"https://www.courtlistener.com/?q={name_plus}&type=p"),
-        ("VINE Offender Search NM",             "https://vinelink.vineapps.com/search/NM/Person"),
+        (vine_label,                            vine_url),
         ("NM Corrections Inmate",               "https://www.cd.nm.gov/divisions/oid/offender-search/"),
         ("JailBase (Arrest Bookings) ★ FREE",   f"https://www.jailbase.com/search/?name_searched={name_plus}"),
-        ("ArrestFacts",                         f"https://arrestfacts.com/search?name={name_plus}"),
-        ("BustedMugshots",                      f"https://bustedmugshots.com/search?name={name_plus}"),
-        ("MugshotSearch",                       f"https://www.mugshots.com/search?q={name_plus}"),
         ("OpenSanctions Watchlist",             f"https://www.opensanctions.org/search/?q={name_plus}"),
-        ("Sex Offender Registry NM",            "https://www.nmsexoffender.dps.nm.gov/"),
         ("Sex Offender Registry National",      f"https://www.nsopw.gov/Search/Results?firstName={first}&lastName={last}"),
     ]
+    # NM's own registry is only relevant when the subject is NM-based (or no
+    # state was entered at all) — for an out-of-state subject the national
+    # NSOPW registry above already covers them; the NM-only one would mislead.
+    if not state or state.upper() == "NM":
+        criminal.insert(-1, ("Sex Offender Registry NM", "https://www.nmsexoffender.dps.nm.gov/"))
     emit_section(lines, "ARREST & CRIMINAL RECORDS", criminal, seen)
 
     vital = [
@@ -1009,24 +1005,6 @@ def module_public_records(target, job_id, dob="", ssn="", oln="", extra=None):
         ("BLS License Lookup",       "https://www.careeronestop.org/Toolkit/Credentials/find-licenses.aspx"),
     ]
     emit_section(lines, "PROFESSIONAL LICENSES", licenses, seen)
-
-    try:
-        cl_url = ("https://www.courtlistener.com/api/rest/v3/people/?name_last="
-                  + urllib.parse.quote_plus(last) + "&name_first="
-                  + urllib.parse.quote_plus(first) + "&format=json")
-        data = http_get_json(cl_url, timeout=10)
-        count = data.get("count", 0)
-        if count > 0:
-            lines.append("=" * 50)
-            lines.append(f"COURTLISTENER — {count} FEDERAL RECORD(S) FOUND")
-            lines.append("=" * 50)
-            lines.append("")
-            for r in data.get("results", [])[:3]:
-                lines.append(f"  Name: {r.get('name_full','N/A')}")
-                lines.append(f"  URL:  https://www.courtlistener.com{r.get('absolute_url','')}")
-                lines.append("")
-    except Exception as e:
-        log_err("CourtListener live check", e)
 
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "public_records", "result": result})
@@ -1064,21 +1042,6 @@ def module_property(target, job_id, dob="", ssn="", oln="", extra=None):
         lines.append(f"LOCATION: {location_part}")
     lines.append("")
 
-    nm_counties = [
-        ("NETR — ALL 33 NM COUNTIES ★ START HERE",    "https://publicrecords.netronline.com/state/NM"),
-        ("Bernalillo County — Owner Name Search",      "https://assessor.bernco.gov/public.access/search/commonsearch.aspx?mode=owner"),
-        ("Santa Fe County — Parcel Map Search",        "https://assessor.santafecountynm.gov/map.php"),
-        ("Dona Ana County — Property Search",          "https://assessor.donaanacounty.org/"),
-        ("Sandoval County — Property Search",          "https://www.sandovalcountynm.gov/assessor/property-search/"),
-        ("Taos County — Property Search",              "https://www.taoscounty.org/assessor"),
-        ("San Juan County — Property Search",          "https://www.sjcounty.net/departments/assessor"),
-        ("Bernalillo County Clerk — Deeds/Liens",      "https://www.berncoclerk.gov/recording-and-filing/public-records-search/"),
-    ]
-    emit_section(lines, "NEW MEXICO PROPERTY RECORDS", nm_counties, seen,
-                 note="NOTE: Use NETR to find the correct direct search link for any "
-                      "NM county.\nMost county assessors require clicking through a "
-                      "disclaimer before searching.")
-
     # National owner-name search (both surname orderings). PropWire and County
     # Office are BANNED_SITES (Mode 1 — ad-filled owner-teaser pages) and are cut;
     # what remains is FamilyTreeNow address history plus the NETR/Zillow routers.
@@ -1092,9 +1055,11 @@ def module_property(target, job_id, dob="", ssn="", oln="", extra=None):
         kept = dedup_links(owner, seen)
         if kept:
             nat_blocks.append((nf, surname, kept))
+    zillow_url = f"https://www.zillow.com/homes/{location_part.replace(' ','-')}_rb/" \
+        if location_part else "https://www.zillow.com/"
     static_national = dedup_links([
         ("NETR — All 50 States Router",   "https://publicrecords.netronline.com/"),
-        ("Zillow — Ownership Check",      f"https://www.zillow.com/homes/{location_part.replace(' ','-') or 'new-mexico'}_rb/"),
+        ("Zillow — Ownership Check",      zillow_url),
     ], seen)
     if nat_blocks or static_national:
         lines.append("=" * 50)
@@ -1117,38 +1082,9 @@ def module_property(target, job_id, dob="", ssn="", oln="", extra=None):
 
     tax = [
         ("NM Taxation & Revenue",     "https://tap.state.nm.us/tap/_/"),
-        ("Federal Tax Liens (PACER)", "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
         ("UCC Filings NM",            "https://portal.sos.state.nm.us/BFS/online/UCCFilings/SearchUCC"),
-        ("Bankruptcy Search",         "https://pcl.uscourts.gov/pcl/pages/search/findParty.jsf"),
     ]
     emit_section(lines, "TAX & LIENS — FREE", tax, seen)
-
-    # Property dorks routed through google_dork() (Mode 6 quoting rule).
-    def prop_dorks(nf):
-        return [
-            google_dork(nf, terms="property owner New Mexico"),
-            google_dork(nf, terms="real estate deed"),
-            google_dork(nf, terms="assessor parcel"),
-            google_dork(nf, terms="foreclosure lien"),
-        ]
-    dork_blocks = []
-    for nf in orderings:
-        kept = [(d, u) for d, u in prop_dorks(nf) if u not in seen and not seen.add(u)]
-        if kept:
-            dork_blocks.append((nf, kept))
-    if dork_blocks:
-        lines.append("=" * 50)
-        lines.append("GOOGLE DORKS FOR PROPERTY")
-        lines.append("=" * 50)
-        lines.append("")
-        for nf, kept in dork_blocks:
-            if len(orderings) > 1:
-                lines.append(f"── DORKS FOR: {nf} ──")
-                lines.append("")
-            for dork, url in kept:
-                lines.append(f"  {dork}")
-                lines.append(f"  {url}")
-                lines.append("")
 
     result = "\n".join(lines)
     emit(job_id, "module_done", {"module": "property", "result": result})
@@ -1332,7 +1268,7 @@ def module_skip_trace(target, job_id, dob="", ssn="", oln="", extra=None):
     # honestly as manual steps (Mode 5). VoterRecords.com and the state voter
     # portal are stateful search forms; a link only reaches their front door,
     # not the subject.
-    state_portal = voter_portals.get(state.upper() if state else "NM")
+    state_portal = voter_portals.get(state.upper()) if state else None
     manual = [
         ("VoterRecords.com — all states (type the name on the site)",
          "https://voterrecords.com/"),
@@ -1476,7 +1412,7 @@ def module_social_media(target, job_id, dob="", ssn="", oln="", extra=None):
     first = p["first"] or (parts[0] if parts else target)
     last = p["last_primary"] or (parts[-1] if len(parts) > 1 else "")
     name_plus = name_quoted.replace(" ", "+")
-    city = p["city"] or "Albuquerque"
+    city = p["city"]
 
     ex = extra or {}
     username = (ex.get("username") or "").strip()
@@ -1532,8 +1468,9 @@ def module_social_media(target, job_id, dob="", ssn="", oln="", extra=None):
         ("People Search",  f"https://twitter.com/search?q=%22{name_plus}%22&f=user"),
         ("Recent Posts",   f"https://twitter.com/search?q=%22{name_plus}%22&f=live"),
         ("Top Posts",      f"https://twitter.com/search?q=%22{name_plus}%22&f=top"),
-        ("Near Location",  f"https://twitter.com/search?q=%22{name_plus}%22+near%3A%22{city or 'Albuquerque'}%22"),
     ]
+    if city:
+        tw.append(("Near Location", f"https://twitter.com/search?q=%22{name_plus}%22+near%3A%22{city}%22"))
     for label, url in tw:
         lines.append(f"[{label}]")
         lines.append(f"  {url}")
@@ -1702,10 +1639,9 @@ def module_social_footprint(target, job_id, dob="", ssn="", oln="", extra=None):
     # once, state/location loose — never quoted).
     _, li_exact = google_dork(name_part, sites=["linkedin.com/in"])
     _, li_loc = google_dork(name_part, sites=["linkedin.com"],
-                            terms=(location_part or "New Mexico"))
+                            terms=location_part)
     li = [
         ("LinkedIn People Search",     f"https://www.linkedin.com/search/results/people/?keywords={name_plus}"),
-        ("LinkedIn + Location filter", f"https://www.linkedin.com/search/results/people/?keywords={name_plus}&geoUrn=%5B%22102095887%22%5D"),
         ("Google LI Profile (exact)",  li_exact),
         ("Google LI + Location",       li_loc),
     ]
