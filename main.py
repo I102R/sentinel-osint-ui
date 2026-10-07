@@ -341,6 +341,11 @@ BANNED_SITES = [
     "arrestfacts.com",
     "bustedmugshots.com",
     "mugshots.com",
+    # Defunct — acquired/shut down via Daniel's Law settlement; now returns a
+    # legal notice instead of subject data. Banned defensively so they can
+    # never be regenerated.
+    "peekyou.com",
+    "radaris.com",
 ]
 
 
@@ -485,7 +490,6 @@ def people_search_links(first, surname, full_name, city="", state=""):
       IDCrawl           /<state-full-name> segment ⚑ (your named example)
       USPhoneBook       — location scheme unconfirmed → kept name-only ⚑
       SearchPeopleFree  — location scheme unconfirmed → kept name-only ⚑
-      PeekYou           — location scheme unconfirmed → kept name-only ⚑
       SortedByName      — name index, no location support → name-only (expected)
     """
     st = (state or "").strip()
@@ -544,7 +548,6 @@ def people_search_links(first, surname, full_name, city="", state=""):
         ("Addresses.com",              addresses),
         ("USPhoneBook",                f"https://www.usphonebook.com/{first_url}-{sur_url}"),
         ("SearchPeopleFree",           f"https://www.searchpeoplefree.com/find/{first_url}-{sur_url}"),
-        ("PeekYou (social+arrests)",   f"https://www.peekyou.com/{first_url}_{sur_url}"),
         ("SortedByName",               f"https://www.sortedbyname.com/search?q={fn_plus}"),
     ]
     return primary, secondary
@@ -1619,7 +1622,6 @@ def module_social_footprint(target, job_id, dob="", ssn="", oln="", extra=None):
     realtime = [
         ("Social Searcher ★ FREE",        f"https://www.social-searcher.com/social-buzz/?q={name_plus}"),
         ("Social Catfish (reverse ID)",   f"https://socialcatfish.com/search/?q={name_plus}"),
-        ("PeekYou (social+arrests)",      f"https://www.peekyou.com/{first.lower()}_{last.lower()}"),
         ("Sowsearch (FB Deep)",           f"https://sowsearch.info/search?q={name_plus}"),
         ("Boardreader (forums)",          f"https://boardreader.com/s/{name_plus}.html"),
         ("WhatsMyName (usernames)",       f"https://whatsmyname.app/?q={handle_for_tools}"),
