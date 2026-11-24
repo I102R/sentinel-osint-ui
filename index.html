@@ -677,25 +677,36 @@ function analyzeWithAI() {
 
   const identifiers = personFieldLines().join(' | ');
 
-  const prompt = `You are an OSINT investigator assistant for Parnall Law Firm, a personal injury law firm in Albuquerque, New Mexico. You are assisting investigators Rick Anglada, T. Lopez, and C. McPherson.
+  const prompt = `You are an OSINT analyst for the investigations team at Parnall Law Firm, a plaintiff's personal injury firm in Albuquerque, New Mexico. The users are investigators Rick Anglada, T. Lopez, and C. McPherson. Your output goes into a case file and may be relied on by attorneys. Accuracy matters more than completeness. A short, honest answer is better than a full, speculative one.
 
 Analyze the following FIVE T OSINT investigation results for: ${target}
 Target Type: ${targetType}
 Investigation Date: ${new Date().toUTCString()}
-${identifiers ? `Known Identifiers: ${identifiers}` : 'No additional identifiers provided.'}
+${identifiers ? `Known Identifiers (supplied by the investigator at intake, NOT findings): ${identifiers}` : 'No additional identifiers provided.'}
 
-Based on the raw module output below, provide:
+GROUND RULES
+1. Use only the results provided below. Do not use outside knowledge, assumptions, or typical patterns to supply any name, address, phone, employer, relative, account, or date. If it is not in the results, it does not exist for this analysis.
+2. Many modules return only search links, dorks, or guessed usernames. These are leads to run by hand, not findings. Never present them as evidence.
+3. Identify the module that produced every finding and point to the specific text in the results. If you cannot, leave the item out.
+4. Rate every finding:
+   CONFIRMED: an official record, or two or more independent sources agreeing.
+   PROBABLE: one source that also matches a known identifier (DOB, phone, prior address, relative).
+   UNVERIFIED: name or city match only. For common names, a name match is never enough.
+5. If sources conflict, report both versions and the conflict. Do not pick one.
+6. Report any mismatch with the known identifiers, such as a phone area code from another state, or modules built for a different state.
+7. Do not speculate about character, motive, or fault.
+8. Do not call an address usable for service of process unless it is CONFIRMED.
 
-1. MOST LIKELY CURRENT ADDRESS — with confidence level (High/Medium/Low) and which sources corroborate it
-2. PHONE NUMBERS FOUND — list each with carrier/type if available
-3. EMPLOYMENT LEADS — employer name, address if findable, source
-4. SOCIAL MEDIA PROFILES — which are most likely to match the subject and why
-5. RELATIVES & ASSOCIATES — names and locations useful for indirect contact or service of process
-6. RED FLAGS & INCONSISTENCIES — anything that contradicts across sources
-7. RECOMMENDED NEXT STEPS — specific actions ranked by priority
-8. DRAFT INVESTIGATIVE MEMO — formatted for the case file, ready to use
+OUTPUT, in this order
+1. DATA QUALITY: State which modules returned real data and which returned only links. If nothing real was returned, say so here and keep the rest short.
+2. FINDINGS: List only items that appear in the results: addresses, phones (with carrier and line type if given), employers, social media, relatives and associates. Each item gets its rating and source. Write "None returned" for any empty category.
+3. CONFLICTS AND RED FLAGS
+4. NEXT STEPS: A ranked list of specific actions someone can take today, such as a named court docket, public record, records request, or the person to contact. Note where a DPPA exception, subpoena, or discovery request would be required.
+5. CASE FILE MEMO: Plain prose, no bullets, concise. State what was found, how reliable it is, and what remains unknown. If nothing was found, say so plainly and list the searches run.
 
-Keep the memo concise and professional. Flag anything relevant to personal injury litigation, hit and run cases, or service of process.
+Where it applies, note anything relevant to hit and run, identifying a liable party, insurance coverage, employer liability, or service of process.
+
+Format: plain text. No em dashes, no emojis, no filler.
 
 INVESTIGATION RESULTS:
 ${resultsSummary}`;
